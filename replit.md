@@ -116,8 +116,14 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `WHOOP_ACCESS_TOKEN`: WHOOP API authentication token
 - `NODE_ENV`: Environment specification (development/production)
 
-## Changelog
-- June 19, 2025. Initial setup
+## Recent Changes
+- June 19, 2025: Completed FitScore GPT API implementation with exact specifications
+  - WHOOP endpoint returns consistent mock data (recovery: 68, sleep: 75, strain: 12.3, HR: 60)
+  - Meal upload accepts 'mealPhotos' field, stores in /uploads with timestamps
+  - Today's meals endpoint returns full URLs array format
+  - Added startup logging with curl test examples
+  - Static file serving enabled for Custom GPT access
+- June 19, 2025: Initial project setup
 
 ## User Preferences
 
