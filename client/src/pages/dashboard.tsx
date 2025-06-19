@@ -27,7 +27,7 @@ export default function Dashboard() {
     queryKey: ['/api/whoop/today'],
   });
 
-  const { data: todayMeals, isLoading: mealsLoading, refetch: refetchMeals } = useQuery<MealResponse>({
+  const { data: todayMeals, isLoading: mealsLoading, refetch: refetchMeals } = useQuery<string[]>({
     queryKey: ['/api/meals/today'],
   });
 
@@ -35,7 +35,7 @@ export default function Dashboard() {
     queryKey: ['/api/meals'],
   });
 
-  const mealsCount = todayMeals?.meals?.length || 0;
+  const mealsCount = todayMeals?.length || 0;
   const totalStorage = allMeals?.reduce((acc, meal) => acc + meal.size, 0) || 0;
   const storageInMB = (totalStorage / (1024 * 1024)).toFixed(1);
 

@@ -41,20 +41,14 @@ const upload = multer({
   }
 });
 
-// Mock WHOOP API function with placeholder logic
+// Mock WHOOP API function - returns consistent mock data
 async function fetchWhoopData(): Promise<WhoopTodayResponse> {
-  // In a real implementation, this would use the WHOOP API with stored access token
-  const accessToken = process.env.WHOOP_ACCESS_TOKEN || "placeholder_token";
-  
-  // Placeholder logic - in production this would make actual API calls
-  console.log(`Using WHOOP access token: ${accessToken}`);
-  
-  // Return realistic but static data for now
+  // Return mock data as specified
   return {
-    recovery_score: Math.floor(Math.random() * 40) + 60, // 60-100
-    sleep_score: Math.floor(Math.random() * 30) + 70,    // 70-100
-    strain_score: Math.floor(Math.random() * 15) + 5,     // 5-20
-    resting_heart_rate: Math.floor(Math.random() * 20) + 50 // 50-70
+    recovery_score: 68,
+    sleep_score: 75,
+    strain_score: 12.3,
+    resting_heart_rate: 60
   };
 }
 
@@ -71,6 +65,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Serve static files from uploads directory
   app.use('/uploads', express.static(uploadsDir));
+
+  // Log API examples on startup
+  console.log('\n🚀 FitScore GPT API Endpoints:');
+  console.log('📊 Health Check: GET /');
+  console.log('🏃 WHOOP Data: GET /api/whoop/today');
+  console.log('📸 Upload Meals: POST /api/meals (field: mealPhotos)');
+  console.log('🍽️ Today\'s Meals: GET /api/meals/today');
+  console.log('\n📝 Test with curl:');
+  console.log('curl http://localhost:5000/');
+  console.log('curl http://localhost:5000/api/whoop/today');
+  console.log('curl http://localhost:5000/api/meals/today');
+  console.log('curl -F "mealPhotos=@image.jpg" http://localhost:5000/api/meals');
+  console.log('');
 
   // Health check endpoint
   app.get('/', (req, res) => {
@@ -117,7 +124,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Meal upload endpoint
-  app.post('/api/meals', upload.array('meals', 10), async (req: Request, res: Response) => {
+  app.post('/api/meals', upload.array('mealPhotos', 10), async (req: Request, res: Response) => {
     try {
       console.log('Processing meal uploads...');
       
@@ -159,14 +166,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const today = getTodayDate();
       const meals = await storage.getMealsByDate(today);
       
-      const mealUrls = meals.map(meal => `/uploads/${meal.filename}`);
-      
-      const response: MealResponse = {
-        meals: mealUrls
-      };
+      // Return full URLs including domain
+      const baseUrl = req.protocol + '://' + req.get('host');
+      const mealUrls = meals.map(meal => `${baseUrl}/uploads/${meal.filename}`);
       
       console.log(`Found ${meals.length} meals for today`);
-      res.json(response);
+      res.json(mealUrls);
     } catch (error) {
       console.error('Error fetching meals:', error);
       res.status(500).json({ error: 'Failed to fetch today\'s meals' });

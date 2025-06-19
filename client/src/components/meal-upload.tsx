@@ -18,7 +18,7 @@ export function MealUpload({ onUploadSuccess }: MealUploadProps) {
     mutationFn: async (files: FileList) => {
       const formData = new FormData();
       Array.from(files).forEach(file => {
-        formData.append('meals', file);
+        formData.append('mealPhotos', file);
       });
 
       const response = await fetch('/api/meals', {
