@@ -169,9 +169,9 @@ export default function Dashboard() {
                       </div>
                     ))}
                   </div>
-                ) : todayMeals?.meals && todayMeals.meals.length > 0 ? (
+                ) : todayMeals && todayMeals.length > 0 ? (
                   <div className="grid grid-cols-2 gap-4">
-                    {todayMeals.meals.map((mealUrl, index) => (
+                    {todayMeals.map((mealUrl: string, index: number) => (
                       <div key={index} className="bg-slate-50 rounded-lg p-4">
                         <img 
                           src={mealUrl} 
@@ -192,7 +192,7 @@ export default function Dashboard() {
                         </div>
                       </div>
                     ))}
-                    {todayMeals.meals.length < 4 && (
+                    {todayMeals.length < 4 && (
                       <div className="bg-slate-50 rounded-lg p-4 border-2 border-dashed border-slate-300 flex items-center justify-center">
                         <div className="text-center">
                           <Plus className="h-8 w-8 text-slate-400 mx-auto mb-2" />
