@@ -1,4 +1,6 @@
 import { users, meals, whoopData, type User, type InsertUser, type Meal, type InsertMeal, type WhoopData, type InsertWhoopData } from "@shared/schema";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -15,87 +17,67 @@ export interface IStorage {
   createOrUpdateWhoopData(data: InsertWhoopData): Promise<WhoopData>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private meals: Map<number, Meal>;
-  private whoopData: Map<string, WhoopData>; // keyed by date
-  private currentUserId: number;
-  private currentMealId: number;
-  private currentWhoopId: number;
-
-  constructor() {
-    this.users = new Map();
-    this.meals = new Map();
-    this.whoopData = new Map();
-    this.currentUserId = 1;
-    this.currentMealId = 1;
-    this.currentWhoopId = 1;
-  }
-
+export class DatabaseStorage implements IStorage {
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user || undefined;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user || undefined;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentUserId++;
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
+    const [user] = await db
+      .insert(users)
+      .values(insertUser)
+      .returning();
     return user;
   }
 
   async createMeal(insertMeal: InsertMeal): Promise<Meal> {
-    const id = this.currentMealId++;
-    const meal: Meal = { 
-      ...insertMeal, 
-      id, 
-      uploadedAt: new Date()
-    };
-    this.meals.set(id, meal);
+    const [meal] = await db
+      .insert(meals)
+      .values(insertMeal)
+      .returning();
     return meal;
   }
 
   async getMealsByDate(date: string): Promise<Meal[]> {
-    return Array.from(this.meals.values()).filter(
-      (meal) => meal.date === date
-    );
+    return await db.select().from(meals).where(eq(meals.date, date));
   }
 
   async getAllMeals(): Promise<Meal[]> {
-    return Array.from(this.meals.values());
+    return await db.select().from(meals);
   }
 
   async getWhoopDataByDate(date: string): Promise<WhoopData | undefined> {
-    return this.whoopData.get(date);
+    const [data] = await db.select().from(whoopData).where(eq(whoopData.date, date));
+    return data || undefined;
   }
 
   async createOrUpdateWhoopData(insertData: InsertWhoopData): Promise<WhoopData> {
-    const existing = this.whoopData.get(insertData.date);
+    const existing = await this.getWhoopDataByDate(insertData.date);
     
     if (existing) {
-      const updated: WhoopData = {
-        ...existing,
-        ...insertData,
-        lastSync: new Date()
-      };
-      this.whoopData.set(insertData.date, updated);
+      const [updated] = await db
+        .update(whoopData)
+        .set({
+          ...insertData,
+          lastSync: new Date()
+        })
+        .where(eq(whoopData.date, insertData.date))
+        .returning();
       return updated;
     } else {
-      const id = this.currentWhoopId++;
-      const data: WhoopData = {
-        ...insertData,
-        id,
-        lastSync: new Date()
-      };
-      this.whoopData.set(insertData.date, data);
+      const [data] = await db
+        .insert(whoopData)
+        .values(insertData)
+        .returning();
       return data;
     }
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
