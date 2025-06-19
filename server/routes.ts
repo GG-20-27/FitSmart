@@ -1,7 +1,8 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import multer from "multer";
+import multer, { type FileFilterCallback } from "multer";
 import path from "path";
 import fs from "fs";
 import cors from "cors";
@@ -16,10 +17,10 @@ if (!fs.existsSync(uploadsDir)) {
 
 // Configure multer for file uploads
 const storage_multer = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: (req: Request, file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
     cb(null, uploadsDir);
   },
-  filename: (req, file, cb) => {
+  filename: (req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const ext = path.extname(file.originalname);
     cb(null, `meal_${timestamp}${ext}`);
@@ -31,7 +32,7 @@ const upload = multer({
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
   },
-  fileFilter: (req, file, cb) => {
+  fileFilter: (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -116,18 +117,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Meal upload endpoint
-  app.post('/api/meals', upload.array('meals', 10), async (req, res) => {
+  app.post('/api/meals', upload.array('meals', 10), async (req: Request, res: Response) => {
     try {
       console.log('Processing meal uploads...');
       
-      if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+      const files = req.files as Express.Multer.File[];
+      if (!files || !Array.isArray(files) || files.length === 0) {
         return res.status(400).json({ error: 'No files uploaded' });
       }
       
       const today = getTodayDate();
       const uploadedMeals = [];
       
-      for (const file of req.files) {
+      for (const file of files) {
         const meal = await storage.createMeal({
           filename: file.filename,
           originalName: file.originalname,
