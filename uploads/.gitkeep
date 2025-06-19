@@ -1,0 +1,2 @@
+# This file ensures the uploads directory is tracked in version control
+# The uploads directory stores meal images uploaded via the API
