@@ -58,6 +58,75 @@ function getTodayDate(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+// Daily WHOOP data logging system
+const historyFile = path.join(process.cwd(), 'data', 'userProfile.json');
+
+function logDailyStats(entry: any) {
+  try {
+    // Ensure data directory exists
+    const dataDir = path.dirname(historyFile);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    // Read existing data or initialize empty array
+    let allEntries: any[] = [];
+    if (fs.existsSync(historyFile)) {
+      const fileContent = fs.readFileSync(historyFile, 'utf8');
+      allEntries = JSON.parse(fileContent) || [];
+    }
+
+    // Remove existing entry for the same date and add new one
+    const updated = [...allEntries.filter(d => d.date !== entry.date), entry];
+    
+    // Write back to file
+    fs.writeFileSync(historyFile, JSON.stringify(updated, null, 2));
+    console.log('Daily WHOOP stats logged:', entry.date);
+  } catch (error) {
+    console.error('Failed to log daily stats:', error);
+  }
+}
+
+function calculateAverages(days: number = 7): any {
+  try {
+    if (!fs.existsSync(historyFile)) {
+      return { avg_recovery: null, avg_strain: null, avg_sleep: null, avg_hrv: null };
+    }
+
+    const fileContent = fs.readFileSync(historyFile, 'utf8');
+    const allEntries = JSON.parse(fileContent) || [];
+    
+    // Get entries from the last N days
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffString = cutoffDate.toISOString().split('T')[0];
+    
+    const recentEntries = allEntries
+      .filter((entry: any) => entry.date >= cutoffString)
+      .filter((entry: any) => entry.recovery_score !== null || entry.strain_score !== null || entry.sleep_score !== null || entry.hrv !== null);
+
+    if (recentEntries.length === 0) {
+      return { avg_recovery: null, avg_strain: null, avg_sleep: null, avg_hrv: null };
+    }
+
+    // Calculate averages
+    const validRecovery = recentEntries.filter((e: any) => e.recovery_score !== null);
+    const validStrain = recentEntries.filter((e: any) => e.strain_score !== null);
+    const validSleep = recentEntries.filter((e: any) => e.sleep_score !== null);
+    const validHrv = recentEntries.filter((e: any) => e.hrv !== null);
+
+    return {
+      avg_recovery: validRecovery.length > 0 ? Math.round(validRecovery.reduce((sum: number, e: any) => sum + e.recovery_score, 0) / validRecovery.length * 10) / 10 : null,
+      avg_strain: validStrain.length > 0 ? Math.round(validStrain.reduce((sum: number, e: any) => sum + e.strain_score, 0) / validStrain.length * 10) / 10 : null,
+      avg_sleep: validSleep.length > 0 ? Math.round(validSleep.reduce((sum: number, e: any) => sum + e.sleep_score, 0) / validSleep.length * 10) / 10 : null,
+      avg_hrv: validHrv.length > 0 ? Math.round(validHrv.reduce((sum: number, e: any) => sum + e.hrv, 0) / validHrv.length * 10) / 10 : null
+    };
+  } catch (error) {
+    console.error('Failed to calculate averages:', error);
+    return { avg_recovery: null, avg_strain: null, avg_sleep: null, avg_hrv: null };
+  }
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Enable CORS for Custom GPT access
   app.use(cors({
@@ -305,14 +374,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const whoopData = await whoopApiService.getTodaysData();
       
       // Store in database for caching
-      const today = getTodayDate();
+      const todayDate = getTodayDate();
       await storage.createOrUpdateWhoopData({
-        date: today,
+        date: todayDate,
         recoveryScore: Math.round(whoopData.recovery_score || 0),
         sleepScore: Math.round(whoopData.sleep_score || 0),
         strainScore: Math.round((whoopData.strain || 0) * 10), // Store as integer * 10
         restingHeartRate: Math.round(whoopData.resting_heart_rate || 0)
       });
+
+      // Log daily stats to userProfile.json
+      const dailyEntry = {
+        date: today,
+        recovery_score: whoopData.recovery_score,
+        strain_score: whoopData.strain,
+        sleep_score: whoopData.sleep_score,
+        hrv: whoopData.hrv
+      };
+      logDailyStats(dailyEntry);
 
       // Return the new response format as specified
       const result = {
@@ -341,6 +420,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.status(500).json({ 
         error: 'Failed to fetch WHOOP data',
+        details: error.message
+      });
+    }
+  });
+
+  // WHOOP summary analytics endpoint
+  app.get('/api/whoop/summary', async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 7;
+      
+      // Validate days parameter
+      if (days < 1 || days > 365) {
+        return res.status(400).json({ 
+          error: 'Invalid days parameter. Must be between 1 and 365.' 
+        });
+      }
+
+      const averages = calculateAverages(days);
+      
+      console.log(`WHOOP summary calculated for last ${days} days:`, averages);
+      
+      res.json({
+        period_days: days,
+        ...averages
+      });
+    } catch (error: any) {
+      console.error('Error in /api/whoop/summary:', error.message);
+      res.status(500).json({ 
+        error: 'Failed to calculate WHOOP summary',
         details: error.message
       });
     }

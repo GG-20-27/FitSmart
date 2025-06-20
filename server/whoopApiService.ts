@@ -198,7 +198,7 @@ export class WhoopApiService {
       console.log('Raw WHOOP data retrieved:');
       console.log('Cycle:', cycle);
       console.log('Recovery:', recovery);
-      console.log('Sleep:', sleep);
+      console.log('WHOOP sleep raw:', sleep);
 
       const result: WhoopTodayData = {
         cycle_id: cycle.id,
