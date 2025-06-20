@@ -70,10 +70,17 @@ export type WhoopToken = typeof whoopTokens.$inferSelect;
 
 // WHOOP API response types
 export interface WhoopTodayResponse {
-  recovery_score: number;
-  sleep_score: number;
-  strain_score: number;
-  resting_heart_rate: number;
+  cycle_id?: string;
+  strain?: number;
+  recovery_score?: number;
+  hrv?: number;
+  resting_heart_rate?: number;
+  sleep_score?: number;
+  raw?: {
+    cycle?: any;
+    recovery?: any;
+    sleep?: any;
+  };
 }
 
 export interface MealResponse {
