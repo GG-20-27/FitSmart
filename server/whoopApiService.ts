@@ -209,12 +209,14 @@ export class WhoopApiService {
     const clientId = process.env.WHOOP_CLIENT_ID;
     const redirectUri = 'https://health-data-hub.replit.app/api/whoop/callback';
     const scope = 'read:recovery read:sleep read:cycles read:profile';
+    const state = 'whoop_auth_' + Date.now(); // Generate a unique state for security
     
     return `${WHOOP_OAUTH_BASE}/oauth2/auth?` +
       `client_id=${clientId}&` +
       `redirect_uri=${encodeURIComponent(redirectUri)}&` +
       `response_type=code&` +
-      `scope=${encodeURIComponent(scope)}`;
+      `scope=${encodeURIComponent(scope)}&` +
+      `state=${state}`;
   }
 }
 

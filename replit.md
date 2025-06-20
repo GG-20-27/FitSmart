@@ -126,6 +126,9 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
   - Updated frontend with WhoopAuth component for seamless OAuth authentication
   - Enhanced HealthMetrics component with proper authentication error handling
   - /api/whoop/today endpoint now fetches live data from WHOOP API when authenticated
+  - Fixed OAuth implementation with proper form encoding and state parameter for security
+  - Added prominent "Connect WHOOP" buttons in dashboard header and status card
+  - Resolved frontend routing issues by moving health check endpoint from root to /api/health
 - June 19, 2025: Added PostgreSQL database support
   - Migrated from in-memory storage to DatabaseStorage class using Drizzle ORM
   - Created database tables: users, meals, whoop_data

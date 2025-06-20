@@ -129,6 +129,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Validate state parameter (basic validation - starts with our prefix)
+      if (!state || !state.toString().startsWith('whoop_auth_')) {
+        console.error('Invalid or missing state parameter:', state);
+        return res.status(400).json({ 
+          error: 'Invalid state parameter',
+          details: 'OAuth state validation failed'
+        });
+      }
+
       console.log('Valid authorization code received, proceeding with token exchange...');
       const tokenResponse = await whoopApiService.exchangeCodeForToken(code as string);
       
