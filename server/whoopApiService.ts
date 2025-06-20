@@ -112,45 +112,63 @@ export class WhoopApiService {
 
   async getTodaysRecovery(accessToken: string): Promise<WhoopRecoveryData | null> {
     try {
-      // Try different date formats and endpoints
+      // Use a wider date range to ensure we capture available data
       const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const startDate = weekAgo.toISOString().split('T')[0];
+      const endDate = today.toISOString().split('T')[0];
       
-      console.log('Fetching WHOOP recovery data for date range:', yesterdayStr, 'to', todayStr);
+      console.log('Fetching WHOOP recovery data for date range:', startDate, 'to', endDate);
       
-      // Try the correct WHOOP API v1 endpoint with proper date range
-      const response = await axios.get(`${WHOOP_API_BASE}/v1/recovery/collection`, {
-        headers: this.getAuthHeaders(accessToken),
-        params: {
-          start: yesterdayStr,
-          end: todayStr,
-          limit: 1
+      // Try the actual working WHOOP API v1 endpoints based on documentation
+      const endpoints = [
+        { url: `${WHOOP_API_BASE}/v1/recovery`, name: 'Recovery' },
+        { url: `${WHOOP_API_BASE}/v1/cycle`, name: 'Physiological Cycle' },
+        { url: `https://api.whoop.com/developer/v1/recovery`, name: 'Recovery Alt' },
+        { url: `https://api.whoop.com/developer/v1/cycle`, name: 'Cycle Alt' }
+      ];
+      
+      for (const { url, name } of endpoints) {
+        try {
+          console.log(`Trying ${name} endpoint:`, url);
+          const response = await axios.get(url, {
+            headers: this.getAuthHeaders(accessToken),
+            params: {
+              start: startDate,
+              end: endDate,
+              limit: 10
+            }
+          });
+
+          console.log(`${name} endpoint SUCCESS - Status:`, response.status);
+          console.log(`${name} response structure:`, Object.keys(response.data));
+          console.log(`${name} response data:`, JSON.stringify(response.data, null, 2));
+
+          if (response.data && (response.data.records || response.data.data || response.data.length > 0)) {
+            const records = response.data.records || response.data.data || response.data;
+            if (records && records.length > 0) {
+              const record = records[records.length - 1]; // Get most recent
+              console.log(`${name} record found:`, JSON.stringify(record, null, 2));
+              
+              return {
+                recovery_score: record.score?.recovery_score || record.recovery_score || 0,
+                resting_heart_rate: record.score?.resting_heart_rate || record.resting_heart_rate || 0,
+                hrv_rmssd_milli: record.score?.hrv_rmssd_milli || record.hrv_rmssd_milli || 0,
+                spo2_percentage: record.score?.spo2_percentage || record.spo2_percentage || 0,
+                skin_temp_celsius: record.score?.skin_temp_celsius || record.skin_temp_celsius || 0
+              };
+            }
+          }
+        } catch (endpointError: any) {
+          console.log(`${name} endpoint failed - Status:`, endpointError.response?.status, 'Error:', endpointError.response?.data || endpointError.message);
+          continue;
         }
-      });
-
-      console.log('WHOOP recovery response status:', response.status);
-      console.log('WHOOP recovery response:', JSON.stringify(response.data, null, 2));
-
-      if (response.data && response.data.records && response.data.records.length > 0) {
-        const record = response.data.records[0];
-        console.log('Recovery record found:', record);
-        return {
-          recovery_score: record.score?.recovery_score || 0,
-          resting_heart_rate: record.score?.resting_heart_rate || 0,
-          hrv_rmssd_milli: record.score?.hrv_rmssd_milli || 0,
-          spo2_percentage: record.score?.spo2_percentage || 0,
-          skin_temp_celsius: record.score?.skin_temp_celsius || 0
-        };
       }
       
-      console.log('No recovery records found in response');
+      console.log('No recovery data found from any endpoint');
       return null;
     } catch (error: any) {
-      console.error('Failed to fetch recovery data - Status:', error.response?.status);
-      console.error('Failed to fetch recovery data - Response:', error.response?.data);
-      console.error('Failed to fetch recovery data - Error:', error.message);
+      console.error('Failed to fetch recovery data:', error.message);
       return null;
     }
   }
@@ -164,7 +182,7 @@ export class WhoopApiService {
       
       console.log('Fetching WHOOP sleep data for date range:', yesterdayStr, 'to', todayStr);
       
-      const response = await axios.get(`${WHOOP_API_BASE}/v1/activity/sleep/collection`, {
+      const response = await axios.get(`${WHOOP_API_BASE}/v1/activity/sleep`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
           start: yesterdayStr,
@@ -211,7 +229,7 @@ export class WhoopApiService {
       
       console.log('Fetching WHOOP strain data for date range:', yesterdayStr, 'to', todayStr);
       
-      const response = await axios.get(`${WHOOP_API_BASE}/v1/cycle/collection`, {
+      const response = await axios.get(`${WHOOP_API_BASE}/v1/cycle`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
           start: yesterdayStr,
@@ -304,7 +322,7 @@ export class WhoopApiService {
   getOAuthUrl(): string {
     const clientId = process.env.WHOOP_CLIENT_ID;
     const redirectUri = 'https://health-data-hub.replit.app/api/whoop/callback';
-    const scope = 'read:recovery read:sleep read:cycles read:profile';
+    const scope = 'read:recovery read:sleep read:cycles read:profile read:workout';
     const state = 'whoop_auth_' + Date.now(); // Generate a unique state for security
     
     return `${WHOOP_OAUTH_BASE}/oauth2/auth?` +
