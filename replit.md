@@ -39,8 +39,9 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - **Schema Validation**: Zod schemas for type-safe data validation
 
 ### API Layer
-- **Health Check Endpoint** (`/`): API status verification
-- **WHOOP Integration** (`/api/whoop/today`): Fetches daily health metrics
+- **Health Check Endpoint** (`/api/health`): API status verification
+- **WHOOP Authentication** (`/api/whoop/login`, `/api/whoop/callback`, `/api/whoop/status`): OAuth flow endpoints
+- **WHOOP Integration** (`/api/whoop/today`): Fetches daily health metrics from live API
 - **Meal Management** (`/api/meals`): File upload and meal data management
 - **File Upload**: Multer middleware for handling meal image uploads (10MB limit)
 
