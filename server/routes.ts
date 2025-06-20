@@ -286,14 +286,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('Fetching live WHOOP data for today...');
       
+      // Token validation at the top
       const tokenData = await whoopTokenStorage.getDefaultToken();
-      if (!tokenData) {
-        console.warn('No WHOOP access token found. User needs to authenticate first.');
-        return res.status(401).json({ 
-          error: 'WHOOP authentication required',
-          message: 'Please visit /api/whoop/login to authenticate with WHOOP first',
-          auth_url: '/api/whoop/login'
-        });
+      if (!tokenData?.access_token) {
+        return res.status(401).json({ error: 'Missing WHOOP access token' });
       }
 
       if (!whoopTokenStorage.isTokenValid(tokenData)) {
@@ -305,47 +301,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const today = getTodayDate();
-      let whoopData = await storage.getWhoopDataByDate(today);
+      // Fetch real WHOOP data using the corrected API structure
+      const whoopData = await whoopApiService.getTodaysData();
       
-      // Always try to fetch fresh data from WHOOP API
-      try {
-        const freshData = await fetchWhoopData();
-        whoopData = await storage.createOrUpdateWhoopData({
-          date: today,
-          recoveryScore: Math.round(freshData.recovery_score),
-          sleepScore: Math.round(freshData.sleep_score),
-          strainScore: Math.round(freshData.strain_score * 10), // Store as integer * 10
-          restingHeartRate: Math.round(freshData.resting_heart_rate)
+      // Store in database for caching
+      const today = getTodayDate();
+      await storage.createOrUpdateWhoopData({
+        date: today,
+        recoveryScore: Math.round(whoopData.recovery_score || 0),
+        sleepScore: Math.round(whoopData.sleep_score || 0),
+        strainScore: Math.round((whoopData.strain || 0) * 10), // Store as integer * 10
+        restingHeartRate: Math.round(whoopData.resting_heart_rate || 0)
+      });
+
+      // Return the new response format as specified
+      const result = {
+        cycle_id: whoopData.cycle_id,
+        strain: whoopData.strain,
+        recovery_score: whoopData.recovery_score,
+        hrv: whoopData.hrv,
+        resting_heart_rate: whoopData.resting_heart_rate,
+        sleep_score: whoopData.sleep_score,
+        raw: whoopData.raw
+      };
+
+      console.log('WHOOP data retrieved successfully');
+      res.json(result);
+    } catch (error: any) {
+      console.error('Error in /api/whoop/today:', error.message);
+      
+      // Log non-200 responses clearly for debugging
+      if (error.response) {
+        console.error('WHOOP API Error Response:', {
+          status: error.response.status,
+          data: error.response.data,
+          endpoint: error.config?.url
         });
-        
-        console.log('Fresh WHOOP data fetched and stored');
-      } catch (apiError) {
-        console.error('Failed to fetch fresh WHOOP data:', apiError);
-        
-        // If we have cached data, use it
-        if (whoopData) {
-          console.log('Using cached WHOOP data');
-        } else {
-          return res.status(503).json({ 
-            error: 'WHOOP API unavailable',
-            message: 'Unable to fetch live data and no cached data available'
-          });
-        }
       }
       
-      const response: WhoopTodayResponse = {
-        recovery_score: whoopData.recoveryScore,
-        sleep_score: whoopData.sleepScore,
-        strain_score: whoopData.strainScore / 10, // Convert back to decimal
-        resting_heart_rate: whoopData.restingHeartRate
-      };
-      
-      console.log('WHOOP data retrieved:', response);
-      res.json(response);
-    } catch (error) {
-      console.error('Error in WHOOP endpoint:', error);
-      res.status(500).json({ error: 'Internal server error while fetching WHOOP data' });
+      res.status(500).json({ 
+        error: 'Failed to fetch WHOOP data',
+        details: error.message
+      });
     }
   });
 

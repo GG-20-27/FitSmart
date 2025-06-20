@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { whoopTokenStorage } from './whoopTokenStorage';
 
-const WHOOP_API_BASE = 'https://api.prod.whoop.com/developer';
+const BASE = 'https://api.prod.whoop.com/developer/v1';
 const WHOOP_OAUTH_BASE = 'https://api.prod.whoop.com/oauth';
 
 export interface WhoopRecoveryData {
@@ -32,18 +32,26 @@ export interface WhoopStrainData {
 }
 
 export interface WhoopTodayData {
-  recovery_score: number;
-  sleep_score: number;
-  strain_score: number;
-  resting_heart_rate: number;
+  cycle_id?: string;
+  strain?: number;
+  recovery_score?: number;
+  hrv?: number;
+  resting_heart_rate?: number;
+  sleep_score?: number;
+  raw?: {
+    cycle?: any;
+    recovery?: any;
+    sleep?: any;
+  };
 }
 
 export class WhoopApiService {
-  private getAuthHeaders(accessToken: string) {
-    return {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json'
-    };
+  private async authHeader() {
+    const tokenData = await whoopTokenStorage.getDefaultToken();
+    if (!tokenData?.access_token) {
+      throw new Error('Missing WHOOP access token');
+    }
+    return { Authorization: `Bearer ${tokenData.access_token}` };
   }
 
   async exchangeCodeForToken(code: string): Promise<any> {
@@ -56,9 +64,6 @@ export class WhoopApiService {
     }
 
     console.log('Starting WHOOP token exchange...');
-    console.log('Client ID:', clientId);
-    console.log('Redirect URI:', redirectUri);
-    console.log('Authorization code:', code);
 
     const requestData = {
       client_id: clientId,
@@ -68,18 +73,10 @@ export class WhoopApiService {
       redirect_uri: redirectUri
     };
 
-    console.log('Request data object:', requestData);
-
     try {
       const formBody = Object.entries(requestData)
         .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
         .join('&');
-
-      const requestUrl = `${WHOOP_OAUTH_BASE}/oauth2/token`;
-      console.log('Request URL:', requestUrl);
-      console.log('Form body:', formBody);
-      console.log('Form body length:', formBody.length);
-      console.log('Form body bytes:', Buffer.from(formBody).length);
 
       const response = await fetch(`${WHOOP_OAUTH_BASE}/oauth2/token`, {
         method: 'POST',
@@ -93,217 +90,130 @@ export class WhoopApiService {
 
       const responseText = await response.text();
       console.log('WHOOP response status:', response.status);
-      console.log('WHOOP response text:', responseText);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${responseText}`);
       }
 
       const data = JSON.parse(responseText);
-      console.log('WHOOP token exchange successful:', data);
+      console.log('WHOOP token exchange successful');
       return data;
     } catch (error: any) {
-      console.error('WHOOP token exchange failed:');
-      console.error('Error message:', error.message);
-      console.error('Full error:', error);
+      console.error('WHOOP token exchange failed:', error.message);
       throw new Error(`Failed to exchange code for access token: ${error.message}`);
     }
   }
 
-  async getTodaysRecovery(accessToken: string): Promise<WhoopRecoveryData | null> {
+  async getLatestCycle(): Promise<any> {
     try {
-      // Use a wider date range to ensure we capture available data
-      const today = new Date();
-      const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const startDate = weekAgo.toISOString().split('T')[0];
-      const endDate = today.toISOString().split('T')[0];
+      const headers = await this.authHeader();
+      console.log('Fetching latest cycle from WHOOP API...');
       
-      console.log('Fetching WHOOP recovery data for date range:', startDate, 'to', endDate);
+      const response = await axios.get(`${BASE}/cycle?limit=1`, { headers });
       
-      // Test actual WHOOP API v1 endpoints - based on real API documentation
-      const endpoints = [
-        { url: `${WHOOP_API_BASE}/v1/recovery/collection`, name: 'Recovery Collection' },
-        { url: `${WHOOP_API_BASE}/v1/cycle/collection`, name: 'Cycle Collection' },
-        { url: `${WHOOP_API_BASE}/v1/measurement/collection`, name: 'Measurement Collection' }
-      ];
-      
-      for (const { url, name } of endpoints) {
-        try {
-          console.log(`Trying ${name} endpoint:`, url);
-          const response = await axios.get(url, {
-            headers: this.getAuthHeaders(accessToken),
-            params: {
-              start: startDate,
-              end: endDate,
-              limit: 10
-            }
-          });
-
-          console.log(`${name} endpoint SUCCESS - Status:`, response.status);
-          console.log(`${name} response structure:`, Object.keys(response.data));
-          console.log(`${name} response data:`, JSON.stringify(response.data, null, 2));
-
-          if (response.data && (response.data.records || response.data.data || response.data.length > 0)) {
-            const records = response.data.records || response.data.data || response.data;
-            if (records && records.length > 0) {
-              const record = records[records.length - 1]; // Get most recent
-              console.log(`${name} record found:`, JSON.stringify(record, null, 2));
-              
-              return {
-                recovery_score: record.score?.recovery_score || record.recovery_score || 0,
-                resting_heart_rate: record.score?.resting_heart_rate || record.resting_heart_rate || 0,
-                hrv_rmssd_milli: record.score?.hrv_rmssd_milli || record.hrv_rmssd_milli || 0,
-                spo2_percentage: record.score?.spo2_percentage || record.spo2_percentage || 0,
-                skin_temp_celsius: record.score?.skin_temp_celsius || record.skin_temp_celsius || 0
-              };
-            }
-          }
-        } catch (endpointError: any) {
-          console.log(`${name} endpoint failed - Status:`, endpointError.response?.status, 'Error:', endpointError.response?.data || endpointError.message);
-          continue;
-        }
+      if (response.status === 200 && response.data.records && response.data.records.length > 0) {
+        console.log('Latest cycle found:', response.data.records[0].id);
+        return response.data.records[0];
+      } else {
+        console.log('No cycles found in response');
+        return null;
       }
-      
-      console.log('No recovery data found from any endpoint');
-      return null;
     } catch (error: any) {
-      console.error('Failed to fetch recovery data:', error.message);
-      return null;
+      console.error('Failed to fetch latest cycle:', error.response?.status, error.response?.data);
+      if (error.response?.status === 404) {
+        console.log('Cycle endpoint returned 404 - no cycles available');
+        return null;
+      }
+      throw error;
     }
   }
 
-  async getTodaysSleep(accessToken: string): Promise<WhoopSleepData | null> {
+  async getRecovery(cycleId: string): Promise<any> {
     try {
-      const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const headers = await this.authHeader();
+      console.log(`Fetching recovery for cycle ${cycleId}...`);
       
-      console.log('Fetching WHOOP sleep data for date range:', yesterdayStr, 'to', todayStr);
+      const response = await axios.get(`${BASE}/cycle/${cycleId}/recovery`, { headers });
       
-      const response = await axios.get(`${WHOOP_API_BASE}/v1/activity/sleep`, {
-        headers: this.getAuthHeaders(accessToken),
-        params: {
-          start: yesterdayStr,
-          end: todayStr,
-          limit: 1
-        }
-      });
-
-      console.log('WHOOP sleep response status:', response.status);
-      console.log('WHOOP sleep response:', JSON.stringify(response.data, null, 2));
-
-      if (response.data && response.data.records && response.data.records.length > 0) {
-        const record = response.data.records[0];
-        console.log('Sleep record found:', record);
-        return {
-          sleep_score: record.score?.stage_summary?.sleep_performance_percentage || record.score?.sleep_performance_percentage || 0,
-          stage_summary: record.score?.stage_summary || {
-            total_in_bed_time_milli: 0,
-            total_awake_time_milli: 0,
-            total_no_data_time_milli: 0,
-            total_light_sleep_time_milli: 0,
-            total_slow_wave_sleep_time_milli: 0,
-            total_rem_sleep_time_milli: 0
-          }
-        };
+      if (response.status === 200) {
+        console.log('Recovery data found for cycle:', cycleId);
+        return response.data;
       }
-      
-      console.log('No sleep records found in response');
       return null;
     } catch (error: any) {
-      console.error('Failed to fetch sleep data - Status:', error.response?.status);
-      console.error('Failed to fetch sleep data - Response:', error.response?.data);
-      console.error('Failed to fetch sleep data - Error:', error.message);
-      return null;
+      console.error(`Failed to fetch recovery for cycle ${cycleId}:`, error.response?.status, error.response?.data);
+      if (error.response?.status === 404) {
+        console.log(`No recovery data available for cycle ${cycleId}`);
+        return null;
+      }
+      throw error;
     }
   }
 
-  async getTodaysStrain(accessToken: string): Promise<WhoopStrainData | null> {
+  async getSleep(cycleId: string): Promise<any> {
     try {
-      const today = new Date();
-      const todayStr = today.toISOString().split('T')[0];
-      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const headers = await this.authHeader();
+      console.log(`Fetching sleep for cycle ${cycleId}...`);
       
-      console.log('Fetching WHOOP strain data for date range:', yesterdayStr, 'to', todayStr);
+      const response = await axios.get(`${BASE}/cycle/${cycleId}/sleep`, { headers });
       
-      const response = await axios.get(`${WHOOP_API_BASE}/v1/cycle`, {
-        headers: this.getAuthHeaders(accessToken),
-        params: {
-          start: yesterdayStr,
-          end: todayStr,
-          limit: 1
-        }
-      });
-
-      console.log('WHOOP strain response status:', response.status);
-      console.log('WHOOP strain response:', JSON.stringify(response.data, null, 2));
-
-      if (response.data && response.data.records && response.data.records.length > 0) {
-        const record = response.data.records[0];
-        console.log('Strain record found:', record);
-        return {
-          strain: record.score?.strain || 0,
-          kilojoule: record.score?.kilojoule || 0,
-          average_heart_rate: record.score?.average_heart_rate || 0,
-          max_heart_rate: record.score?.max_heart_rate || 0
-        };
+      if (response.status === 200) {
+        console.log('Sleep data found for cycle:', cycleId);
+        return response.data;
       }
-      
-      console.log('No strain records found in response');
       return null;
     } catch (error: any) {
-      console.error('Failed to fetch strain data - Status:', error.response?.status);
-      console.error('Failed to fetch strain data - Response:', error.response?.data);
-      console.error('Failed to fetch strain data - Error:', error.message);
-      return null;
+      console.error(`Failed to fetch sleep for cycle ${cycleId}:`, error.response?.status, error.response?.data);
+      if (error.response?.status === 404) {
+        console.log(`No sleep data available for cycle ${cycleId}`);
+        return null;
+      }
+      throw error;
     }
   }
 
   async getTodaysData(): Promise<WhoopTodayData> {
     const tokenData = await whoopTokenStorage.getDefaultToken();
     
-    if (!tokenData || !whoopTokenStorage.isTokenValid(tokenData)) {
-      console.warn('No valid WHOOP access token found.');
-      throw new Error('WHOOP authentication required');
+    if (!tokenData?.access_token) {
+      throw new Error('Missing WHOOP access token');
     }
 
     console.log('Fetching WHOOP data with valid token...');
 
-    // Verify API connection with user profile
     try {
-      const userResponse = await axios.get(`${WHOOP_API_BASE}/v1/user/profile/basic`, {
-        headers: this.getAuthHeaders(tokenData.access_token)
-      });
-      console.log('WHOOP API connection verified:', userResponse.status);
-      
-      // If user profile works but data endpoints don't, this indicates limited API access
-      const [recovery, sleep, strain] = await Promise.all([
-        this.getTodaysRecovery(tokenData.access_token),
-        this.getTodaysSleep(tokenData.access_token),
-        this.getTodaysStrain(tokenData.access_token)
+      // Fetch latest cycle first
+      const cycle = await this.getLatestCycle();
+      if (!cycle) {
+        console.log('No cycle data available');
+        return {};
+      }
+
+      // Fetch recovery and sleep based on cycle ID
+      const [recovery, sleep] = await Promise.all([
+        this.getRecovery(cycle.id),
+        this.getSleep(cycle.id)
       ]);
 
-      console.log('WHOOP data endpoints tested - all returned null due to 404 errors');
-      console.log('This indicates the data endpoints may not be available or require different OAuth scopes');
+      console.log('Raw WHOOP data retrieved:');
+      console.log('Cycle:', cycle);
+      console.log('Recovery:', recovery);
+      console.log('Sleep:', sleep);
 
-      // Since API connection works but data endpoints return 404, return authenticated but no data
-      const result = {
-        recovery_score: recovery?.recovery_score || 0,
-        sleep_score: sleep?.sleep_score || 0,
-        strain_score: strain?.strain || 0,
-        resting_heart_rate: recovery?.resting_heart_rate || 0
+      const result: WhoopTodayData = {
+        cycle_id: cycle.id,
+        strain: cycle.score?.strain ?? null,
+        recovery_score: recovery?.score?.recovery_score ?? null,
+        hrv: recovery?.score?.hrv_rmssd_milli ?? null,
+        resting_heart_rate: recovery?.score?.resting_heart_rate ?? null,
+        sleep_score: sleep?.score?.sleep_score ?? null,
+        raw: { cycle, recovery, sleep }
       };
 
-      // Since authentication works but data endpoints are unavailable, 
-      // this suggests WHOOP may require additional API access or different endpoints
-      console.log('WHOOP API Status: Authenticated successfully');
-      console.log('Note: Data endpoints returning 404 - may require WHOOP developer partnership for data access');
-
+      console.log('Processed WHOOP data:', result);
       return result;
     } catch (error: any) {
-      console.error('WHOOP API connection failed:', error.response?.status, error.response?.data);
+      console.error('WHOOP API connection failed:', error.message);
       throw new Error('WHOOP API connection failed');
     }
   }
@@ -311,15 +221,15 @@ export class WhoopApiService {
   getOAuthUrl(): string {
     const clientId = process.env.WHOOP_CLIENT_ID;
     const redirectUri = 'https://health-data-hub.replit.app/api/whoop/callback';
-    const scope = 'read:recovery read:sleep read:cycles read:profile read:workout read:body_measurement';
-    const state = 'whoop_auth_' + Date.now(); // Generate a unique state for security
+    const scope = 'read:cycles read:recovery read:sleep read:profile read:workout read:body_measurement';
+    const state = 'whoop_auth_' + Date.now();
     
     return `${WHOOP_OAUTH_BASE}/oauth2/auth?` +
       `client_id=${clientId}&` +
       `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-      `response_type=code&` +
       `scope=${encodeURIComponent(scope)}&` +
-      `state=${state}`;
+      `state=${state}&` +
+      `response_type=code`;
   }
 }
 
