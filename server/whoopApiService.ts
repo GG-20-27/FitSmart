@@ -112,22 +112,30 @@ export class WhoopApiService {
 
   async getTodaysRecovery(accessToken: string): Promise<WhoopRecoveryData | null> {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      console.log('Fetching WHOOP recovery data for:', today);
+      // Try different date formats and endpoints
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
       
-      const response = await axios.get(`${WHOOP_API_BASE}/developer/v1/recovery`, {
+      console.log('Fetching WHOOP recovery data for date range:', yesterdayStr, 'to', todayStr);
+      
+      // Try the correct WHOOP API v1 endpoint with proper date range
+      const response = await axios.get(`${WHOOP_API_BASE}/v1/recovery`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
-          start: today,
-          end: today
+          start: yesterdayStr,
+          end: todayStr,
+          limit: 1
         }
       });
 
+      console.log('WHOOP recovery response status:', response.status);
       console.log('WHOOP recovery response:', JSON.stringify(response.data, null, 2));
 
-      if (response.data.records && response.data.records.length > 0) {
+      if (response.data && response.data.records && response.data.records.length > 0) {
         const record = response.data.records[0];
-        console.log('Recovery record:', record);
+        console.log('Recovery record found:', record);
         return {
           recovery_score: record.score?.recovery_score || 0,
           resting_heart_rate: record.score?.resting_heart_rate || 0,
@@ -136,31 +144,41 @@ export class WhoopApiService {
           skin_temp_celsius: record.score?.skin_temp_celsius || 0
         };
       }
+      
+      console.log('No recovery records found in response');
       return null;
     } catch (error: any) {
-      console.error('Failed to fetch recovery data:', error.response?.data || error.message);
+      console.error('Failed to fetch recovery data - Status:', error.response?.status);
+      console.error('Failed to fetch recovery data - Response:', error.response?.data);
+      console.error('Failed to fetch recovery data - Error:', error.message);
       return null;
     }
   }
 
   async getTodaysSleep(accessToken: string): Promise<WhoopSleepData | null> {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      console.log('Fetching WHOOP sleep data for:', today);
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
       
-      const response = await axios.get(`${WHOOP_API_BASE}/developer/v1/activity/sleep`, {
+      console.log('Fetching WHOOP sleep data for date range:', yesterdayStr, 'to', todayStr);
+      
+      const response = await axios.get(`${WHOOP_API_BASE}/v1/activity/sleep`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
-          start: today,
-          end: today
+          start: yesterdayStr,
+          end: todayStr,
+          limit: 1
         }
       });
 
+      console.log('WHOOP sleep response status:', response.status);
       console.log('WHOOP sleep response:', JSON.stringify(response.data, null, 2));
 
-      if (response.data.records && response.data.records.length > 0) {
+      if (response.data && response.data.records && response.data.records.length > 0) {
         const record = response.data.records[0];
-        console.log('Sleep record:', record);
+        console.log('Sleep record found:', record);
         return {
           sleep_score: record.score?.stage_summary?.sleep_performance_percentage || record.score?.sleep_performance_percentage || 0,
           stage_summary: record.score?.stage_summary || {
@@ -173,31 +191,41 @@ export class WhoopApiService {
           }
         };
       }
+      
+      console.log('No sleep records found in response');
       return null;
     } catch (error: any) {
-      console.error('Failed to fetch sleep data:', error.response?.data || error.message);
+      console.error('Failed to fetch sleep data - Status:', error.response?.status);
+      console.error('Failed to fetch sleep data - Response:', error.response?.data);
+      console.error('Failed to fetch sleep data - Error:', error.message);
       return null;
     }
   }
 
   async getTodaysStrain(accessToken: string): Promise<WhoopStrainData | null> {
     try {
-      const today = new Date().toISOString().split('T')[0];
-      console.log('Fetching WHOOP strain data for:', today);
+      const today = new Date();
+      const todayStr = today.toISOString().split('T')[0];
+      const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
       
-      const response = await axios.get(`${WHOOP_API_BASE}/developer/v1/cycle`, {
+      console.log('Fetching WHOOP strain data for date range:', yesterdayStr, 'to', todayStr);
+      
+      const response = await axios.get(`${WHOOP_API_BASE}/v1/cycle`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
-          start: today,
-          end: today
+          start: yesterdayStr,
+          end: todayStr,
+          limit: 1
         }
       });
 
+      console.log('WHOOP strain response status:', response.status);
       console.log('WHOOP strain response:', JSON.stringify(response.data, null, 2));
 
-      if (response.data.records && response.data.records.length > 0) {
+      if (response.data && response.data.records && response.data.records.length > 0) {
         const record = response.data.records[0];
-        console.log('Strain record:', record);
+        console.log('Strain record found:', record);
         return {
           strain: record.score?.strain || 0,
           kilojoule: record.score?.kilojoule || 0,
@@ -205,9 +233,13 @@ export class WhoopApiService {
           max_heart_rate: record.score?.max_heart_rate || 0
         };
       }
+      
+      console.log('No strain records found in response');
       return null;
     } catch (error: any) {
-      console.error('Failed to fetch strain data:', error.response?.data || error.message);
+      console.error('Failed to fetch strain data - Status:', error.response?.status);
+      console.error('Failed to fetch strain data - Response:', error.response?.data);
+      console.error('Failed to fetch strain data - Error:', error.message);
       return null;
     }
   }
