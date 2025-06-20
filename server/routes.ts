@@ -229,6 +229,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Debug endpoint to test OAuth URL generation
+  app.get('/api/whoop/debug', (req, res) => {
+    try {
+      const oauthUrl = whoopApiService.getOAuthUrl();
+      res.json({
+        oauth_url: oauthUrl,
+        client_id: process.env.WHOOP_CLIENT_ID,
+        redirect_uri: 'https://health-data-hub.replit.app/api/whoop/callback',
+        status: 'OAuth flow ready'
+      });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to generate OAuth URL' });
+    }
+  });
+
   // WHOOP data endpoint - now uses live API data
   app.get('/api/whoop/today', async (req, res) => {
     try {
