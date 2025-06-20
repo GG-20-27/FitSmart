@@ -123,80 +123,21 @@ function CircularProgress({ value, max = 100, size = 120, strokeWidth = 8, color
   );
 }
 
-// FitScore logo as SVG component
+// FitScore logo using the real brand image
 function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?: number }) {
   return (
-    <div 
-      className={`inline-flex items-center justify-center ${className}`}
-      style={{ width: size, height: size }}
-    >
-      <svg 
+    <div className={`flex items-center justify-center ${className}`}>
+      <img 
+        src="/attached_assets/ChatGPT Image 2025. g. 11. jūn. 10_44_10_1750431009671.png" 
+        alt="FitScore Logo" 
         width={size} 
-        height={size} 
-        viewBox="0 0 200 200" 
+        height={size}
         className="drop-shadow-lg"
-      >
-        <defs>
-          <linearGradient id="fitscoreGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" style={{ stopColor: '#3b82f6', stopOpacity: 1 }} />
-            <stop offset="100%" style={{ stopColor: '#8b5cf6', stopOpacity: 1 }} />
-          </linearGradient>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-            <feMerge> 
-              <feMergeNode in="coloredBlur"/>
-              <feMergeNode in="SourceGraphic"/>
-            </feMerge>
-          </filter>
-        </defs>
-        
-        {/* Outer circle */}
-        <circle 
-          cx="100" 
-          cy="100" 
-          r="90" 
-          fill="url(#fitscoreGradient)" 
-          filter="url(#glow)"
-          opacity="0.9"
-        />
-        
-        {/* Inner elements */}
-        <g transform="translate(100,100)" fill="white" opacity="0.9">
-          {/* Brain/AI icon (top left) */}
-          <g transform="translate(-40,-40) scale(0.8)">
-            <path d="M-15,-10 Q-20,-15 -10,-15 Q0,-20 10,-15 Q20,-15 15,-10 Q20,-5 15,0 Q20,5 10,10 Q0,15 -10,10 Q-20,5 -15,0 Q-20,-5 -15,-10 Z" />
-            <circle cx="-8" cy="-5" r="2" fill="url(#fitscoreGradient)" />
-            <circle cx="0" cy="-8" r="2" fill="url(#fitscoreGradient)" />
-            <circle cx="8" cy="-5" r="2" fill="url(#fitscoreGradient)" />
-          </g>
-          
-          {/* FS text (top right) */}
-          <g transform="translate(15,-35)">
-            <text fontSize="28" fontWeight="bold" textAnchor="middle" fontFamily="Inter, sans-serif">FS</text>
-          </g>
-          
-          {/* Heart rate line (center) */}
-          <g transform="translate(0,0)">
-            <path 
-              d="M-35,0 L-20,0 L-15,-15 L-10,15 L-5,-10 L0,0 L5,0 L10,-15 L15,15 L20,0 L35,0" 
-              stroke="white" 
-              strokeWidth="3" 
-              fill="none"
-              strokeLinecap="round"
-            />
-          </g>
-          
-          {/* Activity bars (bottom) */}
-          <g transform="translate(0,35)">
-            <rect x="-25" y="-5" width="6" height="10" rx="3" />
-            <rect x="-15" y="-10" width="6" height="15" rx="3" />
-            <rect x="-5" y="-8" width="6" height="13" rx="3" />
-            <rect x="5" y="-12" width="6" height="17" rx="3" />
-            <rect x="15" y="-6" width="6" height="11" rx="3" />
-            <rect x="25" y="-4" width="6" height="9" rx="3" />
-          </g>
-        </g>
-      </svg>
+        style={{ 
+          filter: 'drop-shadow(0 0 20px rgba(59, 130, 246, 0.5))',
+          borderRadius: '50%'
+        }}
+      />
     </div>
   );
 }
@@ -506,10 +447,8 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {/* Avg Recovery - Navy */}
               <Card 
-                className="border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in"
+                className="gradient-recovery border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in rounded-2xl"
                 style={{ 
-                  background: 'linear-gradient(135deg, #1E3A8A 0%, #1E40AF 100%)',
-                  borderRadius: '1rem',
                   boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(30, 58, 138, 0.3)'
                 }}
               >
@@ -530,10 +469,8 @@ export default function Dashboard() {
 
               {/* Avg Strain - Crimson */}
               <Card 
-                className="border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in"
+                className="gradient-strain border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in rounded-2xl"
                 style={{ 
-                  background: 'linear-gradient(135deg, #B91C1C 0%, #DC2626 100%)',
-                  borderRadius: '1rem',
                   boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(185, 28, 28, 0.3)',
                   animationDelay: '0.1s'
                 }}
@@ -541,7 +478,7 @@ export default function Dashboard() {
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-3">
                     <Zap className="h-5 w-5 text-white/90" />
-                    <span className="text-sm font-medium text-white/90">⚡ Avg Strain</span>
+                    <span className="text-sm font-medium text-white/90">Avg Strain</span>
                   </div>
                   <div className="text-3xl font-bold text-white">
                     {whoopSummary.avg_strain !== null ? (
@@ -555,10 +492,8 @@ export default function Dashboard() {
 
               {/* Avg Sleep - Purple */}
               <Card 
-                className="border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in"
+                className="gradient-sleep border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in rounded-2xl"
                 style={{ 
-                  background: 'linear-gradient(135deg, #6D28D9 0%, #7C3AED 100%)',
-                  borderRadius: '1rem',
                   boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(109, 40, 217, 0.3)',
                   animationDelay: '0.2s'
                 }}
@@ -566,7 +501,7 @@ export default function Dashboard() {
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-3">
                     <Moon className="h-5 w-5 text-white/90" />
-                    <span className="text-sm font-medium text-white/90">🌙 Avg Sleep</span>
+                    <span className="text-sm font-medium text-white/90">Avg Sleep</span>
                   </div>
                   <div className="text-3xl font-bold text-white">
                     {whoopSummary.avg_sleep !== null ? (
@@ -591,7 +526,7 @@ export default function Dashboard() {
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-3">
                     <Activity className="h-5 w-5 text-white/90" />
-                    <span className="text-sm font-medium text-white/90">🫀 Avg HRV</span>
+                    <span className="text-sm font-medium text-white/90">Avg HRV</span>
                   </div>
                   <div className="text-3xl font-bold text-white">
                     {whoopSummary.avg_hrv !== null ? (
