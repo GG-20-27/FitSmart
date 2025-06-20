@@ -145,12 +145,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tokenData = {
         access_token: tokenResponse.access_token,
         refresh_token: tokenResponse.refresh_token,
-        expires_at: tokenResponse.expires_in ? Date.now() + (tokenResponse.expires_in * 1000) : undefined,
+        expires_at: tokenResponse.expires_in ? Math.floor(Date.now() / 1000) + tokenResponse.expires_in : undefined,
         user_id: tokenResponse.user?.id || 'default'
       };
       
-      whoopTokenStorage.setDefaultToken(tokenData);
-      console.log('WHOOP authentication successful! Token stored with expiration:', new Date(tokenData.expires_at || 0));
+      await whoopTokenStorage.setDefaultToken(tokenData);
+      console.log('WHOOP authentication successful! Token stored with expiration:', tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
 
       // Return HTML that closes the popup and notifies parent
       const html = `
@@ -257,7 +257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Test endpoint to manually set a WHOOP token for debugging
-  app.post('/api/whoop/test-token', (req, res) => {
+  app.post('/api/whoop/test-token', async (req, res) => {
     try {
       const { access_token } = req.body;
       if (!access_token) {
@@ -265,9 +265,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Store the test token
-      whoopTokenStorage.setDefaultToken({
+      await whoopTokenStorage.setDefaultToken({
         access_token: access_token,
-        expires_at: Date.now() + (24 * 60 * 60 * 1000), // 24 hours from now
+        expires_at: Date.now() / 1000 + (24 * 60 * 60), // 24 hours from now in seconds
         user_id: 'test_user'
       });
 
@@ -286,7 +286,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('Fetching live WHOOP data for today...');
       
-      const tokenData = whoopTokenStorage.getDefaultToken();
+      const tokenData = await whoopTokenStorage.getDefaultToken();
       if (!tokenData) {
         console.warn('No WHOOP access token found. User needs to authenticate first.');
         return res.status(401).json({ 
