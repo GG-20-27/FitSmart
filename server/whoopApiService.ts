@@ -58,38 +58,55 @@ export class WhoopApiService {
     console.log('Starting WHOOP token exchange...');
     console.log('Client ID:', clientId);
     console.log('Redirect URI:', redirectUri);
-    console.log('Authorization code:', code.substring(0, 10) + '...');
+    console.log('Authorization code:', code);
+
+    const requestData = {
+      client_id: clientId,
+      client_secret: clientSecret,
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: redirectUri
+    };
+
+    console.log('Request data object:', requestData);
 
     try {
-      // Use application/x-www-form-urlencoded format as required by WHOOP
-      const params = new URLSearchParams();
-      params.append('client_id', clientId);
-      params.append('client_secret', clientSecret);
-      params.append('grant_type', 'authorization_code');
-      params.append('code', code);
-      params.append('redirect_uri', redirectUri);
+      const formBody = Object.entries(requestData)
+        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+        .join('&');
 
-      const response = await axios.post(`${WHOOP_OAUTH_BASE}/oauth2/token`, params, {
+      const requestUrl = `${WHOOP_OAUTH_BASE}/oauth2/token`;
+      console.log('Request URL:', requestUrl);
+      console.log('Form body:', formBody);
+      console.log('Form body length:', formBody.length);
+      console.log('Form body bytes:', Buffer.from(formBody).length);
+
+      const response = await fetch(`${WHOOP_OAUTH_BASE}/oauth2/token`, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json'
-        }
+          'Accept': 'application/json',
+          'User-Agent': 'FitScore-GPT-API/1.0'
+        },
+        body: formBody
       });
 
-      console.log('WHOOP token exchange successful:', response.data);
-      return response.data;
+      const responseText = await response.text();
+      console.log('WHOOP response status:', response.status);
+      console.log('WHOOP response text:', responseText);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${responseText}`);
+      }
+
+      const data = JSON.parse(responseText);
+      console.log('WHOOP token exchange successful:', data);
+      return data;
     } catch (error: any) {
       console.error('WHOOP token exchange failed:');
-      console.error('Status:', error.response?.status);
-      console.error('Status Text:', error.response?.statusText);
-      console.error('Response Data:', error.response?.data);
-      console.error('Request Config:', {
-        url: error.config?.url,
-        method: error.config?.method,
-        headers: error.config?.headers,
-        data: error.config?.data
-      });
-      throw new Error(`Failed to exchange code for access token: ${error.response?.data?.error || error.message}`);
+      console.error('Error message:', error.message);
+      console.error('Full error:', error);
+      throw new Error(`Failed to exchange code for access token: ${error.message}`);
     }
   }
 
