@@ -399,7 +399,7 @@ export default function Dashboard() {
               </Card>
 
               {/* Strain Score */}
-              <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105">
+              <Card className="glassy-card hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105 animate-fade-in" style={{ animationDelay: '0.1s' }}>
                 <CardContent className="p-6">
                   <div className="flex flex-col items-center space-y-4">
                     <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-500 rounded-full flex items-center justify-center shadow-lg">
@@ -407,6 +407,7 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="flex items-center justify-center space-x-2 mb-1">
+                        <span className="text-base">⚡</span>
                         <Zap className="h-4 w-4 text-orange-400" />
                         <span className="text-sm font-medium text-slate-300">Strain</span>
                       </div>
@@ -419,7 +420,7 @@ export default function Dashboard() {
               </Card>
 
               {/* Sleep Score */}
-              <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105">
+              <Card className="glassy-card hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105 animate-fade-in" style={{ animationDelay: '0.2s' }}>
                 <CardContent className="p-6">
                   <div className="flex flex-col items-center space-y-4">
                     <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-full flex items-center justify-center shadow-lg">
@@ -427,6 +428,7 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="flex items-center justify-center space-x-2 mb-1">
+                        <span className="text-base">🌙</span>
                         <Moon className="h-4 w-4 text-purple-400" />
                         <span className="text-sm font-medium text-slate-300">Sleep</span>
                       </div>
@@ -448,7 +450,7 @@ export default function Dashboard() {
               </Card>
 
               {/* HRV */}
-              <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105">
+              <Card className="glassy-card hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105 animate-fade-in" style={{ animationDelay: '0.3s' }}>
                 <CardContent className="p-6">
                   <div className="flex flex-col items-center space-y-4">
                     <div className="w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-500 rounded-full flex items-center justify-center shadow-lg">
@@ -456,6 +458,7 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="flex items-center justify-center space-x-2 mb-1">
+                        <span className="text-base">🫀</span>
                         <Activity className="h-4 w-4 text-green-400" />
                         <span className="text-sm font-medium text-slate-300">HRV</span>
                       </div>
