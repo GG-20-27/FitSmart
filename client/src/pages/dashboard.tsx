@@ -515,10 +515,8 @@ export default function Dashboard() {
 
               {/* Avg HRV - Emerald */}
               <Card 
-                className="border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in"
+                className="gradient-hrv border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in rounded-2xl"
                 style={{ 
-                  background: 'linear-gradient(135deg, #047857 0%, #059669 100%)',
-                  borderRadius: '1rem',
                   boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(4, 120, 87, 0.3)',
                   animationDelay: '0.3s'
                 }}
