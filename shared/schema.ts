@@ -28,6 +28,16 @@ export const whoopData = pgTable("whoop_data", {
   lastSync: timestamp("last_sync").defaultNow().notNull(),
 });
 
+export const whoopTokens = pgTable("whoop_tokens", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().default('default'),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -43,12 +53,20 @@ export const insertWhoopDataSchema = createInsertSchema(whoopData).omit({
   lastSync: true,
 });
 
+export const insertWhoopTokenSchema = createInsertSchema(whoopTokens).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertMeal = z.infer<typeof insertMealSchema>;
 export type Meal = typeof meals.$inferSelect;
 export type InsertWhoopData = z.infer<typeof insertWhoopDataSchema>;
 export type WhoopData = typeof whoopData.$inferSelect;
+export type InsertWhoopToken = z.infer<typeof insertWhoopTokenSchema>;
+export type WhoopToken = typeof whoopTokens.$inferSelect;
 
 // WHOOP API response types
 export interface WhoopTodayResponse {

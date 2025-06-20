@@ -1,5 +1,6 @@
-import fs from 'fs';
-import path from 'path';
+import { db } from './db';
+import { whoopTokens, type InsertWhoopToken, type WhoopToken } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 interface WhoopTokenData {
   access_token: string;
@@ -8,34 +9,9 @@ interface WhoopTokenData {
   user_id?: string;
 }
 
-const TOKEN_FILE = path.join(process.cwd(), 'whoop_tokens.json');
-
 export class WhoopTokenStorage {
-  private tokens: Map<string, WhoopTokenData> = new Map();
-
   constructor() {
-    this.loadTokens();
-  }
-
-  private loadTokens() {
-    try {
-      if (fs.existsSync(TOKEN_FILE)) {
-        const data = fs.readFileSync(TOKEN_FILE, 'utf8');
-        const tokenData = JSON.parse(data);
-        this.tokens = new Map(Object.entries(tokenData));
-      }
-    } catch (error) {
-      console.warn('Failed to load WHOOP tokens:', error);
-    }
-  }
-
-  private saveTokens() {
-    try {
-      const tokenData = Object.fromEntries(this.tokens);
-      fs.writeFileSync(TOKEN_FILE, JSON.stringify(tokenData, null, 2));
-    } catch (error) {
-      console.error('Failed to save WHOOP tokens:', error);
-    }
+    // No need to load tokens - using database directly
   }
 
   setToken(userId: string, tokenData: WhoopTokenData) {

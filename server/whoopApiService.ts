@@ -216,14 +216,11 @@ export class WhoopApiService {
     const tokenData = whoopTokenStorage.getDefaultToken();
     
     if (!tokenData || !whoopTokenStorage.isTokenValid(tokenData)) {
-      console.warn('No valid WHOOP access token found. Using fallback data.');
-      return {
-        recovery_score: 68,
-        sleep_score: 75,
-        strain_score: 12.3,
-        resting_heart_rate: 60
-      };
+      console.warn('No valid WHOOP access token found.');
+      throw new Error('WHOOP authentication required');
     }
+
+    console.log('Fetching WHOOP data with valid token...');
 
     try {
       const [recovery, sleep, strain] = await Promise.all([
@@ -232,12 +229,26 @@ export class WhoopApiService {
         this.getTodaysStrain(tokenData.access_token)
       ]);
 
-      return {
+      console.log('Raw WHOOP data retrieved:');
+      console.log('Recovery:', recovery);
+      console.log('Sleep:', sleep);
+      console.log('Strain:', strain);
+
+      const result = {
         recovery_score: recovery?.recovery_score || 0,
         sleep_score: sleep?.sleep_score || 0,
         strain_score: strain?.strain || 0,
         resting_heart_rate: recovery?.resting_heart_rate || 0
       };
+
+      console.log('Processed WHOOP data:', result);
+
+      // If all values are 0, there might be no data for today or data structure issues
+      if (result.recovery_score === 0 && result.sleep_score === 0 && result.strain_score === 0 && result.resting_heart_rate === 0) {
+        console.warn('All WHOOP values are 0 - possible data structure mismatch or no data for today');
+      }
+
+      return result;
     } catch (error) {
       console.error('Failed to fetch WHOOP data:', error);
       throw new Error('Unable to fetch live WHOOP data');
