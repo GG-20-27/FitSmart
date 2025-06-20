@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { whoopTokenStorage } from './whoopTokenStorage';
 
-const WHOOP_API_BASE = 'https://api.prod.whoop.com';
+const WHOOP_API_BASE = 'https://api.prod.whoop.com/developer';
 const WHOOP_OAUTH_BASE = 'https://api.prod.whoop.com/oauth';
 
 export interface WhoopRecoveryData {
@@ -121,7 +121,7 @@ export class WhoopApiService {
       console.log('Fetching WHOOP recovery data for date range:', yesterdayStr, 'to', todayStr);
       
       // Try the correct WHOOP API v1 endpoint with proper date range
-      const response = await axios.get(`${WHOOP_API_BASE}/v1/recovery`, {
+      const response = await axios.get(`${WHOOP_API_BASE}/v1/recovery/collection`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
           start: yesterdayStr,
@@ -164,7 +164,7 @@ export class WhoopApiService {
       
       console.log('Fetching WHOOP sleep data for date range:', yesterdayStr, 'to', todayStr);
       
-      const response = await axios.get(`${WHOOP_API_BASE}/v1/activity/sleep`, {
+      const response = await axios.get(`${WHOOP_API_BASE}/v1/activity/sleep/collection`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
           start: yesterdayStr,
@@ -211,7 +211,7 @@ export class WhoopApiService {
       
       console.log('Fetching WHOOP strain data for date range:', yesterdayStr, 'to', todayStr);
       
-      const response = await axios.get(`${WHOOP_API_BASE}/v1/cycle`, {
+      const response = await axios.get(`${WHOOP_API_BASE}/v1/cycle/collection`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
           start: yesterdayStr,
@@ -254,6 +254,17 @@ export class WhoopApiService {
 
     console.log('Fetching WHOOP data with valid token...');
 
+    // First, test if the API connection works by checking user profile
+    try {
+      const userResponse = await axios.get(`${WHOOP_API_BASE}/v1/user/profile/basic`, {
+        headers: this.getAuthHeaders(tokenData.access_token)
+      });
+      console.log('WHOOP user profile test successful:', userResponse.status);
+    } catch (error: any) {
+      console.error('WHOOP user profile test failed:', error.response?.status, error.response?.data);
+      // Continue with data fetching even if profile fails
+    }
+
     try {
       const [recovery, sleep, strain] = await Promise.all([
         this.getTodaysRecovery(tokenData.access_token),
@@ -275,9 +286,12 @@ export class WhoopApiService {
 
       console.log('Processed WHOOP data:', result);
 
-      // If all values are 0, there might be no data for today or data structure issues
+      // If all values are 0, check if it's an API access issue
       if (result.recovery_score === 0 && result.sleep_score === 0 && result.strain_score === 0 && result.resting_heart_rate === 0) {
-        console.warn('All WHOOP values are 0 - possible data structure mismatch or no data for today');
+        console.warn('All WHOOP values are 0 - this could indicate:');
+        console.warn('1. No data available for today');
+        console.warn('2. API endpoint access issues');
+        console.warn('3. Insufficient OAuth scopes');
       }
 
       return result;
