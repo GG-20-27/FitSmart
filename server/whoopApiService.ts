@@ -172,6 +172,36 @@ export class WhoopApiService {
     }
   }
 
+  async getLatestSleepScore(): Promise<number | null> {
+    try {
+      // Get recent cycles to find latest sleep data
+      const headers = await this.authHeader();
+      const response = await axios.get(`${BASE}/cycle?limit=10`, { headers });
+      
+      if (response.data.records) {
+        // Check each cycle for sleep data, starting from most recent
+        for (const cycle of response.data.records) {
+          try {
+            const sleepData = await this.getSleep(cycle.id);
+            if (sleepData?.score?.sleep_score) {
+              console.log(`Found sleep score ${sleepData.score.sleep_score} for cycle ${cycle.id}`);
+              return sleepData.score.sleep_score;
+            }
+          } catch (error) {
+            // Skip cycles without sleep data (404 errors are normal)
+            continue;
+          }
+        }
+      }
+      
+      console.log('No sleep data found in recent cycles');
+      return null;
+    } catch (error) {
+      console.error('Error fetching latest sleep score:', error);
+      return null;
+    }
+  }
+
   async getTodaysData(): Promise<WhoopTodayData> {
     const tokenData = await whoopTokenStorage.getDefaultToken();
     
@@ -195,6 +225,13 @@ export class WhoopApiService {
         this.getSleep(cycle.id)
       ]);
 
+      // If no sleep data for current cycle, try to get latest available
+      let latestSleepScore = null;
+      if (!sleep?.score?.sleep_score) {
+        console.log('No sleep data for current cycle, fetching latest available...');
+        latestSleepScore = await this.getLatestSleepScore();
+      }
+
       console.log('Raw WHOOP data retrieved:');
       console.log('Cycle:', cycle);
       console.log('Recovery:', recovery);
@@ -206,7 +243,7 @@ export class WhoopApiService {
         recovery_score: recovery?.score?.recovery_score ?? null,
         hrv: recovery?.score?.hrv_rmssd_milli ?? null,
         resting_heart_rate: recovery?.score?.resting_heart_rate ?? null,
-        sleep_score: sleep?.score?.sleep_score ?? null,
+        sleep_score: sleep?.score?.sleep_score ?? latestSleepScore,
         raw: { cycle, recovery, sleep }
       };
 

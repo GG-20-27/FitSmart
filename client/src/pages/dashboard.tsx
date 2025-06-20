@@ -337,7 +337,8 @@ export default function Dashboard() {
         {/* Live WHOOP Summary */}
         <div className="mb-12 animate-slide-up">
           <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-white mb-2">Hello Gustavs 👋 Here are your health insights for today</h2>
+            <h1 className="text-4xl font-bold text-white mb-3 tracking-tight">Hello Gustavs</h1>
+            <p className="text-xl text-slate-300 mb-4 font-medium">Here are your health insights for today</p>
             <p className="text-slate-400">Live data from your WHOOP device</p>
             {lastSync && (
               <div className="flex items-center justify-center mt-2 text-sm text-slate-500">
@@ -389,7 +390,6 @@ export default function Dashboard() {
                     />
                     <div className="text-center">
                       <div className="flex items-center justify-center space-x-2 mb-1">
-                        <span className="text-base">💙</span>
                         <Heart className="h-4 w-4 text-blue-400" />
                         <span className="text-sm font-medium text-slate-300">Recovery</span>
                       </div>
@@ -407,7 +407,6 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="flex items-center justify-center space-x-2 mb-1">
-                        <span className="text-base">⚡</span>
                         <Zap className="h-4 w-4 text-orange-400" />
                         <span className="text-sm font-medium text-slate-300">Strain</span>
                       </div>
@@ -428,7 +427,6 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="flex items-center justify-center space-x-2 mb-1">
-                        <span className="text-base">🌙</span>
                         <Moon className="h-4 w-4 text-purple-400" />
                         <span className="text-sm font-medium text-slate-300">Sleep</span>
                       </div>
@@ -458,7 +456,6 @@ export default function Dashboard() {
                     </div>
                     <div className="text-center">
                       <div className="flex items-center justify-center space-x-2 mb-1">
-                        <span className="text-base">🫀</span>
                         <Activity className="h-4 w-4 text-green-400" />
                         <span className="text-sm font-medium text-slate-300">HRV</span>
                       </div>
@@ -519,7 +516,7 @@ export default function Dashboard() {
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-3">
                     <Heart className="h-5 w-5 text-white/90" />
-                    <span className="text-sm font-medium text-white/90">💙 Avg Recovery</span>
+                    <span className="text-sm font-medium text-white/90">Avg Recovery</span>
                   </div>
                   <div className="text-3xl font-bold text-white">
                     {whoopSummary.avg_recovery !== null ? (
