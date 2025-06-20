@@ -108,35 +108,97 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // WHOOP OAuth callback endpoint
   app.get('/api/whoop/callback', async (req, res) => {
     try {
-      const { code, error } = req.query;
+      console.log('WHOOP OAuth callback received');
+      console.log('Query params:', req.query);
+      
+      const { code, error, state } = req.query;
       
       if (error) {
-        console.error('WHOOP OAuth error:', error);
-        return res.status(400).json({ error: 'OAuth authentication failed' });
+        console.error('WHOOP OAuth error received:', error);
+        return res.status(400).json({ 
+          error: 'OAuth authentication failed',
+          details: error 
+        });
       }
 
       if (!code) {
-        return res.status(400).json({ error: 'No authorization code received' });
+        console.error('No authorization code received in callback');
+        return res.status(400).json({ 
+          error: 'No authorization code received',
+          received_params: Object.keys(req.query)
+        });
       }
 
-      console.log('Exchanging authorization code for access token...');
+      console.log('Valid authorization code received, proceeding with token exchange...');
       const tokenResponse = await whoopApiService.exchangeCodeForToken(code as string);
       
-      // Store the token
-      whoopTokenStorage.setDefaultToken({
+      // Store the token with proper expiration
+      const tokenData = {
         access_token: tokenResponse.access_token,
         refresh_token: tokenResponse.refresh_token,
-        expires_at: tokenResponse.expires_in ? Date.now() + (tokenResponse.expires_in * 1000) : undefined
-      });
+        expires_at: tokenResponse.expires_in ? Date.now() + (tokenResponse.expires_in * 1000) : undefined,
+        user_id: tokenResponse.user?.id || 'default'
+      };
+      
+      whoopTokenStorage.setDefaultToken(tokenData);
+      console.log('WHOOP authentication successful! Token stored with expiration:', new Date(tokenData.expires_at || 0));
 
-      console.log('WHOOP authentication successful! Token stored.');
-      res.json({ 
-        message: 'WHOOP authentication successful!',
-        status: 'connected'
-      });
-    } catch (error) {
+      // Return HTML that closes the popup and notifies parent
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>WHOOP Authentication Success</title>
+            <style>
+              body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+              .success { color: #22c55e; font-size: 18px; margin-bottom: 20px; }
+              .message { color: #6b7280; }
+            </style>
+          </head>
+          <body>
+            <div class="success">✅ WHOOP Authentication Successful!</div>
+            <div class="message">This window will close automatically...</div>
+            <script>
+              // Notify parent window and close popup
+              if (window.opener) {
+                window.opener.postMessage({ type: 'WHOOP_AUTH_SUCCESS' }, '*');
+              }
+              setTimeout(() => window.close(), 2000);
+            </script>
+          </body>
+        </html>
+      `;
+      
+      res.setHeader('Content-Type', 'text/html');
+      res.send(html);
+    } catch (error: any) {
       console.error('WHOOP callback error:', error);
-      res.status(500).json({ error: 'Failed to complete WHOOP authentication' });
+      
+      // Return HTML error page for popup
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>WHOOP Authentication Error</title>
+            <style>
+              body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+              .error { color: #ef4444; font-size: 18px; margin-bottom: 20px; }
+              .message { color: #6b7280; }
+            </style>
+          </head>
+          <body>
+            <div class="error">❌ Authentication Failed</div>
+            <div class="message">${error.message || 'An error occurred during authentication'}</div>
+            <div class="message">This window will close automatically...</div>
+            <script>
+              setTimeout(() => window.close(), 3000);
+            </script>
+          </body>
+        </html>
+      `;
+      
+      res.setHeader('Content-Type', 'text/html');
+      res.status(500).send(html);
     }
   });
 

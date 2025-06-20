@@ -55,19 +55,41 @@ export class WhoopApiService {
       throw new Error('Missing WHOOP client credentials');
     }
 
+    console.log('Starting WHOOP token exchange...');
+    console.log('Client ID:', clientId);
+    console.log('Redirect URI:', redirectUri);
+    console.log('Authorization code:', code.substring(0, 10) + '...');
+
     try {
-      const response = await axios.post(`${WHOOP_OAUTH_BASE}/oauth2/token`, {
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-        code: code
+      // Use application/x-www-form-urlencoded format as required by WHOOP
+      const params = new URLSearchParams();
+      params.append('client_id', clientId);
+      params.append('client_secret', clientSecret);
+      params.append('grant_type', 'authorization_code');
+      params.append('code', code);
+      params.append('redirect_uri', redirectUri);
+
+      const response = await axios.post(`${WHOOP_OAUTH_BASE}/oauth2/token`, params, {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json'
+        }
       });
 
+      console.log('WHOOP token exchange successful:', response.data);
       return response.data;
     } catch (error: any) {
-      console.error('WHOOP token exchange failed:', error.response?.data || error.message);
-      throw new Error('Failed to exchange code for access token');
+      console.error('WHOOP token exchange failed:');
+      console.error('Status:', error.response?.status);
+      console.error('Status Text:', error.response?.statusText);
+      console.error('Response Data:', error.response?.data);
+      console.error('Request Config:', {
+        url: error.config?.url,
+        method: error.config?.method,
+        headers: error.config?.headers,
+        data: error.config?.data
+      });
+      throw new Error(`Failed to exchange code for access token: ${error.response?.data?.error || error.message}`);
     }
   }
 
