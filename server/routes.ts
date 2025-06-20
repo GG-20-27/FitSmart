@@ -242,14 +242,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/whoop/debug', (req, res) => {
     try {
       const oauthUrl = whoopApiService.getOAuthUrl();
+      const tokenData = whoopTokenStorage.getDefaultToken();
       res.json({
         oauth_url: oauthUrl,
         client_id: process.env.WHOOP_CLIENT_ID,
         redirect_uri: 'https://health-data-hub.replit.app/api/whoop/callback',
-        status: 'OAuth flow ready'
+        status: 'OAuth flow ready',
+        has_token: !!tokenData,
+        token_valid: tokenData ? whoopTokenStorage.isTokenValid(tokenData) : false
       });
     } catch (error) {
       res.status(500).json({ error: 'Failed to generate OAuth URL' });
+    }
+  });
+
+  // Test endpoint to manually set a WHOOP token for debugging
+  app.post('/api/whoop/test-token', (req, res) => {
+    try {
+      const { access_token } = req.body;
+      if (!access_token) {
+        return res.status(400).json({ error: 'access_token required' });
+      }
+
+      // Store the test token
+      whoopTokenStorage.setDefaultToken({
+        access_token: access_token,
+        expires_at: Date.now() + (24 * 60 * 60 * 1000), // 24 hours from now
+        user_id: 'test_user'
+      });
+
+      res.json({ 
+        message: 'Test token stored successfully',
+        status: 'authenticated'
+      });
+    } catch (error) {
+      console.error('Error setting test token:', error);
+      res.status(500).json({ error: 'Failed to set test token' });
     }
   });
 

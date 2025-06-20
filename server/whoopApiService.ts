@@ -113,6 +113,8 @@ export class WhoopApiService {
   async getTodaysRecovery(accessToken: string): Promise<WhoopRecoveryData | null> {
     try {
       const today = new Date().toISOString().split('T')[0];
+      console.log('Fetching WHOOP recovery data for:', today);
+      
       const response = await axios.get(`${WHOOP_API_BASE}/developer/v1/recovery`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
@@ -121,8 +123,18 @@ export class WhoopApiService {
         }
       });
 
+      console.log('WHOOP recovery response:', JSON.stringify(response.data, null, 2));
+
       if (response.data.records && response.data.records.length > 0) {
-        return response.data.records[0].score;
+        const record = response.data.records[0];
+        console.log('Recovery record:', record);
+        return {
+          recovery_score: record.score?.recovery_score || 0,
+          resting_heart_rate: record.score?.resting_heart_rate || 0,
+          hrv_rmssd_milli: record.score?.hrv_rmssd_milli || 0,
+          spo2_percentage: record.score?.spo2_percentage || 0,
+          skin_temp_celsius: record.score?.skin_temp_celsius || 0
+        };
       }
       return null;
     } catch (error: any) {
@@ -134,6 +146,8 @@ export class WhoopApiService {
   async getTodaysSleep(accessToken: string): Promise<WhoopSleepData | null> {
     try {
       const today = new Date().toISOString().split('T')[0];
+      console.log('Fetching WHOOP sleep data for:', today);
+      
       const response = await axios.get(`${WHOOP_API_BASE}/developer/v1/activity/sleep`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
@@ -142,8 +156,22 @@ export class WhoopApiService {
         }
       });
 
+      console.log('WHOOP sleep response:', JSON.stringify(response.data, null, 2));
+
       if (response.data.records && response.data.records.length > 0) {
-        return response.data.records[0].score;
+        const record = response.data.records[0];
+        console.log('Sleep record:', record);
+        return {
+          sleep_score: record.score?.stage_summary?.sleep_performance_percentage || record.score?.sleep_performance_percentage || 0,
+          stage_summary: record.score?.stage_summary || {
+            total_in_bed_time_milli: 0,
+            total_awake_time_milli: 0,
+            total_no_data_time_milli: 0,
+            total_light_sleep_time_milli: 0,
+            total_slow_wave_sleep_time_milli: 0,
+            total_rem_sleep_time_milli: 0
+          }
+        };
       }
       return null;
     } catch (error: any) {
@@ -155,6 +183,8 @@ export class WhoopApiService {
   async getTodaysStrain(accessToken: string): Promise<WhoopStrainData | null> {
     try {
       const today = new Date().toISOString().split('T')[0];
+      console.log('Fetching WHOOP strain data for:', today);
+      
       const response = await axios.get(`${WHOOP_API_BASE}/developer/v1/cycle`, {
         headers: this.getAuthHeaders(accessToken),
         params: {
@@ -163,8 +193,17 @@ export class WhoopApiService {
         }
       });
 
+      console.log('WHOOP strain response:', JSON.stringify(response.data, null, 2));
+
       if (response.data.records && response.data.records.length > 0) {
-        return response.data.records[0].score;
+        const record = response.data.records[0];
+        console.log('Strain record:', record);
+        return {
+          strain: record.score?.strain || 0,
+          kilojoule: record.score?.kilojoule || 0,
+          average_heart_rate: record.score?.average_heart_rate || 0,
+          max_heart_rate: record.score?.max_heart_rate || 0
+        };
       }
       return null;
     } catch (error: any) {

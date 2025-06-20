@@ -39,12 +39,20 @@ export class WhoopTokenStorage {
   }
 
   setToken(userId: string, tokenData: WhoopTokenData) {
+    console.log('Storing WHOOP token for user:', userId);
+    console.log('Token data:', { 
+      has_access_token: !!tokenData.access_token,
+      expires_at: tokenData.expires_at ? new Date(tokenData.expires_at) : 'no expiration'
+    });
     this.tokens.set(userId, tokenData);
     this.saveTokens();
+    console.log('Token stored successfully, total tokens:', this.tokens.size);
   }
 
   getToken(userId: string): WhoopTokenData | undefined {
-    return this.tokens.get(userId);
+    const token = this.tokens.get(userId);
+    console.log('Getting token for user:', userId, 'found:', !!token);
+    return token;
   }
 
   // For simplicity, use default user for now
