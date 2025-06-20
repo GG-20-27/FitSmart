@@ -64,16 +64,31 @@
 @layer components {
   .animate-fade-in {
     animation: fadeIn 0.6s ease-out forwards;
+    opacity: 0;
   }
   
   .animate-slide-up {
     animation: slideUp 0.8s ease-out forwards;
+    opacity: 0;
   }
   
   .gradient-glow {
     background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.1));
     backdrop-filter: blur(10px);
     border: 1px solid rgba(59, 130, 246, 0.2);
+  }
+
+  .glassy-card {
+    background: rgba(30, 41, 59, 0.4);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    box-shadow: 
+      0 4px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  }
+
+  .hover\:scale-102:hover {
+    transform: scale(1.02);
   }
 }
 
