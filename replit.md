@@ -17,8 +17,8 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 ### Backend Architecture
 - **Runtime**: Node.js with TypeScript
 - **Framework**: Express.js for API server
-- **Database**: PostgreSQL with Drizzle ORM
-- **File Storage**: Local file system for meal image uploads
+- **Database**: PostgreSQL with Drizzle ORM (migrated from in-memory storage)
+- **File Storage**: Local file system for meal image uploads in `/uploads` directory
 - **Development**: tsx for TypeScript execution in development
 
 ### Project Structure
@@ -117,6 +117,11 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- June 19, 2025: Added PostgreSQL database support
+  - Migrated from in-memory storage to DatabaseStorage class using Drizzle ORM
+  - Created database tables: users, meals, whoop_data
+  - All API endpoints now persist data to PostgreSQL
+  - Verified database integration with successful meal uploads and WHOOP data storage
 - June 19, 2025: Completed FitScore GPT API implementation with exact specifications
   - WHOOP endpoint returns consistent mock data (recovery: 68, sleep: 75, strain: 12.3, HR: 60)
   - Meal upload accepts 'mealPhotos' field, stores in /uploads with timestamps

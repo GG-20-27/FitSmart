@@ -8,6 +8,8 @@ import fs from "fs";
 import cors from "cors";
 import { z } from "zod";
 import type { WhoopTodayResponse, MealResponse, ApiStatusResponse } from "@shared/schema";
+import { whoopApiService } from "./whoopApiService";
+import { whoopTokenStorage } from "./whoopTokenStorage";
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -41,15 +43,15 @@ const upload = multer({
   }
 });
 
-// Mock WHOOP API function - returns consistent mock data
+// Fetch live WHOOP data using OAuth access token
 async function fetchWhoopData(): Promise<WhoopTodayResponse> {
-  // Return mock data as specified
-  return {
-    recovery_score: 68,
-    sleep_score: 75,
-    strain_score: 12.3,
-    resting_heart_rate: 60
-  };
+  try {
+    const data = await whoopApiService.getTodaysData();
+    return data;
+  } catch (error) {
+    console.error('Failed to fetch live WHOOP data:', error);
+    throw error;
+  }
 }
 
 function getTodayDate(): string {
@@ -69,11 +71,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Log API examples on startup
   console.log('\n🚀 FitScore GPT API Endpoints:');
   console.log('📊 Health Check: GET /');
+  console.log('🔐 WHOOP Login: GET /api/whoop/login');
+  console.log('🔄 WHOOP Callback: GET /api/whoop/callback');
   console.log('🏃 WHOOP Data: GET /api/whoop/today');
   console.log('📸 Upload Meals: POST /api/meals (field: mealPhotos)');
   console.log('🍽️ Today\'s Meals: GET /api/meals/today');
   console.log('\n📝 Test with curl:');
   console.log('curl http://localhost:5000/');
+  console.log('curl http://localhost:5000/api/whoop/login');
   console.log('curl http://localhost:5000/api/whoop/today');
   console.log('curl http://localhost:5000/api/meals/today');
   console.log('curl -F "mealPhotos=@image.jpg" http://localhost:5000/api/meals');
