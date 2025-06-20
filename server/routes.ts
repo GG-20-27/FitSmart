@@ -70,22 +70,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Log API examples on startup
   console.log('\n🚀 FitScore GPT API Endpoints:');
-  console.log('📊 Health Check: GET /');
+  console.log('📊 Health Check: GET /api/health');
   console.log('🔐 WHOOP Login: GET /api/whoop/login');
   console.log('🔄 WHOOP Callback: GET /api/whoop/callback');
   console.log('🏃 WHOOP Data: GET /api/whoop/today');
   console.log('📸 Upload Meals: POST /api/meals (field: mealPhotos)');
   console.log('🍽️ Today\'s Meals: GET /api/meals/today');
   console.log('\n📝 Test with curl:');
-  console.log('curl http://localhost:5000/');
+  console.log('curl http://localhost:5000/api/health');
   console.log('curl http://localhost:5000/api/whoop/login');
   console.log('curl http://localhost:5000/api/whoop/today');
   console.log('curl http://localhost:5000/api/meals/today');
   console.log('curl -F "mealPhotos=@image.jpg" http://localhost:5000/api/meals');
   console.log('');
 
-  // Health check endpoint
-  app.get('/', (req, res) => {
+  // Health check endpoint (moved from root to avoid conflicts with frontend)
+  app.get('/api/health', (req, res) => {
     const response: ApiStatusResponse = {
       status: "success",
       message: "✅ FitScore GPT API is running"
