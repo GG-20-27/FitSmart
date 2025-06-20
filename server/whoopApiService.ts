@@ -213,7 +213,7 @@ export class WhoopApiService {
   }
 
   async getTodaysData(): Promise<WhoopTodayData> {
-    const tokenData = whoopTokenStorage.getDefaultToken();
+    const tokenData = await whoopTokenStorage.getDefaultToken();
     
     if (!tokenData || !whoopTokenStorage.isTokenValid(tokenData)) {
       console.warn('No valid WHOOP access token found.');

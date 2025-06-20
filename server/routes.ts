@@ -212,9 +212,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // WHOOP authentication status endpoint
-  app.get('/api/whoop/status', (req, res) => {
+  app.get('/api/whoop/status', async (req, res) => {
     try {
-      const tokenData = whoopTokenStorage.getDefaultToken();
+      const tokenData = await whoopTokenStorage.getDefaultToken();
       
       if (!tokenData) {
         return res.json({
@@ -239,10 +239,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Debug endpoint to test OAuth URL generation
-  app.get('/api/whoop/debug', (req, res) => {
+  app.get('/api/whoop/debug', async (req, res) => {
     try {
       const oauthUrl = whoopApiService.getOAuthUrl();
-      const tokenData = whoopTokenStorage.getDefaultToken();
+      const tokenData = await whoopTokenStorage.getDefaultToken();
       res.json({
         oauth_url: oauthUrl,
         client_id: process.env.WHOOP_CLIENT_ID,
