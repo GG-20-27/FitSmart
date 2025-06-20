@@ -93,28 +93,28 @@
 
   /* Animated gradient backgrounds for weekly average cards */
   .gradient-recovery {
-    background: linear-gradient(135deg, #1E3A8A, #3B82F6);
-    background-size: 200% 200%;
+    background: linear-gradient(135deg, #1E3A8A, #1E40AF, #3B82F6);
+    background-size: 300% 300%;
     animation: gradientMove 6s ease-in-out infinite;
   }
 
   .gradient-strain {
-    background: linear-gradient(135deg, #B91C1C, #EF4444);
-    background-size: 200% 200%;
+    background: linear-gradient(135deg, #7F1D1D, #B91C1C, #DC2626);
+    background-size: 300% 300%;
     animation: gradientMove 6s ease-in-out infinite;
     animation-delay: 1.5s;
   }
 
   .gradient-sleep {
-    background: linear-gradient(135deg, #6D28D9, #A855F7);
-    background-size: 200% 200%;
+    background: linear-gradient(135deg, #581C87, #6D28D9, #7C3AED);
+    background-size: 300% 300%;
     animation: gradientMove 6s ease-in-out infinite;
     animation-delay: 3s;
   }
 
   .gradient-hrv {
-    background: linear-gradient(135deg, #047857, #10B981);
-    background-size: 200% 200%;
+    background: linear-gradient(135deg, #064E3B, #047857, #059669);
+    background-size: 300% 300%;
     animation: gradientMove 6s ease-in-out infinite;
     animation-delay: 4.5s;
   }

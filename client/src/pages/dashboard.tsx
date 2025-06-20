@@ -320,8 +320,8 @@ export default function Dashboard() {
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* Recovery Score - Large Circle */}
-              <Card className="glassy-card hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105 animate-fade-in">
+              {/* Recovery Score - Navy Blue Theme */}
+              <Card className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700/50 backdrop-blur-md hover:from-slate-700/80 hover:to-slate-800/80 transition-all duration-300 transform hover:scale-105 animate-fade-in shadow-xl">
                 <CardContent className="p-6">
                   <div className="flex flex-col items-center space-y-4">
                     <CircularProgress 
@@ -339,8 +339,8 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
 
-              {/* Strain Score */}
-              <Card className="glassy-card hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105 animate-fade-in" style={{ animationDelay: '0.1s' }}>
+              {/* Strain Score - Orange/Red Theme */}
+              <Card className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700/50 backdrop-blur-md hover:from-slate-700/80 hover:to-slate-800/80 transition-all duration-300 transform hover:scale-105 animate-fade-in shadow-xl" style={{ animationDelay: '0.1s' }}>
                 <CardContent className="p-6">
                   <div className="flex flex-col items-center space-y-4">
                     <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-500 rounded-full flex items-center justify-center shadow-lg">
@@ -359,8 +359,8 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
 
-              {/* Sleep Score */}
-              <Card className="glassy-card hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105 animate-fade-in" style={{ animationDelay: '0.2s' }}>
+              {/* Sleep Score - Purple Theme */}
+              <Card className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700/50 backdrop-blur-md hover:from-slate-700/80 hover:to-slate-800/80 transition-all duration-300 transform hover:scale-105 animate-fade-in shadow-xl" style={{ animationDelay: '0.2s' }}>
                 <CardContent className="p-6">
                   <div className="flex flex-col items-center space-y-4">
                     <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-full flex items-center justify-center shadow-lg">
@@ -388,8 +388,8 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
 
-              {/* HRV */}
-              <Card className="glassy-card hover:bg-slate-800/70 transition-all duration-300 transform hover:scale-105 animate-fade-in" style={{ animationDelay: '0.3s' }}>
+              {/* HRV - Green Theme */}
+              <Card className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700/50 backdrop-blur-md hover:from-slate-700/80 hover:to-slate-800/80 transition-all duration-300 transform hover:scale-105 animate-fade-in shadow-xl" style={{ animationDelay: '0.3s' }}>
                 <CardContent className="p-6">
                   <div className="flex flex-col items-center space-y-4">
                     <div className="w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-500 rounded-full flex items-center justify-center shadow-lg">
@@ -452,16 +452,16 @@ export default function Dashboard() {
                   boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(30, 58, 138, 0.3)'
                 }}
               >
-                <CardContent className="p-6">
+                <CardContent className="p-6 relative">
                   <div className="flex items-center space-x-3 mb-3">
-                    <Heart className="h-5 w-5 text-white/90" />
-                    <span className="text-sm font-medium text-white/90">Avg Recovery</span>
+                    <Heart className="h-5 w-5 text-white drop-shadow-sm" />
+                    <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Recovery</span>
                   </div>
-                  <div className="text-3xl font-bold text-white">
+                  <div className="text-3xl font-bold text-white drop-shadow-md">
                     {whoopSummary.avg_recovery !== null ? (
                       <CountUp end={whoopSummary.avg_recovery} suffix="%" duration={1500} />
                     ) : (
-                      <span className="text-white/70">N/A</span>
+                      <span className="text-white/80">N/A</span>
                     )}
                   </div>
                 </CardContent>
@@ -475,16 +475,16 @@ export default function Dashboard() {
                   animationDelay: '0.1s'
                 }}
               >
-                <CardContent className="p-6">
+                <CardContent className="p-6 relative">
                   <div className="flex items-center space-x-3 mb-3">
-                    <Zap className="h-5 w-5 text-white/90" />
-                    <span className="text-sm font-medium text-white/90">Avg Strain</span>
+                    <Zap className="h-5 w-5 text-white drop-shadow-sm" />
+                    <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Strain</span>
                   </div>
-                  <div className="text-3xl font-bold text-white">
+                  <div className="text-3xl font-bold text-white drop-shadow-md">
                     {whoopSummary.avg_strain !== null ? (
                       <CountUp end={whoopSummary.avg_strain} decimals={1} duration={1500} />
                     ) : (
-                      <span className="text-white/70">N/A</span>
+                      <span className="text-white/80">N/A</span>
                     )}
                   </div>
                 </CardContent>
@@ -498,16 +498,16 @@ export default function Dashboard() {
                   animationDelay: '0.2s'
                 }}
               >
-                <CardContent className="p-6">
+                <CardContent className="p-6 relative">
                   <div className="flex items-center space-x-3 mb-3">
-                    <Moon className="h-5 w-5 text-white/90" />
-                    <span className="text-sm font-medium text-white/90">Avg Sleep</span>
+                    <Moon className="h-5 w-5 text-white drop-shadow-sm" />
+                    <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Sleep</span>
                   </div>
-                  <div className="text-3xl font-bold text-white">
+                  <div className="text-3xl font-bold text-white drop-shadow-md">
                     {whoopSummary.avg_sleep !== null ? (
                       <CountUp end={whoopSummary.avg_sleep} suffix="%" duration={1500} />
                     ) : (
-                      <span className="text-white/70">N/A</span>
+                      <span className="text-white/80">N/A</span>
                     )}
                   </div>
                 </CardContent>
@@ -521,16 +521,16 @@ export default function Dashboard() {
                   animationDelay: '0.3s'
                 }}
               >
-                <CardContent className="p-6">
+                <CardContent className="p-6 relative">
                   <div className="flex items-center space-x-3 mb-3">
-                    <Activity className="h-5 w-5 text-white/90" />
-                    <span className="text-sm font-medium text-white/90">Avg HRV</span>
+                    <Activity className="h-5 w-5 text-white drop-shadow-sm" />
+                    <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg HRV</span>
                   </div>
-                  <div className="text-3xl font-bold text-white">
+                  <div className="text-3xl font-bold text-white drop-shadow-md">
                     {whoopSummary.avg_hrv !== null ? (
                       <CountUp end={whoopSummary.avg_hrv} suffix=" ms" decimals={1} duration={1500} />
                     ) : (
-                      <span className="text-white/70">N/A</span>
+                      <span className="text-white/80">N/A</span>
                     )}
                   </div>
                 </CardContent>
