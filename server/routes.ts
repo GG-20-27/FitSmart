@@ -385,7 +385,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Log daily stats to userProfile.json
       const dailyEntry = {
-        date: today,
+        date: todayDate,
         recovery_score: whoopData.recovery_score,
         strain_score: whoopData.strain,
         sleep_score: whoopData.sleep_score,
