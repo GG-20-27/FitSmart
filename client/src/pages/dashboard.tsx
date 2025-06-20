@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -15,18 +15,33 @@ import {
   RefreshCw,
   Info,
   Upload,
-  Plus
+  Plus,
+  ExternalLink,
+  AlertCircle
 } from "lucide-react";
+import { queryClient } from "@/lib/queryClient";
 import { HealthMetrics } from "@/components/health-metrics";
 import { MealUpload } from "@/components/meal-upload";
 import { ApiStatus } from "@/components/api-status";
 import { WhoopAuth } from "@/components/whoop-auth";
 import type { WhoopTodayResponse, MealResponse, Meal } from "@shared/schema";
 
+interface WhoopAuthStatus {
+  authenticated: boolean;
+  message: string;
+  auth_url?: string;
+  expires_at?: number;
+}
+
 export default function Dashboard() {
   const { data: whoopData, isLoading: whoopLoading, refetch: refetchWhoop, error: whoopError } = useQuery<WhoopTodayResponse>({
     queryKey: ['/api/whoop/today'],
     retry: false, // Don't retry on 401 errors
+  });
+
+  const { data: whoopAuthStatus, isLoading: authLoading } = useQuery<WhoopAuthStatus>({
+    queryKey: ['/api/whoop/status'],
+    refetchInterval: 5000, // Check status every 5 seconds
   });
 
   const { data: todayMeals, isLoading: mealsLoading, refetch: refetchMeals } = useQuery<string[]>({
@@ -37,9 +52,29 @@ export default function Dashboard() {
     queryKey: ['/api/meals'],
   });
 
+  const connectWhoopMutation = useMutation({
+    mutationFn: () => {
+      const authUrl = window.location.origin + '/api/whoop/login';
+      const popup = window.open(authUrl, 'whoop-auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
+      
+      return new Promise<void>((resolve) => {
+        const pollInterval = setInterval(() => {
+          if (popup?.closed) {
+            clearInterval(pollInterval);
+            // Refresh auth status and data
+            queryClient.invalidateQueries({ queryKey: ['/api/whoop/status'] });
+            queryClient.invalidateQueries({ queryKey: ['/api/whoop/today'] });
+            resolve();
+          }
+        }, 1000);
+      });
+    }
+  });
+
   const mealsCount = todayMeals?.length || 0;
   const totalStorage = allMeals?.reduce((acc, meal) => acc + meal.size, 0) || 0;
   const storageInMB = (totalStorage / (1024 * 1024)).toFixed(1);
+  const isWhoopConnected = whoopAuthStatus?.authenticated;
 
   const handleRefreshData = async () => {
     await Promise.all([refetchWhoop(), refetchMeals()]);
@@ -62,6 +97,17 @@ export default function Dashboard() {
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                 <span className="text-sm text-green-700 font-medium">API Running</span>
               </div>
+              {!isWhoopConnected && !authLoading && (
+                <Button 
+                  onClick={() => connectWhoopMutation.mutate()}
+                  disabled={connectWhoopMutation.isPending}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  size="sm"
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  {connectWhoopMutation.isPending ? 'Connecting...' : 'Connect WHOOP'}
+                </Button>
+              )}
               <Button 
                 variant="ghost" 
                 size="sm" 
@@ -98,12 +144,40 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-slate-600 text-sm font-medium">WHOOP Status</p>
-                  <p className="text-2xl font-bold text-blue-600">Connected</p>
+                  {authLoading ? (
+                    <div className="flex items-center space-x-2">
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      <span className="text-lg font-bold text-slate-600">Checking...</span>
+                    </div>
+                  ) : (
+                    <p className={`text-2xl font-bold ${isWhoopConnected ? 'text-green-600' : 'text-orange-600'}`}>
+                      {isWhoopConnected ? 'Connected' : 'Not Connected'}
+                    </p>
+                  )}
                 </div>
-                <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
-                  <Link className="h-6 w-6 text-blue-600" />
+                <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                  isWhoopConnected ? 'bg-green-50' : 'bg-orange-50'
+                }`}>
+                  {isWhoopConnected ? (
+                    <Link className="h-6 w-6 text-green-600" />
+                  ) : (
+                    <AlertCircle className="h-6 w-6 text-orange-600" />
+                  )}
                 </div>
               </div>
+              {!isWhoopConnected && !authLoading && (
+                <div className="mt-4">
+                  <Button 
+                    onClick={() => connectWhoopMutation.mutate()}
+                    disabled={connectWhoopMutation.isPending}
+                    className="w-full bg-blue-600 hover:bg-blue-700"
+                    size="sm"
+                  >
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    {connectWhoopMutation.isPending ? 'Opening WHOOP...' : 'Connect WHOOP Account'}
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
 
