@@ -39,7 +39,7 @@ export default function Dashboard() {
     retry: false, // Don't retry on 401 errors
   });
 
-  const { data: whoopAuthStatus, isLoading: authLoading } = useQuery<WhoopAuthStatus>({
+  const { data: whoopAuthStatus, isLoading: authLoading, error: authError } = useQuery<WhoopAuthStatus>({
     queryKey: ['/api/whoop/status'],
     refetchInterval: 5000, // Check status every 5 seconds
   });
@@ -51,6 +51,12 @@ export default function Dashboard() {
   const { data: allMeals } = useQuery<Meal[]>({
     queryKey: ['/api/meals'],
   });
+
+  // Define variables after queries
+  const isWhoopConnected = whoopAuthStatus?.authenticated;
+  const mealsCount = todayMeals?.length || 0;
+  const totalStorage = allMeals?.reduce((acc, meal) => acc + meal.size, 0) || 0;
+  const storageInMB = (totalStorage / (1024 * 1024)).toFixed(1);
 
   const connectWhoopMutation = useMutation({
     mutationFn: () => {
@@ -70,11 +76,6 @@ export default function Dashboard() {
       });
     }
   });
-
-  const mealsCount = todayMeals?.length || 0;
-  const totalStorage = allMeals?.reduce((acc, meal) => acc + meal.size, 0) || 0;
-  const storageInMB = (totalStorage / (1024 * 1024)).toFixed(1);
-  const isWhoopConnected = whoopAuthStatus?.authenticated;
 
   const handleRefreshData = async () => {
     await Promise.all([refetchWhoop(), refetchMeals()]);
@@ -97,17 +98,15 @@ export default function Dashboard() {
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                 <span className="text-sm text-green-700 font-medium">API Running</span>
               </div>
-              {!isWhoopConnected && !authLoading && (
-                <Button 
-                  onClick={() => connectWhoopMutation.mutate()}
-                  disabled={connectWhoopMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
-                  size="sm"
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  {connectWhoopMutation.isPending ? 'Connecting...' : 'Connect WHOOP'}
-                </Button>
-              )}
+              <Button 
+                onClick={() => connectWhoopMutation.mutate()}
+                disabled={connectWhoopMutation.isPending}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                size="sm"
+              >
+                <ExternalLink className="h-4 w-4 mr-2" />
+                {connectWhoopMutation.isPending ? 'Connecting...' : 'Connect WHOOP'}
+              </Button>
               <Button 
                 variant="ghost" 
                 size="sm" 
