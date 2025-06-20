@@ -1,15 +1,19 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { Heart, Moon, Zap, Activity, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Heart, Moon, Zap, Activity, RefreshCw, AlertCircle, ExternalLink } from "lucide-react";
 import type { WhoopTodayResponse } from "@shared/schema";
 
 interface HealthMetricsProps {
   data?: WhoopTodayResponse;
   isLoading: boolean;
+  error?: any;
+  onRetry?: () => void;
 }
 
-export function HealthMetrics({ data, isLoading }: HealthMetricsProps) {
+export function HealthMetrics({ data, isLoading, error, onRetry }: HealthMetricsProps) {
   if (isLoading) {
     return (
       <Card>
@@ -31,6 +35,39 @@ export function HealthMetrics({ data, isLoading }: HealthMetricsProps) {
     );
   }
 
+  if (error) {
+    const isAuthError = error?.response?.status === 401;
+    
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Today's Health Metrics</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Alert>
+            <AlertCircle className="h-4 w-4" />
+            <AlertDescription>
+              {isAuthError 
+                ? "WHOOP authentication required. Please connect your WHOOP account above."
+                : "Unable to fetch health data. Please check your connection and try again."
+              }
+            </AlertDescription>
+          </Alert>
+          {onRetry && !isAuthError && (
+            <Button 
+              onClick={onRetry} 
+              variant="outline" 
+              className="mt-4"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (!data) {
     return (
       <Card>
@@ -40,9 +77,19 @@ export function HealthMetrics({ data, isLoading }: HealthMetricsProps) {
         <CardContent>
           <div className="text-center py-8">
             <Activity className="h-12 w-12 text-slate-400 mx-auto mb-4" />
-            <p className="text-slate-600">Unable to load health data</p>
-            <p className="text-sm text-slate-500 mt-1">Check WHOOP API connection</p>
+            <p className="text-slate-600">No health data available</p>
+            <p className="text-sm text-slate-500 mt-1">Ensure WHOOP account is connected</p>
           </div>
+          {onRetry && (
+            <Button 
+              onClick={onRetry} 
+              variant="outline" 
+              className="mt-4"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          )}
         </CardContent>
       </Card>
     );

@@ -20,11 +20,13 @@ import {
 import { HealthMetrics } from "@/components/health-metrics";
 import { MealUpload } from "@/components/meal-upload";
 import { ApiStatus } from "@/components/api-status";
+import { WhoopAuth } from "@/components/whoop-auth";
 import type { WhoopTodayResponse, MealResponse, Meal } from "@shared/schema";
 
 export default function Dashboard() {
-  const { data: whoopData, isLoading: whoopLoading, refetch: refetchWhoop } = useQuery<WhoopTodayResponse>({
+  const { data: whoopData, isLoading: whoopLoading, refetch: refetchWhoop, error: whoopError } = useQuery<WhoopTodayResponse>({
     queryKey: ['/api/whoop/today'],
+    retry: false, // Don't retry on 401 errors
   });
 
   const { data: todayMeals, isLoading: mealsLoading, refetch: refetchMeals } = useQuery<string[]>({
@@ -136,7 +138,15 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
           {/* WHOOP Health Data */}
-          <HealthMetrics data={whoopData} isLoading={whoopLoading} />
+          <div className="space-y-6">
+            <WhoopAuth />
+            <HealthMetrics 
+              data={whoopData} 
+              isLoading={whoopLoading} 
+              error={whoopError}
+              onRetry={() => refetchWhoop()}
+            />
+          </div>
 
           {/* Meal Management */}
           <div className="space-y-8">
