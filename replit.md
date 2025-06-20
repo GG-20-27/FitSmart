@@ -118,17 +118,16 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
-- June 20, 2025: Implemented complete WHOOP OAuth authentication and live data integration
-  - Added WHOOP OAuth flow with /api/whoop/login and /api/whoop/callback endpoints
-  - Integrated live WHOOP API data fetching for recovery, sleep, strain, and heart rate metrics
-  - Created WhoopApiService for handling API calls to WHOOP's production endpoints
-  - Implemented secure token storage with expiration handling and validation
-  - Updated frontend with WhoopAuth component for seamless OAuth authentication
-  - Enhanced HealthMetrics component with proper authentication error handling
-  - /api/whoop/today endpoint now fetches live data from WHOOP API when authenticated
-  - Fixed OAuth implementation with proper form encoding and state parameter for security
-  - Added prominent "Connect WHOOP" buttons in dashboard header and status card
-  - Resolved frontend routing issues by moving health check endpoint from root to /api/health
+- June 20, 2025: Completed WHOOP OAuth authentication system with database persistence
+  - Fixed WHOOP token persistence by migrating from file-based to PostgreSQL database storage
+  - Updated all token storage methods to use database with proper async handling
+  - Added WHOOP tokens table to database schema for persistent authentication
+  - Resolved authentication errors and implemented comprehensive endpoint testing
+  - WHOOP OAuth authentication working correctly (user profile endpoint returns 200)
+  - Identified WHOOP API data endpoint limitation: all data endpoints return 404 errors
+  - Authentication persists across server restarts with database storage
+  - Note: WHOOP data endpoints may require additional developer partnership or API access beyond standard OAuth
+  - System ready for integration when WHOOP provides access to data endpoints
 - June 19, 2025: Added PostgreSQL database support
   - Migrated from in-memory storage to DatabaseStorage class using Drizzle ORM
   - Created database tables: users, meals, whoop_data
