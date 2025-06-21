@@ -191,7 +191,7 @@ export default function Dashboard() {
 
   const refreshData = () => {
     queryClient.invalidateQueries({ queryKey: ['/api/whoop/today'] });
-    queryClient.invalidateQueries({ queryKey: ['/api/whoop/summary'] });
+    queryClient.invalidateQueries({ queryKey: ['/api/whoop/weekly'] });
     setLastSync(new Date());
   };
 
@@ -438,10 +438,10 @@ export default function Dashboard() {
               ))}
             </div>
           ) : whoopSummary && (
-            whoopSummary.avg_recovery !== null || 
-            whoopSummary.avg_strain !== null || 
-            whoopSummary.avg_sleep !== null || 
-            whoopSummary.avg_hrv !== null
+            whoopSummary.avgRecovery !== null || 
+            whoopSummary.avgStrain !== null || 
+            whoopSummary.avgSleep !== null || 
+            whoopSummary.avgHRV !== null
           ) ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {/* Avg Recovery - Navy */}
@@ -457,8 +457,8 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Recovery</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary.avg_recovery !== null ? (
-                      <CountUp end={whoopSummary.avg_recovery} suffix="%" duration={1500} />
+                    {whoopSummary.avgRecovery !== null ? (
+                      <CountUp end={whoopSummary.avgRecovery} suffix="%" duration={1500} />
                     ) : (
                       <span className="text-white/80">N/A</span>
                     )}
@@ -480,8 +480,8 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Strain</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary.avg_strain !== null ? (
-                      <CountUp end={whoopSummary.avg_strain} decimals={1} duration={1500} />
+                    {whoopSummary.avgStrain !== null ? (
+                      <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1500} />
                     ) : (
                       <span className="text-white/80">N/A</span>
                     )}
@@ -503,8 +503,8 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Sleep</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary.avg_sleep !== null ? (
-                      <CountUp end={whoopSummary.avg_sleep} suffix="%" duration={1500} />
+                    {whoopSummary.avgSleep !== null ? (
+                      <CountUp end={whoopSummary.avgSleep} suffix="%" duration={1500} />
                     ) : (
                       <span className="text-white/80">N/A</span>
                     )}
@@ -526,8 +526,8 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg HRV</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary.avg_hrv !== null ? (
-                      <CountUp end={whoopSummary.avg_hrv} suffix=" ms" decimals={1} duration={1500} />
+                    {whoopSummary.avgHRV !== null ? (
+                      <CountUp end={whoopSummary.avgHRV} suffix=" ms" decimals={1} duration={1500} />
                     ) : (
                       <span className="text-white/80">N/A</span>
                     )}
