@@ -437,12 +437,7 @@ export default function Dashboard() {
                 </Card>
               ))}
             </div>
-          ) : whoopSummary && (
-            whoopSummary.avgRecovery !== null || 
-            whoopSummary.avgStrain !== null || 
-            whoopSummary.avgSleep !== null || 
-            whoopSummary.avgHRV !== null
-          ) ? (
+          ) : whoopSummary ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {/* Avg Recovery - Navy */}
               <Card 
@@ -547,13 +542,11 @@ export default function Dashboard() {
             </Card>
           )}
           
-          {whoopSummary && (
-            <div className="text-center mt-6">
-              <p className="text-sm text-slate-500">
-                Averages calculated from the past {whoopSummary.period_days} days of real WHOOP data
-              </p>
-            </div>
-          )}
+          <div className="text-center mt-6">
+            <p className="text-sm text-slate-500">
+              Averages calculated from the past 7 days of real WHOOP data
+            </p>
+          </div>
         </div>
       </div>
     </div>
