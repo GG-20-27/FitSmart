@@ -174,13 +174,14 @@ export class WhoopApiService {
 
   async getLatestSleepScore(): Promise<number | null> {
     try {
-      // Get recent cycles to find latest sleep data
+      // Get recent cycles - sleep data is typically in previous cycle
       const headers = await this.authHeader();
-      const response = await axios.get(`${BASE}/cycle?limit=10`, { headers });
+      const response = await axios.get(`${BASE}/cycle?limit=5`, { headers });
       
-      if (response.data.records) {
-        // Check each cycle for sleep data, starting from most recent
-        for (const cycle of response.data.records) {
+      if (response.data.records && response.data.records.length > 1) {
+        // Start from second cycle (previous night) as sleep is processed from previous cycle
+        for (let i = 1; i < response.data.records.length; i++) {
+          const cycle = response.data.records[i];
           try {
             const sleepData = await this.getSleep(cycle.id);
             if (sleepData?.score?.sleep_score) {
@@ -199,6 +200,98 @@ export class WhoopApiService {
     } catch (error) {
       console.error('Error fetching latest sleep score:', error);
       return null;
+    }
+  }
+
+  async getWeeklyAverages(): Promise<{
+    avgRecovery: number | null;
+    avgStrain: number | null;
+    avgSleep: number | null;
+    avgHRV: number | null;
+  }> {
+    try {
+      const headers = await this.authHeader();
+      
+      // Get cycles from the past 7 days
+      const endDate = new Date();
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7);
+      
+      const response = await axios.get(
+        `${BASE}/cycle?start=${startDate.toISOString()}&end=${endDate.toISOString()}`, 
+        { headers }
+      );
+      
+      if (!response.data.records || response.data.records.length === 0) {
+        console.log('No cycles found for weekly averages');
+        return { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
+      }
+      
+      const cycles = response.data.records;
+      console.log(`Processing ${cycles.length} cycles for weekly averages`);
+      
+      const recoveryScores: number[] = [];
+      const strainScores: number[] = [];
+      const sleepScores: number[] = [];
+      const hrvScores: number[] = [];
+      
+      // Process each cycle
+      for (const cycle of cycles) {
+        try {
+          // Get recovery data
+          const recovery = await this.getRecovery(cycle.id);
+          if (recovery?.score?.recovery_score) {
+            recoveryScores.push(recovery.score.recovery_score);
+          }
+          if (recovery?.score?.hrv_rmssd_milli) {
+            hrvScores.push(recovery.score.hrv_rmssd_milli);
+          }
+          
+          // Get strain data from cycle
+          if (cycle.score?.strain) {
+            strainScores.push(cycle.score.strain);
+          }
+          
+          // Get sleep data
+          try {
+            const sleep = await this.getSleep(cycle.id);
+            if (sleep?.score?.sleep_score) {
+              sleepScores.push(sleep.score.sleep_score);
+            }
+          } catch (error) {
+            // Sleep data often missing, continue silently
+          }
+          
+        } catch (error) {
+          console.error(`Error processing cycle ${cycle.id}:`, error);
+          // Continue with other cycles
+        }
+      }
+      
+      // Calculate averages
+      const avgRecovery = recoveryScores.length > 0 
+        ? Math.round((recoveryScores.reduce((a, b) => a + b, 0) / recoveryScores.length) * 10) / 10
+        : null;
+      
+      const avgStrain = strainScores.length > 0 
+        ? Math.round((strainScores.reduce((a, b) => a + b, 0) / strainScores.length) * 10) / 10
+        : null;
+      
+      const avgSleep = sleepScores.length > 0 
+        ? Math.round((sleepScores.reduce((a, b) => a + b, 0) / sleepScores.length) * 10) / 10
+        : null;
+      
+      const avgHRV = hrvScores.length > 0 
+        ? Math.round((hrvScores.reduce((a, b) => a + b, 0) / hrvScores.length) * 10) / 10
+        : null;
+      
+      console.log(`Weekly averages calculated: Recovery: ${avgRecovery}%, Strain: ${avgStrain}, Sleep: ${avgSleep}%, HRV: ${avgHRV}ms`);
+      
+      return { avgRecovery, avgStrain, avgSleep, avgHRV };
+      
+    } catch (error) {
+      console.error('Error calculating weekly averages:', error);
+      return { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
     }
   }
 

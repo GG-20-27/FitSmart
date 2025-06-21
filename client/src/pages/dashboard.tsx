@@ -26,11 +26,10 @@ interface WhoopAuthStatus {
 }
 
 interface WhoopSummary {
-  period_days: number;
-  avg_recovery: number | null;
-  avg_strain: number | null;
-  avg_sleep: number | null;
-  avg_hrv: number | null;
+  avgRecovery: number | null;
+  avgStrain: number | null;
+  avgSleep: number | null;
+  avgHRV: number | null;
 }
 
 interface CountUpProps {
@@ -164,7 +163,7 @@ export default function Dashboard() {
   });
 
   const { data: whoopSummary, isLoading: summaryLoading } = useQuery<WhoopSummary>({
-    queryKey: ['/api/whoop/summary'],
+    queryKey: ['/api/whoop/weekly'],
     enabled: whoopAuthStatus?.authenticated === true,
     refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
   });
@@ -182,7 +181,7 @@ export default function Dashboard() {
             clearInterval(pollInterval);
             queryClient.invalidateQueries({ queryKey: ['/api/whoop/status'] });
             queryClient.invalidateQueries({ queryKey: ['/api/whoop/today'] });
-            queryClient.invalidateQueries({ queryKey: ['/api/whoop/summary'] });
+            queryClient.invalidateQueries({ queryKey: ['/api/whoop/weekly'] });
             resolve();
           }
         }, 1000);

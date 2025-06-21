@@ -425,6 +425,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // WHOOP weekly averages endpoint
+  app.get('/api/whoop/weekly', async (req, res) => {
+    try {
+      console.log('Fetching weekly WHOOP averages...');
+      
+      // Token validation
+      const tokenData = await whoopTokenStorage.getDefaultToken();
+      if (!tokenData?.access_token) {
+        return res.status(401).json({ error: 'Missing WHOOP access token' });
+      }
+
+      if (!whoopTokenStorage.isTokenValid(tokenData)) {
+        console.warn('WHOOP access token has expired. Re-authentication required.');
+        return res.status(401).json({ 
+          error: 'WHOOP token expired',
+          message: 'Please visit /api/whoop/login to re-authenticate with WHOOP',
+          auth_url: '/api/whoop/login'
+        });
+      }
+      
+      const weeklyData = await whoopApiService.getWeeklyAverages();
+      
+      console.log('Weekly WHOOP averages retrieved successfully');
+      res.json(weeklyData);
+    } catch (error: any) {
+      console.error('Error in /api/whoop/weekly:', error.message);
+      
+      if (error.response) {
+        console.error('WHOOP API Error Response:', {
+          status: error.response.status,
+          data: error.response.data,
+          endpoint: error.config?.url
+        });
+      }
+      
+      res.status(500).json({ 
+        error: 'Failed to fetch weekly WHOOP averages',
+        details: error.message
+      });
+    }
+  });
+
   // WHOOP summary analytics endpoint
   app.get('/api/whoop/summary', async (req, res) => {
     try {
