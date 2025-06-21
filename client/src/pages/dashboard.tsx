@@ -162,11 +162,13 @@ export default function Dashboard() {
     refetchInterval: 30000, // Check auth status every 30 seconds
   });
 
-  const { data: whoopSummary, isLoading: summaryLoading } = useQuery<WhoopSummary>({
+  const { data: whoopSummary, isLoading: summaryLoading, error: summaryError } = useQuery<WhoopSummary>({
     queryKey: ['/api/whoop/weekly'],
     enabled: whoopAuthStatus?.authenticated === true,
     refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
   });
+
+
 
   const isWhoopConnected = whoopAuthStatus?.authenticated;
 
