@@ -172,6 +172,50 @@ export class WhoopApiService {
     }
   }
 
+  async getLatestSleepData(): Promise<{ sleep_score: number | null; cycleDate: string | null }> {
+    try {
+      const headers = await this.authHeader();
+      const response = await axios.get(`${BASE}/cycle?limit=3`, { headers });
+      
+      if (!response.data.records || response.data.records.length === 0) {
+        return { sleep_score: null, cycleDate: null };
+      }
+
+      const cycles = response.data.records;
+
+      // Check today's cycle first
+      const todayCycle = cycles[0];
+      if (todayCycle?.id) {
+        const todaySleep = await this.getSleep(todayCycle.id);
+        if (todaySleep?.score?.sleep_score) {
+          return { 
+            sleep_score: todaySleep.score.sleep_score, 
+            cycleDate: todayCycle.start 
+          };
+        }
+      }
+
+      // If today's sleep is null, check yesterday's cycle
+      if (cycles.length > 1) {
+        const yesterdayCycle = cycles[1];
+        if (yesterdayCycle?.id) {
+          const yesterdaySleep = await this.getSleep(yesterdayCycle.id);
+          if (yesterdaySleep?.score?.sleep_score) {
+            return { 
+              sleep_score: yesterdaySleep.score.sleep_score, 
+              cycleDate: yesterdayCycle.start 
+            };
+          }
+        }
+      }
+
+      return { sleep_score: null, cycleDate: null };
+    } catch (error) {
+      console.error('Error fetching latest sleep data:', error);
+      return { sleep_score: null, cycleDate: null };
+    }
+  }
+
   async getLatestSleepScore(): Promise<number | null> {
     try {
       // Get recent cycles - sleep data is typically in previous cycle
@@ -296,15 +340,62 @@ export class WhoopApiService {
   }
 
   async getTodaysData(): Promise<WhoopTodayData> {
-    const tokenData = await whoopTokenStorage.getDefaultToken();
-    
-    if (!tokenData?.access_token) {
-      throw new Error('Missing WHOOP access token');
-    }
-
-    console.log('Fetching WHOOP data with valid token...');
-
     try {
+      // Get the latest cycle
+      const latestCycle = await this.getLatestCycle();
+      if (!latestCycle) {
+        console.log('No cycles found');
+        return {};
+      }
+
+      console.log(`Using cycle: ${latestCycle.id}`);
+
+      // Get recovery data
+      const recovery = await this.getRecovery(latestCycle.id);
+      console.log('Recovery data found for cycle:', latestCycle.id);
+
+      // Get latest sleep data (today or yesterday)
+      const sleepData = await this.getLatestSleepData();
+
+      const result: WhoopTodayData = {
+        cycle_id: latestCycle.id,
+        strain: latestCycle.score?.strain || null,
+        recovery_score: recovery?.score?.recovery_score || null,
+        hrv: recovery?.score?.hrv_rmssd_milli || null,
+        resting_heart_rate: recovery?.score?.resting_heart_rate || null,
+        sleep_score: sleepData.sleep_score,
+        raw: {
+          cycle: latestCycle,
+          recovery: recovery,
+          sleep: sleepData
+        }
+      };
+
+      // Store in database for historical tracking
+      const today = getTodayDate();
+      const dataToStore = {
+        date: today,
+        cycle_id: result.cycle_id,
+        strain: result.strain,
+        recovery_score: result.recovery_score,
+        hrv: result.hrv,
+        resting_heart_rate: result.resting_heart_rate,
+        sleep_score: result.sleep_score,
+        raw_data: result.raw
+      };
+
+      // Log the daily stats before storing
+      logDailyStats(dataToStore);
+      
+      await storage.createOrUpdateWhoopData(dataToStore);
+      console.log('WHOOP data retrieved successfully');
+
+      return result;
+    } catch (error) {
+      console.error('Error fetching WHOOP data:', error);
+      return {};
+    }
+  }
       // Fetch latest cycle first
       const cycle = await this.getLatestCycle();
       if (!cycle) {

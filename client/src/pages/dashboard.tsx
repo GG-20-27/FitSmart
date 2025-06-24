@@ -120,7 +120,7 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
   return (
     <div className={`flex items-center justify-center ${className}`}>
       <img 
-        src="/logo.png" 
+        src="/logo.svg" 
         alt="FitScore logo" 
         className="logo"
       />
