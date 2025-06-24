@@ -396,48 +396,6 @@ export class WhoopApiService {
       return {};
     }
   }
-      // Fetch latest cycle first
-      const cycle = await this.getLatestCycle();
-      if (!cycle) {
-        console.log('No cycle data available');
-        return {};
-      }
-
-      // Fetch recovery and sleep based on cycle ID
-      const [recovery, sleep] = await Promise.all([
-        this.getRecovery(cycle.id),
-        this.getSleep(cycle.id)
-      ]);
-
-      // If no sleep data for current cycle, try to get latest available
-      let latestSleepScore = null;
-      if (!sleep?.score?.sleep_score) {
-        console.log('No sleep data for current cycle, fetching latest available...');
-        latestSleepScore = await this.getLatestSleepScore();
-      }
-
-      console.log('Raw WHOOP data retrieved:');
-      console.log('Cycle:', cycle);
-      console.log('Recovery:', recovery);
-      console.log('WHOOP sleep raw:', sleep);
-
-      const result: WhoopTodayData = {
-        cycle_id: cycle.id,
-        strain: cycle.score?.strain ?? null,
-        recovery_score: recovery?.score?.recovery_score ?? null,
-        hrv: recovery?.score?.hrv_rmssd_milli ?? null,
-        resting_heart_rate: recovery?.score?.resting_heart_rate ?? null,
-        sleep_score: sleep?.score?.sleep_score ?? latestSleepScore,
-        raw: { cycle, recovery, sleep }
-      };
-
-      console.log('Processed WHOOP data:', result);
-      return result;
-    } catch (error: any) {
-      console.error('WHOOP API connection failed:', error.message);
-      throw new Error('WHOOP API connection failed');
-    }
-  }
 
   getOAuthUrl(): string {
     const clientId = process.env.WHOOP_CLIENT_ID;

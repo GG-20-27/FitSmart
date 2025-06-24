@@ -419,7 +419,7 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Recovery</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary?.avgRecovery !== null ? (
+                    {whoopSummary?.avgRecovery !== null && whoopSummary?.avgRecovery !== undefined ? (
                       <CountUp end={whoopSummary.avgRecovery} suffix="%" duration={1500} />
                     ) : (
                       <span className="text-white/50">—</span>
@@ -442,7 +442,7 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Strain</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary?.avgStrain !== null ? (
+                    {whoopSummary?.avgStrain !== null && whoopSummary?.avgStrain !== undefined ? (
                       <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1500} />
                     ) : (
                       <span className="text-white/50">—</span>
@@ -465,7 +465,7 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Sleep</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary?.avgSleep !== null ? (
+                    {whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
                       <CountUp end={whoopSummary.avgSleep} suffix="%" duration={1500} />
                     ) : (
                       <span className="text-white/50">—</span>
@@ -488,7 +488,7 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg HRV</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary?.avgHRV !== null ? (
+                    {whoopSummary?.avgHRV !== null && whoopSummary?.avgHRV !== undefined ? (
                       <CountUp end={whoopSummary.avgHRV} suffix=" ms" decimals={1} duration={1500} />
                     ) : (
                       <span className="text-white/50">—</span>
