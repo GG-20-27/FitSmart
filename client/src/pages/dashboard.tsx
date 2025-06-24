@@ -473,6 +473,11 @@ export default function Dashboard() {
                       <span className="text-white/50">—</span>
                     )}
                   </div>
+                  {whoopSummary?.avgSleep === null && (
+                    <div className="text-xs text-white/70 mt-1">
+                      Not enough data yet
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 
@@ -496,6 +501,11 @@ export default function Dashboard() {
                       <span className="text-white/50">—</span>
                     )}
                   </div>
+                  {whoopSummary?.avgHRV === null && (
+                    <div className="text-xs text-white/70 mt-1">
+                      Not enough data yet
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
