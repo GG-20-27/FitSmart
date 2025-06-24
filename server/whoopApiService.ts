@@ -372,7 +372,7 @@ export class WhoopApiService {
       };
 
       // Store in database for historical tracking
-      const today = getTodayDate();
+      const today = new Date().toISOString().split('T')[0];
       const dataToStore = {
         date: today,
         cycle_id: result.cycle_id,
@@ -385,7 +385,7 @@ export class WhoopApiService {
       };
 
       // Log the daily stats before storing
-      logDailyStats(dataToStore);
+      console.log(`Daily WHOOP stats logged: ${today}`);
       
       await storage.createOrUpdateWhoopData(dataToStore);
       console.log('WHOOP data retrieved successfully');

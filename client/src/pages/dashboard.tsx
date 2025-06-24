@@ -154,6 +154,7 @@ export default function Dashboard() {
     queryKey: ['/api/whoop/weekly'],
     enabled: whoopAuthStatus?.authenticated === true,
     refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
+    retry: 3,
   });
 
   const isWhoopConnected = whoopAuthStatus?.authenticated;
