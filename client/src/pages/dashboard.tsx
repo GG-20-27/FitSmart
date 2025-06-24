@@ -115,14 +115,14 @@ function CircularProgress({ value, max = 100, size = 120, strokeWidth = 8, color
   );
 }
 
-// FitScore logo using the real brand image
+// FitScore logo with glowing effect
 function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?: number }) {
   return (
     <div className={`flex items-center justify-center ${className}`}>
       <img 
-        src="/attached_assets/ChatGPT Image 2025. g. 11. jūn. 10_44_10_1750431009671.png" 
-        alt="FitScore Logo" 
-        className="h-12 w-auto"
+        src="/logo.png" 
+        alt="FitScore logo" 
+        className="logo"
       />
       <span className="ml-3 text-3xl font-bold text-white">FitScore</span>
     </div>
@@ -332,7 +332,7 @@ export default function Dashboard() {
                       </div>
                       {!whoopData?.sleep_score && (
                         <div className="text-xs text-slate-500 mt-1 max-w-24 text-center leading-tight">
-                          WHOOP processes sleep after wake
+                          No sleep data yet (WHOOP processes after wake)
                         </div>
                       )}
                     </div>
@@ -404,7 +404,7 @@ export default function Dashboard() {
                 </Card>
               ))}
             </div>
-          ) : whoopSummary ? (
+          ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {/* Avg Recovery - Navy */}
               <Card 
@@ -419,10 +419,10 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Recovery</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary.avgRecovery !== null ? (
+                    {whoopSummary?.avgRecovery !== null ? (
                       <CountUp end={whoopSummary.avgRecovery} suffix="%" duration={1500} />
                     ) : (
-                      <span className="text-white/80">N/A</span>
+                      <span className="text-white/50">—</span>
                     )}
                   </div>
                 </CardContent>
@@ -442,10 +442,10 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Strain</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary.avgStrain !== null ? (
+                    {whoopSummary?.avgStrain !== null ? (
                       <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1500} />
                     ) : (
-                      <span className="text-white/80">N/A</span>
+                      <span className="text-white/50">—</span>
                     )}
                   </div>
                 </CardContent>
@@ -465,10 +465,10 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Sleep</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary.avgSleep !== null ? (
+                    {whoopSummary?.avgSleep !== null ? (
                       <CountUp end={whoopSummary.avgSleep} suffix="%" duration={1500} />
                     ) : (
-                      <span className="text-white/80">N/A</span>
+                      <span className="text-white/50">—</span>
                     )}
                   </div>
                 </CardContent>
@@ -488,25 +488,15 @@ export default function Dashboard() {
                     <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg HRV</span>
                   </div>
                   <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary.avgHRV !== null ? (
+                    {whoopSummary?.avgHRV !== null ? (
                       <CountUp end={whoopSummary.avgHRV} suffix=" ms" decimals={1} duration={1500} />
                     ) : (
-                      <span className="text-white/80">N/A</span>
+                      <span className="text-white/50">—</span>
                     )}
                   </div>
                 </CardContent>
               </Card>
             </div>
-          ) : (
-            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-              <CardContent className="p-12 text-center">
-                <TrendingUp className="h-16 w-16 text-slate-600 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-slate-400 mb-2">No historical data available</h3>
-                <p className="text-slate-500">
-                  Keep using your WHOOP device to build historical averages
-                </p>
-              </CardContent>
-            </Card>
           )}
           
           <div className="text-center mt-6">

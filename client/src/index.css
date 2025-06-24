@@ -4,6 +4,13 @@
 @tailwind components;
 @tailwind utilities;
 
+.logo {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  box-shadow: 0 0 18px rgba(0, 140, 255, 0.55);
+}
+
 :root {
   --background: hsl(0, 0%, 100%);
   --foreground: hsl(20, 14.3%, 4.1%);

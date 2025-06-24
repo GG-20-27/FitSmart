@@ -47,5 +47,19 @@
     "strain_score": 11.694816,
     "sleep_score": null,
     "hrv": 92.5735
+  },
+  {
+    "date": "2025-06-22",
+    "recovery_score": 72,
+    "strain_score": 4.033716,
+    "sleep_score": null,
+    "hrv": 93.28351
+  },
+  {
+    "date": "2025-06-24",
+    "recovery_score": 76,
+    "strain_score": 1.3927909,
+    "sleep_score": null,
+    "hrv": 94.33438
   }
 ]
