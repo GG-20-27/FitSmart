@@ -387,7 +387,7 @@ export class WhoopApiService {
       // Log the daily stats before storing
       console.log(`Daily WHOOP stats logged: ${today}`);
       
-      await storage.createOrUpdateWhoopData(dataToStore);
+      // Database storage handled in routes.ts
       console.log('WHOOP data retrieved successfully');
 
       return result;

@@ -56,6 +56,10 @@
     "hrv": 93.28351
   },
   {
-    "date": "2025-06-24"
+    "date": "2025-06-24",
+    "recovery_score": 76,
+    "strain_score": 1.3927909,
+    "sleep_score": null,
+    "hrv": 94.33438
   }
 ]

@@ -132,9 +132,15 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
 export default function Dashboard() {
   const [lastSync, setLastSync] = useState<Date | null>(null);
   
+  const { data: whoopAuthStatus, isLoading: authLoading, error: authError } = useQuery<WhoopAuthStatus>({
+    queryKey: ['/api/whoop/status'],
+    refetchInterval: 30000, // Check auth status every 30 seconds
+  });
+
   const { data: whoopData, isLoading: whoopLoading, refetch: refetchWhoop, error: whoopError } = useQuery<WhoopTodayResponse>({
     queryKey: ['/api/whoop/today'],
-    retry: false,
+    enabled: whoopAuthStatus?.authenticated === true,
+    retry: 3,
     refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
   });
 
@@ -144,11 +150,6 @@ export default function Dashboard() {
       setLastSync(new Date());
     }
   }, [whoopData]);
-
-  const { data: whoopAuthStatus, isLoading: authLoading, error: authError } = useQuery<WhoopAuthStatus>({
-    queryKey: ['/api/whoop/status'],
-    refetchInterval: 30000, // Check auth status every 30 seconds
-  });
 
   const { data: whoopSummary, isLoading: summaryLoading, error: summaryError } = useQuery<WhoopSummary>({
     queryKey: ['/api/whoop/weekly'],
