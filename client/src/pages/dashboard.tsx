@@ -117,13 +117,13 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
         className="drop-shadow-lg"
       >
         <defs>
-          <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <linearGradient id="heartGradient" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#3B82F6" />
             <stop offset="50%" stopColor="#6366F1" />
             <stop offset="100%" stopColor="#8B5CF6" />
           </linearGradient>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+          <filter id="heartGlow">
+            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
             <feMerge> 
               <feMergeNode in="coloredBlur"/>
               <feMergeNode in="SourceGraphic"/>
@@ -131,35 +131,12 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
           </filter>
         </defs>
         
-        <circle 
-          cx="32" 
-          cy="32" 
-          r="28" 
-          fill="url(#logoGradient)" 
-          filter="url(#glow)"
+        <path 
+          d="M32 50c-12-8-20-16-20-26 0-8 8-14 16-14 4 0 8 2 10 6 2-4 6-6 10-6 8 0 16 6 16 14 0 10-8 18-20 26z" 
+          fill="url(#heartGradient)" 
+          filter="url(#heartGlow)"
           className="animate-pulse"
-          style={{ animationDuration: '3s' }}
-        />
-        
-        <path 
-          d="M20 32 L28 40 L44 24" 
-          stroke="white" 
-          strokeWidth="3" 
-          strokeLinecap="round" 
-          strokeLinejoin="round"
-          fill="none"
-        />
-        
-        <circle cx="48" cy="16" r="3" fill="white" opacity="0.8" />
-        <circle cx="52" cy="20" r="2" fill="white" opacity="0.6" />
-        
-        <path 
-          d="M16 20 Q20 16 24 20 T32 20" 
-          stroke="white" 
-          strokeWidth="2" 
-          strokeLinecap="round"
-          fill="none" 
-          opacity="0.7"
+          style={{ animationDuration: '4s' }}
         />
       </svg>
     </div>
@@ -278,7 +255,7 @@ export default function Dashboard() {
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-6 text-center">
               <div className="mb-4">
-                {whoopData?.recovery_score ? (
+                {whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
                   <CircularProgress 
                     value={whoopData.recovery_score} 
                     color="#3B82F6"
@@ -327,13 +304,13 @@ export default function Dashboard() {
                   <Moon className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-purple-400">
-                  {whoopData?.sleep_score ? (
+                  {whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
                     <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
                   ) : (
                     <span className="text-slate-500">N/A</span>
                   )}
                 </div>
-                {!whoopData?.sleep_score && (
+                {(whoopData?.sleep_score === null || whoopData?.sleep_score === undefined) && (
                   <div className="text-xs text-slate-500 mt-1 max-w-24 text-center leading-tight">
                     No sleep data yet (WHOOP processes after wake)
                   </div>
@@ -354,7 +331,7 @@ export default function Dashboard() {
                   <Activity className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-green-400">
-                  {whoopData?.hrv ? (
+                  {whoopData?.hrv !== null && whoopData?.hrv !== undefined ? (
                     <CountUp end={whoopData.hrv} suffix=" ms" decimals={1} duration={1200} />
                   ) : (
                     <span className="text-slate-500">N/A</span>
