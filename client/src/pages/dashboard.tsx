@@ -111,7 +111,7 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
       <svg 
         width={size} 
         height={size} 
-        viewBox="0 0 64 64" 
+        viewBox="0 0 64 56" 
         fill="none" 
         xmlns="http://www.w3.org/2000/svg"
         className="drop-shadow-lg"
@@ -132,7 +132,7 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
         </defs>
         
         <path 
-          d="M32 50c-12-8-20-16-20-26 0-8 8-14 16-14 4 0 8 2 10 6 2-4 6-6 10-6 8 0 16 6 16 14 0 10-8 18-20 26z" 
+          d="M32 46c-12-8-20-16-20-26 0-8 8-14 16-14 4 0 8 2 10 6 2-4 6-6 10-6 8 0 16 6 16 14 0 10-8 18-20 26z" 
           fill="url(#heartGradient)" 
           filter="url(#heartGlow)"
           className="animate-pulse"
