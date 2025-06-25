@@ -181,7 +181,7 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-12">
           <div className="flex items-center space-x-4">
-            <FitScoreLogo size={64} />
+            <FitScoreLogo size={48} />
             <div>
               <h1 className="text-3xl font-bold text-white">FitScore Health Dashboard</h1>
               <p className="text-slate-400">Real-time WHOOP health analytics</p>
@@ -222,6 +222,9 @@ export default function Dashboard() {
           <div className="max-w-2xl mx-auto mb-8">
             <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
               <CardContent className="p-6 text-center">
+                <div className="flex justify-center mb-4">
+                  <FitScoreLogo size={64} />
+                </div>
                 <h3 className="text-xl font-semibold text-white mb-2">Connect Your WHOOP</h3>
                 <p className="text-slate-400 mb-4">
                   Connect your WHOOP account to view real-time health metrics and analytics.
