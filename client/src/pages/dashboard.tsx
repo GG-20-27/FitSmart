@@ -132,7 +132,7 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
         </defs>
         
         <path 
-          d="M32 46c-12-8-20-16-20-26 0-8 8-14 16-14 4 0 8 2 10 6 2-4 6-6 10-6 8 0 16 6 16 14 0 10-8 18-20 26z" 
+          d="M32 42c-10-7-17-14-17-22 0-7 7-12 14-12 3 0 7 2 8 5 1-3 5-5 8-5 7 0 14 5 14 12 0 8-7 15-17 22z" 
           fill="url(#heartGradient)" 
           filter="url(#heartGlow)"
           className="animate-pulse"
