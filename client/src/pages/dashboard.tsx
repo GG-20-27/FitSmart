@@ -272,7 +272,8 @@ export default function Dashboard() {
         )}
 
         {/* Main Metrics Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
+        {isWhoopConnected && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
           {/* Recovery Card with Circular Progress */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-6 text-center">
@@ -304,7 +305,7 @@ export default function Dashboard() {
                   <Zap className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-orange-400">
-                  {whoopData?.strain ? (
+                  {whoopData?.strain !== null && whoopData?.strain !== undefined ? (
                     <CountUp end={whoopData.strain} decimals={1} duration={1200} />
                   ) : (
                     <span className="text-slate-500">N/A</span>
@@ -366,10 +367,12 @@ export default function Dashboard() {
               </div>
             </CardContent>
           </Card>
-        </div>
+          </div>
+        )}
 
         {/* Weekly Averages */}
-        <div className="mt-16">
+        {isWhoopConnected && (
+          <div className="mt-16">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
               <TrendingUp className="h-8 w-8 mr-3 text-blue-400" />
@@ -453,7 +456,8 @@ export default function Dashboard() {
               Averages calculated from the past 7 days of real WHOOP data
             </p>
           </div>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );

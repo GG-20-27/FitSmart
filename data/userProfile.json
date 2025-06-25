@@ -61,5 +61,12 @@
     "strain_score": null,
     "sleep_score": null,
     "hrv": null
+  },
+  {
+    "date": "2025-06-25",
+    "recovery_score": null,
+    "strain_score": null,
+    "sleep_score": null,
+    "hrv": null
   }
 ]
