@@ -57,9 +57,9 @@
   },
   {
     "date": "2025-06-24",
-    "recovery_score": 76,
-    "strain_score": 1.3927909,
+    "recovery_score": null,
+    "strain_score": null,
     "sleep_score": null,
-    "hrv": 94.33438
+    "hrv": null
   }
 ]

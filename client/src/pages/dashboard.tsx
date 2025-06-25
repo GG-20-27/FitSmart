@@ -1,22 +1,10 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { 
-  Activity, 
-  Heart, 
-  Moon, 
-  Zap,
-  RefreshCw,
-  ExternalLink,
-  AlertCircle,
-  TrendingUp,
-  Clock
-} from "lucide-react";
-import { queryClient } from "@/lib/queryClient";
-import { useEffect, useState } from "react";
-import { formatTime } from "@/lib/utils";
-import type { WhoopTodayResponse } from "@shared/schema";
+import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp } from 'lucide-react';
+import { formatTime } from '@/lib/utils';
+import { WhoopTodayResponse } from '@shared/schema';
 
 interface WhoopAuthStatus {
   authenticated: boolean;
@@ -44,27 +32,29 @@ function CountUp({ end, duration = 1000, suffix = "", decimals = 0 }: CountUpPro
 
   useEffect(() => {
     let startTime: number;
-    const startValue = 0;
-    const endValue = end;
+    let animationFrame: number;
 
     const animate = (currentTime: number) => {
       if (!startTime) startTime = currentTime;
       const progress = Math.min((currentTime - startTime) / duration, 1);
       
-      const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-      const currentCount = startValue + (endValue - startValue) * easeOutQuart;
-      
-      setCount(currentCount);
+      const easeOut = 1 - Math.pow(1 - progress, 3);
+      setCount(end * easeOut);
 
       if (progress < 1) {
-        requestAnimationFrame(animate);
+        animationFrame = requestAnimationFrame(animate);
       }
     };
 
-    requestAnimationFrame(animate);
+    animationFrame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationFrame);
   }, [end, duration]);
 
-  return <span>{count.toFixed(decimals)}{suffix}</span>;
+  return (
+    <span>
+      {decimals > 0 ? count.toFixed(decimals) : Math.floor(count)}{suffix}
+    </span>
+  );
 }
 
 function CircularProgress({ value, max = 100, size = 120, strokeWidth = 8, color = "#3b82f6" }: {
@@ -75,11 +65,12 @@ function CircularProgress({ value, max = 100, size = 120, strokeWidth = 8, color
   color?: string;
 }) {
   const radius = (size - strokeWidth) / 2;
-  const circumference = radius * 2 * Math.PI;
-  const progress = (circumference * value) / max;
+  const circumference = 2 * Math.PI * radius;
+  const percentage = (value / max) * 100;
+  const strokeDashoffset = circumference - (percentage / 100) * circumference;
 
   return (
-    <div className="relative" style={{ width: size, height: size }}>
+    <div className="relative inline-flex items-center justify-center">
       <svg width={size} height={size} className="transform -rotate-90">
         <circle
           cx={size / 2}
@@ -87,7 +78,7 @@ function CircularProgress({ value, max = 100, size = 120, strokeWidth = 8, color
           r={radius}
           stroke="currentColor"
           strokeWidth={strokeWidth}
-          fill="transparent"
+          fill="none"
           className="text-slate-700"
         />
         <circle
@@ -96,35 +87,81 @@ function CircularProgress({ value, max = 100, size = 120, strokeWidth = 8, color
           r={radius}
           stroke={color}
           strokeWidth={strokeWidth}
-          fill="transparent"
+          fill="none"
           strokeDasharray={circumference}
-          strokeDashoffset={circumference - progress}
-          strokeLinecap="round"
-          className="transition-all duration-1000 ease-out"
+          strokeDashoffset={strokeDashoffset}
+          className="transition-all duration-1000 ease-out drop-shadow-sm"
           style={{
-            filter: `drop-shadow(0 0 6px ${color}40)`
+            filter: `drop-shadow(0 0 8px ${color}40)`
           }}
         />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
         <span className="text-2xl font-bold text-white">
-          <CountUp end={value} suffix="%" duration={1500} />
+          <CountUp end={value} suffix="%" duration={1200} />
         </span>
       </div>
     </div>
   );
 }
 
-// FitScore logo with glowing effect
 function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?: number }) {
   return (
-    <div className={`flex items-center justify-center ${className}`}>
-      <img 
-        src="/logo.svg" 
-        alt="FitScore logo" 
-        className="logo"
-      />
-      <span className="ml-3 text-3xl font-bold text-white">FitScore</span>
+    <div className={`relative ${className}`} style={{ width: size, height: size }}>
+      <svg 
+        width={size} 
+        height={size} 
+        viewBox="0 0 64 64" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+        className="drop-shadow-lg"
+      >
+        <defs>
+          <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#3B82F6" />
+            <stop offset="50%" stopColor="#6366F1" />
+            <stop offset="100%" stopColor="#8B5CF6" />
+          </linearGradient>
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+            <feMerge> 
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        
+        <circle 
+          cx="32" 
+          cy="32" 
+          r="28" 
+          fill="url(#logoGradient)" 
+          filter="url(#glow)"
+          className="animate-pulse"
+          style={{ animationDuration: '3s' }}
+        />
+        
+        <path 
+          d="M20 32 L28 40 L44 24" 
+          stroke="white" 
+          strokeWidth="3" 
+          strokeLinecap="round" 
+          strokeLinejoin="round"
+          fill="none"
+        />
+        
+        <circle cx="48" cy="16" r="3" fill="white" opacity="0.8" />
+        <circle cx="52" cy="20" r="2" fill="white" opacity="0.6" />
+        
+        <path 
+          d="M16 20 Q20 16 24 20 T32 20" 
+          stroke="white" 
+          strokeWidth="2" 
+          strokeLinecap="round"
+          fill="none" 
+          opacity="0.7"
+        />
+      </svg>
     </div>
   );
 }
@@ -151,54 +188,50 @@ export default function Dashboard() {
     }
   }, [whoopData]);
 
-  const { data: whoopSummary, isLoading: summaryLoading, error: summaryError } = useQuery<WhoopSummary>({
+  const { data: whoopSummary, isLoading: summaryLoading } = useQuery<WhoopSummary>({
     queryKey: ['/api/whoop/weekly'],
     enabled: whoopAuthStatus?.authenticated === true,
-    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
     retry: 3,
+    refetchInterval: 10 * 60 * 1000, // Refresh every 10 minutes
   });
 
   const isWhoopConnected = whoopAuthStatus?.authenticated;
-
-  const connectWhoopMutation = useMutation({
-    mutationFn: () => {
-      const authUrl = window.location.origin + '/api/whoop/login';
-      const popup = window.open(authUrl, 'whoop-auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
-      
-      return new Promise<void>((resolve) => {
-        const pollInterval = setInterval(() => {
-          if (popup?.closed) {
-            clearInterval(pollInterval);
-            queryClient.invalidateQueries({ queryKey: ['/api/whoop/status'] });
-            queryClient.invalidateQueries({ queryKey: ['/api/whoop/today'] });
-            queryClient.invalidateQueries({ queryKey: ['/api/whoop/weekly'] });
-            resolve();
-          }
-        }, 1000);
-      });
-    },
-  });
-
-  const handleRetry = () => {
-    refetchWhoop();
-  };
-
-  const handleConnect = () => {
-    connectWhoopMutation.mutate();
-  };
-
-  const isError = whoopError || authError;
   const isLoading = whoopLoading || authLoading;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
-      <div className="container mx-auto px-6 py-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <div className="container mx-auto px-4 py-8">
         {/* Header */}
-        <div className="text-center mb-12 animate-fade-in">
-          <FitScoreLogo className="mb-6" />
-          <p className="text-slate-400 text-lg">Health Analytics Dashboard</p>
+        <div className="flex items-center justify-between mb-12">
+          <div className="flex items-center space-x-4">
+            <FitScoreLogo size={64} />
+            <div>
+              <h1 className="text-3xl font-bold text-white">FitScore Health Dashboard</h1>
+              <p className="text-slate-400">Real-time WHOOP health analytics</p>
+            </div>
+          </div>
           
-          {/* Sync Status */}
+          <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 px-3 py-1 bg-green-500/20 rounded-full border border-green-500/30">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+              <span className="text-green-400 text-sm font-medium">Connected</span>
+            </div>
+            <Button 
+              onClick={() => refetchWhoop()} 
+              variant="outline" 
+              size="sm"
+              disabled={isLoading}
+              className="border-slate-600 text-slate-300 hover:bg-slate-700"
+            >
+              Refresh
+            </Button>
+          </div>
+        </div>
+
+        {/* Today's Health Metrics */}
+        <div className="text-center mb-12">
+          <h2 className="text-4xl font-bold text-white mb-2">Today's Health Metrics</h2>
+          <p className="text-slate-400 text-lg">Live data from your WHOOP device</p>
           {lastSync && (
             <div className="flex items-center justify-center mt-4 text-sm text-slate-500">
               <Clock className="h-4 w-4 mr-2" />
@@ -212,21 +245,20 @@ export default function Dashboard() {
           <div className="max-w-2xl mx-auto mb-8">
             <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
               <CardContent className="p-6 text-center">
-                <AlertCircle className="h-12 w-12 text-blue-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-white mb-2">Connect Your WHOOP Device</h3>
-                <p className="text-slate-400 mb-6">
-                  Connect your WHOOP account to view your health metrics and weekly averages
+                <h3 className="text-xl font-semibold text-white mb-2">Connect Your WHOOP</h3>
+                <p className="text-slate-400 mb-4">
+                  Connect your WHOOP account to view real-time health metrics and analytics.
                 </p>
                 <Button 
-                  onClick={handleConnect}
-                  disabled={connectWhoopMutation.isPending}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2"
+                  onClick={() => window.open(whoopAuthStatus?.auth_url || '/api/whoop/login', '_blank')}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={authLoading}
                 >
-                  {connectWhoopMutation.isPending ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                      Connecting...
-                    </>
+                  {authLoading ? (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <span>Connecting...</span>
+                    </div>
                   ) : (
                     <>
                       <ExternalLink className="h-4 w-4 mr-2" />
@@ -239,152 +271,105 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Today's Metrics */}
-        <div className="mb-16">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
-              <Activity className="h-8 w-8 mr-3 text-blue-400" />
-              Today's Metrics
-            </h2>
-            <p className="text-slate-400">Live data from your WHOOP device</p>
-          </div>
-
-          {whoopLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[1, 2, 3, 4].map((i) => (
-                <Card key={i} className="bg-slate-800/50 border-slate-700 backdrop-blur-sm animate-pulse">
-                  <CardContent className="p-6">
-                    <div className="space-y-4">
-                      <div className="h-4 bg-slate-700 rounded w-20"></div>
-                      <div className="h-8 bg-slate-700 rounded w-16"></div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : whoopData ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* Recovery Score with Circular Progress */}
-              <Card className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700/50 backdrop-blur-md hover:from-slate-700/80 hover:to-slate-800/80 transition-all duration-300 transform hover:scale-105 animate-fade-in shadow-xl">
-                <CardContent className="p-6">
-                  <div className="flex flex-col items-center space-y-4">
-                    <div className="flex items-center justify-center space-x-2 mb-1">
-                      <Heart className="h-4 w-4 text-blue-400" />
-                      <span className="text-sm font-medium text-slate-300">Recovery</span>
-                    </div>
-                    <div className="relative">
-                      {whoopData.recovery_score ? (
-                        <CircularProgress 
-                          value={whoopData.recovery_score} 
-                          color="#3b82f6"
-                          size={100}
-                        />
-                      ) : (
-                        <div className="w-24 h-24 rounded-full bg-slate-700 flex items-center justify-center">
-                          <span className="text-slate-500">N/A</span>
-                        </div>
-                      )}
-                    </div>
+        {/* Main Metrics Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
+          {/* Recovery Card with Circular Progress */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-6 text-center">
+              <div className="mb-4">
+                {whoopData?.recovery_score ? (
+                  <CircularProgress 
+                    value={whoopData.recovery_score} 
+                    color="#3B82F6"
+                    size={100}
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded-full bg-slate-700 flex items-center justify-center mx-auto">
+                    <span className="text-slate-500">N/A</span>
                   </div>
-                </CardContent>
-              </Card>
+                )}
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Heart className="h-5 w-5 text-blue-400" />
+                <span className="text-slate-300 font-medium">Recovery</span>
+              </div>
+            </CardContent>
+          </Card>
 
-              {/* Strain - Orange Theme */}
-              <Card className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700/50 backdrop-blur-md hover:from-slate-700/80 hover:to-slate-800/80 transition-all duration-300 transform hover:scale-105 animate-fade-in shadow-xl" style={{ animationDelay: '0.1s' }}>
-                <CardContent className="p-6">
-                  <div className="flex flex-col items-center space-y-4">
-                    <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-red-500 rounded-full flex items-center justify-center shadow-lg">
-                      <Zap className="h-8 w-8 text-white" />
-                    </div>
-                    <div className="text-center">
-                      <div className="flex items-center justify-center space-x-2 mb-1">
-                        <Zap className="h-4 w-4 text-orange-400" />
-                        <span className="text-sm font-medium text-slate-300">Strain</span>
-                      </div>
-                      <div className="text-2xl font-bold text-orange-400">
-                        {whoopData.strain ? (
-                          <CountUp end={whoopData.strain} decimals={1} duration={1200} />
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
+          {/* Strain Card */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-6 text-center">
+              <div className="mb-4">
+                <div className="w-16 h-16 bg-orange-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Zap className="h-8 w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-orange-400">
+                  {whoopData?.strain ? (
+                    <CountUp end={whoopData.strain} decimals={1} duration={1200} />
+                  ) : (
+                    <span className="text-slate-500">N/A</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Zap className="h-5 w-5 text-orange-400" />
+                <span className="text-slate-300 font-medium">Strain</span>
+              </div>
+            </CardContent>
+          </Card>
 
-              {/* Sleep - Purple Theme */}
-              <Card className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700/50 backdrop-blur-md hover:from-slate-700/80 hover:to-slate-800/80 transition-all duration-300 transform hover:scale-105 animate-fade-in shadow-xl" style={{ animationDelay: '0.2s' }}>
-                <CardContent className="p-6">
-                  <div className="flex flex-col items-center space-y-4">
-                    <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-indigo-500 rounded-full flex items-center justify-center shadow-lg">
-                      <Moon className="h-8 w-8 text-white" />
-                    </div>
-                    <div className="text-center">
-                      <div className="flex items-center justify-center space-x-2 mb-1">
-                        <Moon className="h-4 w-4 text-purple-400" />
-                        <span className="text-sm font-medium text-slate-300">Sleep</span>
-                      </div>
-                      <div className="text-2xl font-bold text-purple-400">
-                        {whoopData.sleep_score ? (
-                          <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </div>
-                      {!whoopData?.sleep_score && (
-                        <div className="text-xs text-slate-500 mt-1 max-w-24 text-center leading-tight">
-                          No sleep data yet (WHOOP processes after wake)
-                        </div>
-                      )}
-                    </div>
+          {/* Sleep Card */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-6 text-center">
+              <div className="mb-4">
+                <div className="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Moon className="h-8 w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-purple-400">
+                  {whoopData?.sleep_score ? (
+                    <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
+                  ) : (
+                    <span className="text-slate-500">N/A</span>
+                  )}
+                </div>
+                {!whoopData?.sleep_score && (
+                  <div className="text-xs text-slate-500 mt-1 max-w-24 text-center leading-tight">
+                    No sleep data yet (WHOOP processes after wake)
                   </div>
-                </CardContent>
-              </Card>
+                )}
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Moon className="h-5 w-5 text-purple-400" />
+                <span className="text-slate-300 font-medium">Sleep</span>
+              </div>
+            </CardContent>
+          </Card>
 
-              {/* HRV - Green Theme */}
-              <Card className="bg-gradient-to-br from-slate-800/80 to-slate-900/80 border-slate-700/50 backdrop-blur-md hover:from-slate-700/80 hover:to-slate-800/80 transition-all duration-300 transform hover:scale-105 animate-fade-in shadow-xl" style={{ animationDelay: '0.3s' }}>
-                <CardContent className="p-6">
-                  <div className="flex flex-col items-center space-y-4">
-                    <div className="w-20 h-20 bg-gradient-to-br from-green-500 to-emerald-500 rounded-full flex items-center justify-center shadow-lg">
-                      <Activity className="h-8 w-8 text-white" />
-                    </div>
-                    <div className="text-center">
-                      <div className="flex items-center justify-center space-x-2 mb-1">
-                        <Activity className="h-4 w-4 text-green-400" />
-                        <span className="text-sm font-medium text-slate-300">HRV</span>
-                      </div>
-                      <div className="text-2xl font-bold text-green-400">
-                        {whoopData?.hrv ? (
-                          <CountUp end={whoopData.hrv} suffix=" ms" decimals={1} duration={1200} />
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-          ) : isError ? (
-            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-              <CardContent className="p-8 text-center">
-                <AlertCircle className="h-12 w-12 text-red-400 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-white mb-2">Unable to load WHOOP data</h3>
-                <p className="text-slate-400 mb-4">
-                  There was an issue connecting to your WHOOP device. Please check your connection and try again.
-                </p>
-                <Button onClick={handleRetry} className="bg-blue-600 hover:bg-blue-700 text-white">
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Try Again
-                </Button>
-              </CardContent>
-            </Card>
-          ) : null}
+          {/* HRV Card */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-6 text-center">
+              <div className="mb-4">
+                <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Activity className="h-8 w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-green-400">
+                  {whoopData?.hrv ? (
+                    <CountUp end={whoopData.hrv} suffix=" ms" decimals={1} duration={1200} />
+                  ) : (
+                    <span className="text-slate-500">N/A</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Activity className="h-5 w-5 text-green-400" />
+                <span className="text-slate-300 font-medium">HRV</span>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Weekly Averages */}
-        <div className="animate-slide-up" style={{ animationDelay: '0.3s' }}>
+        <div className="mt-16">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
               <TrendingUp className="h-8 w-8 mr-3 text-blue-400" />
@@ -393,123 +378,75 @@ export default function Dashboard() {
             <p className="text-slate-400">Averages based on real WHOOP data</p>
           </div>
 
-          {summaryLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[1, 2, 3, 4].map((i) => (
-                <Card key={i} className="bg-slate-800/50 border-slate-700 backdrop-blur-sm animate-pulse">
-                  <CardContent className="p-6">
-                    <div className="space-y-4">
-                      <div className="h-4 bg-slate-700 rounded w-20"></div>
-                      <div className="h-8 bg-slate-700 rounded w-16"></div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {/* Avg Recovery - Navy */}
-              <Card 
-                className="gradient-recovery border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in rounded-2xl"
-                style={{ 
-                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(30, 58, 138, 0.3)'
-                }}
-              >
-                <CardContent className="p-6 relative">
-                  <div className="flex items-center space-x-3 mb-3">
-                    <Heart className="h-5 w-5 text-white drop-shadow-sm" />
-                    <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Recovery</span>
-                  </div>
-                  <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary?.avgRecovery !== null && whoopSummary?.avgRecovery !== undefined ? (
-                      <CountUp end={whoopSummary.avgRecovery} suffix="%" duration={1500} />
-                    ) : (
-                      <span className="text-white/50">—</span>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Avg Strain - Crimson */}
-              <Card 
-                className="gradient-strain border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in rounded-2xl"
-                style={{ 
-                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(185, 28, 28, 0.3)',
-                  animationDelay: '0.1s'
-                }}
-              >
-                <CardContent className="p-6 relative">
-                  <div className="flex items-center space-x-3 mb-3">
-                    <Zap className="h-5 w-5 text-white drop-shadow-sm" />
-                    <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Strain</span>
-                  </div>
-                  <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary?.avgStrain !== null && whoopSummary?.avgStrain !== undefined ? (
-                      <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1500} />
-                    ) : (
-                      <span className="text-white/50">—</span>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Avg Sleep - Purple */}
-              <Card 
-                className="gradient-sleep border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in rounded-2xl"
-                style={{ 
-                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(124, 58, 237, 0.3)',
-                  animationDelay: '0.2s'
-                }}
-              >
-                <CardContent className="p-6 relative">
-                  <div className="flex items-center space-x-3 mb-3">
-                    <Moon className="h-5 w-5 text-white drop-shadow-sm" />
-                    <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg Sleep</span>
-                  </div>
-                  <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
-                      <CountUp end={whoopSummary.avgSleep} suffix="%" duration={1500} />
-                    ) : (
-                      <span className="text-white/50">—</span>
-                    )}
-                  </div>
-                  {whoopSummary?.avgSleep === null && (
-                    <div className="text-xs text-white/70 mt-1">
-                      Not enough data yet
-                    </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Avg Recovery */}
+            <Card className="bg-gradient-to-br from-blue-400 to-blue-500 border-0 text-white hover:from-blue-300 hover:to-blue-400 transition-all duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-center space-x-2 mb-3">
+                  <Heart className="h-4 w-4 text-white" />
+                  <span className="text-sm font-medium text-white">Avg Recovery</span>
+                </div>
+                <div className="text-3xl font-bold">
+                  {whoopSummary?.avgRecovery !== null && whoopSummary?.avgRecovery !== undefined ? (
+                    <CountUp end={whoopSummary.avgRecovery} suffix="%" duration={1500} />
+                  ) : (
+                    "N/A"
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </CardContent>
+            </Card>
 
-              {/* Avg HRV - Green */}
-              <Card 
-                className="gradient-hrv border-0 backdrop-blur-sm transition-all duration-300 transform hover:scale-102 cursor-pointer shadow-lg animate-fade-in rounded-2xl"
-                style={{ 
-                  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 20px rgba(34, 197, 94, 0.3)',
-                  animationDelay: '0.3s'
-                }}
-              >
-                <CardContent className="p-6 relative">
-                  <div className="flex items-center space-x-3 mb-3">
-                    <Activity className="h-5 w-5 text-white drop-shadow-sm" />
-                    <span className="text-sm font-medium text-white/95 drop-shadow-sm">Avg HRV</span>
-                  </div>
-                  <div className="text-3xl font-bold text-white drop-shadow-md">
-                    {whoopSummary?.avgHRV !== null && whoopSummary?.avgHRV !== undefined ? (
-                      <CountUp end={whoopSummary.avgHRV} suffix=" ms" decimals={1} duration={1500} />
-                    ) : (
-                      <span className="text-white/50">—</span>
-                    )}
-                  </div>
-                  {whoopSummary?.avgHRV === null && (
-                    <div className="text-xs text-white/70 mt-1">
-                      Not enough data yet
-                    </div>
+            {/* Avg Strain */}
+            <Card className="bg-gradient-to-br from-orange-400 to-orange-500 border-0 text-white hover:from-orange-300 hover:to-orange-400 transition-all duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-center space-x-2 mb-3">
+                  <Zap className="h-4 w-4 text-white" />
+                  <span className="text-sm font-medium text-white">Avg Strain</span>
+                </div>
+                <div className="text-3xl font-bold">
+                  {whoopSummary?.avgStrain !== null && whoopSummary?.avgStrain !== undefined ? (
+                    <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1500} />
+                  ) : (
+                    "N/A"
                   )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Avg Sleep */}
+            <Card className="bg-gradient-to-br from-purple-400 to-purple-500 border-0 text-white hover:from-purple-300 hover:to-purple-400 transition-all duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-center space-x-2 mb-3">
+                  <Moon className="h-4 w-4 text-white" />
+                  <span className="text-sm font-medium text-white">Avg Sleep</span>
+                </div>
+                <div className="text-3xl font-bold">
+                  {whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
+                    <CountUp end={whoopSummary.avgSleep} suffix="%" duration={1500} />
+                  ) : (
+                    "N/A"
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Avg HRV */}
+            <Card className="bg-gradient-to-br from-green-400 to-green-500 border-0 text-white hover:from-green-300 hover:to-green-400 transition-all duration-300">
+              <CardContent className="p-6">
+                <div className="flex items-center space-x-2 mb-3">
+                  <Activity className="h-4 w-4 text-white" />
+                  <span className="text-sm font-medium text-white">Avg HRV</span>
+                </div>
+                <div className="text-3xl font-bold">
+                  {whoopSummary?.avgHRV !== null && whoopSummary?.avgHRV !== undefined ? (
+                    <CountUp end={whoopSummary.avgHRV} suffix=" ms" decimals={1} duration={1500} />
+                  ) : (
+                    "N/A"
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
           
           <div className="text-center mt-6">
             <p className="text-sm text-slate-500">
