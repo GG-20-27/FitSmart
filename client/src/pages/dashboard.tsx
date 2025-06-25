@@ -111,10 +111,11 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
       <svg 
         width={size} 
         height={size} 
-        viewBox="0 0 64 56" 
+        viewBox="0 0 64 48" 
         fill="none" 
         xmlns="http://www.w3.org/2000/svg"
         className="drop-shadow-lg"
+        preserveAspectRatio="xMidYMid meet"
       >
         <defs>
           <linearGradient id="heartGradient" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -132,7 +133,7 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
         </defs>
         
         <path 
-          d="M32 42c-10-7-17-14-17-22 0-7 7-12 14-12 3 0 7 2 8 5 1-3 5-5 8-5 7 0 14 5 14 12 0 8-7 15-17 22z" 
+          d="M32 36c-9-6-15-12-15-20 0-6 6-10 12-10 3 0 6 1 7 4 1-3 4-4 7-4 6 0 12 4 12 10 0 8-6 14-15 20z" 
           fill="url(#heartGradient)" 
           filter="url(#heartGlow)"
           className="animate-pulse"
@@ -181,27 +182,22 @@ export default function Dashboard() {
         {/* Header */}
         <div className="flex items-center justify-between mb-12">
           <div className="flex items-center space-x-4">
-            <FitScoreLogo size={48} />
+            <div className="flex-shrink-0 p-1">
+              <FitScoreLogo size={48} />
+            </div>
             <div>
               <h1 className="text-3xl font-bold text-white">FitScore Health Dashboard</h1>
               <p className="text-slate-400">Real-time WHOOP health analytics</p>
             </div>
           </div>
           
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2 px-3 py-1 bg-green-500/20 rounded-full border border-green-500/30">
-              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-              <span className="text-green-400 text-sm font-medium">Connected</span>
-            </div>
-            <Button 
-              onClick={() => refetchWhoop()} 
-              variant="outline" 
-              size="sm"
-              disabled={isLoading}
-              className="border-slate-600 text-slate-300 hover:bg-slate-700"
-            >
-              Refresh
-            </Button>
+          <div className="flex items-center">
+            {isWhoopConnected && (
+              <div className="flex items-center space-x-2 px-3 py-1 bg-green-600/20 border border-green-500/30 rounded-full">
+                <div className="w-2 h-2 bg-green-400 rounded-full"></div>
+                <span className="text-green-400 text-sm font-medium">Connected</span>
+              </div>
+            )}
           </div>
         </div>
 
