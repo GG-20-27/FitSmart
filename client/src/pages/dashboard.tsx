@@ -107,23 +107,22 @@ function CircularProgress({ value, max = 100, size = 120, strokeWidth = 8, color
 
 function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?: number }) {
   return (
-    <div className={`relative ${className}`} style={{ width: size, height: size }}>
+    <div className={`relative flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
       <svg 
         width={size} 
         height={size} 
-        viewBox="0 0 64 48" 
+        viewBox="0 0 48 48" 
         fill="none" 
         xmlns="http://www.w3.org/2000/svg"
         className="drop-shadow-lg"
-        preserveAspectRatio="xMidYMid meet"
       >
         <defs>
-          <linearGradient id="heartGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#3B82F6" />
-            <stop offset="50%" stopColor="#6366F1" />
+          <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#06B6D4" />
+            <stop offset="50%" stopColor="#3B82F6" />
             <stop offset="100%" stopColor="#8B5CF6" />
           </linearGradient>
-          <filter id="heartGlow">
+          <filter id="glow">
             <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
             <feMerge> 
               <feMergeNode in="coloredBlur"/>
@@ -132,12 +131,21 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
           </filter>
         </defs>
         
-        <path 
-          d="M32 36c-9-6-15-12-15-20 0-6 6-10 12-10 3 0 6 1 7 4 1-3 4-4 7-4 6 0 12 4 12 10 0 8-6 14-15 20z" 
-          fill="url(#heartGradient)" 
-          filter="url(#heartGlow)"
+        <circle 
+          cx="24" 
+          cy="24" 
+          r="22" 
+          fill="url(#bgGradient)" 
+          filter="url(#glow)"
           className="animate-pulse"
           style={{ animationDuration: '4s' }}
+        />
+        
+        <path 
+          d="M24 32c-6-4-10-8-10-13 0-4 4-7 8-7 2 0 4 1 5 3 1-2 3-3 5-3 4 0 8 3 8 7 0 5-4 9-10 13z" 
+          fill="white" 
+          stroke="white"
+          strokeWidth="0.5"
         />
       </svg>
     </div>
@@ -310,8 +318,8 @@ export default function Dashboard() {
                   )}
                 </div>
                 {(whoopData?.sleep_score === null || whoopData?.sleep_score === undefined) && (
-                  <div className="text-xs text-slate-500 mt-1 max-w-24 text-center leading-tight">
-                    No sleep data yet (WHOOP processes after wake)
+                  <div className="text-xs text-slate-500 mt-1 text-center">
+                    Sleep data not available yet
                   </div>
                 )}
               </div>
