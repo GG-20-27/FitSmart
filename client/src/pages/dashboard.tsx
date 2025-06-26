@@ -258,21 +258,20 @@ export default function Dashboard() {
         {/* Main Metrics Cards */}
         {isWhoopConnected && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
-          {/* Recovery Card with Circular Progress */}
+          {/* Recovery Card */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-6 text-center">
               <div className="mb-4">
-                {whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
-                  <CircularProgress 
-                    value={whoopData.recovery_score} 
-                    color="#3B82F6"
-                    size={100}
-                  />
-                ) : (
-                  <div className="w-24 h-24 rounded-full bg-slate-700 flex items-center justify-center mx-auto">
+                <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Heart className="h-8 w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-blue-400">
+                  {whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
+                    <><CountUp end={whoopData.recovery_score} duration={1200} />%</>
+                  ) : (
                     <span className="text-slate-500">N/A</span>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
               <div className="flex items-center justify-center space-x-2">
                 <Heart className="h-5 w-5 text-blue-400" />
