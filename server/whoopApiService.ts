@@ -211,7 +211,34 @@ export class WhoopApiService {
     } catch (error: any) {
       console.error(`Failed to fetch sleep for cycle ${cycleId}:`, error.response?.status, error.response?.data);
       if (error.response?.status === 404) {
-        console.log(`No sleep data available for cycle ${cycleId}`);
+        console.log(`No sleep data available for cycle ${cycleId}, trying previous cycle...`);
+        
+        // Try to get previous cycle's sleep data
+        try {
+          const headers = await this.authHeader();
+          const cycleResponse = await axios.get(`${BASE}/cycle?limit=10`, { headers });
+          
+          if (cycleResponse.data.records && cycleResponse.data.records.length > 0) {
+            // Find the current cycle index and get the previous one
+            const cycles = cycleResponse.data.records;
+            const currentCycleIndex = cycles.findIndex((cycle: any) => cycle.id === cycleId);
+            
+            if (currentCycleIndex !== -1 && currentCycleIndex < cycles.length - 1) {
+              const previousCycleId = cycles[currentCycleIndex + 1].id;
+              console.log(`Trying to fetch sleep data from previous cycle: ${previousCycleId}`);
+              
+              const previousSleepResponse = await axios.get(`${BASE}/cycle/${previousCycleId}/sleep`, { headers });
+              
+              if (previousSleepResponse.status === 200) {
+                console.log('Sleep data found in previous cycle:', previousCycleId);
+                return previousSleepResponse.data;
+              }
+            }
+          }
+        } catch (previousError: any) {
+          console.log(`Could not fetch sleep data from previous cycle:`, previousError.response?.status);
+        }
+        
         return null;
       }
       throw error;
