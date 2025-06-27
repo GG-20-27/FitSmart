@@ -72,8 +72,11 @@
   {
     "date": "2025-06-26",
     "recovery_score": null,
-    "strain_score": 7.454824,
+    "strain_score": 7.462352,
     "sleep_score": null,
     "hrv": null
+  },
+  {
+    "date": "2025-06-27"
   }
 ]

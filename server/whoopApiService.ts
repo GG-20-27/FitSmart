@@ -47,11 +47,57 @@ export interface WhoopTodayData {
 
 export class WhoopApiService {
   private async authHeader() {
-    const tokenData = await whoopTokenStorage.getDefaultToken();
+    let tokenData = await whoopTokenStorage.getDefaultToken();
     if (!tokenData?.access_token) {
       throw new Error('Missing WHOOP access token');
     }
+
+    // Check if token is expired and refresh if needed
+    if (!whoopTokenStorage.isTokenValid(tokenData) && tokenData.refresh_token) {
+      console.log('Token expired, attempting to refresh...');
+      try {
+        const refreshedToken = await this.refreshToken(tokenData.refresh_token);
+        tokenData = refreshedToken;
+        await whoopTokenStorage.setDefaultToken(refreshedToken);
+        console.log('Token refreshed successfully');
+      } catch (error) {
+        console.error('Failed to refresh token:', error);
+        throw new Error('WHOOP token expired and refresh failed');
+      }
+    }
+
     return { Authorization: `Bearer ${tokenData.access_token}` };
+  }
+
+  private async refreshToken(refreshToken: string): Promise<any> {
+    const clientId = process.env.WHOOP_CLIENT_ID;
+    const clientSecret = process.env.WHOOP_CLIENT_SECRET;
+    
+    if (!clientId || !clientSecret) {
+      throw new Error('Missing WHOOP client credentials');
+    }
+
+    try {
+      const response = await axios.post('https://api.prod.whoop.com/oauth/oauth2/token', {
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: clientId,
+        client_secret: clientSecret,
+      });
+
+      const { access_token, refresh_token, expires_in } = response.data;
+      const expiresAt = expires_in ? Date.now() + (expires_in * 1000) : undefined;
+
+      return {
+        access_token,
+        refresh_token: refresh_token || refreshToken,
+        expires_at: expiresAt ? Math.floor(expiresAt / 1000) : undefined,
+        user_id: 'default'
+      };
+    } catch (error) {
+      console.error('Token refresh failed:', error);
+      throw error;
+    }
   }
 
   async exchangeCodeForToken(code: string): Promise<any> {
