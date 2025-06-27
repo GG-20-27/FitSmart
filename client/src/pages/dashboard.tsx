@@ -188,7 +188,7 @@ export default function Dashboard() {
 
   const isWhoopConnected = whoopAuthStatus?.authenticated;
   const isLoading = whoopLoading || authLoading;
-  const hasError = whoopError || authError || (whoopData === null) || (whoopAuthStatus?.authenticated && !whoopData);
+  const hasError = whoopError || authError;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -206,30 +206,34 @@ export default function Dashboard() {
           </div>
           
           <div className="flex items-center space-x-3">
-            {isWhoopConnected && (
+            {isWhoopConnected ? (
               <>
                 <div className="flex items-center space-x-2 px-3 py-1 bg-green-600/20 border border-green-500/30 rounded-full">
                   <div className="w-2 h-2 bg-green-400 rounded-full"></div>
                   <span className="text-green-400 text-sm font-medium">Connected</span>
                 </div>
-                {hasError && (
-                  <Button
-                    onClick={() => window.open('/api/whoop/login', '_blank')}
-                    variant="outline"
-                    size="sm"
-                    className="relative overflow-hidden border-transparent bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:from-blue-600 hover:to-purple-700 animate-pulse"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-purple-500 opacity-50 animate-pulse"></div>
-                    <div className="relative flex items-center space-x-2">
-                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                      </svg>
-                      <RefreshCw className="h-4 w-4" />
-                      <span className="text-sm font-medium">Reconnect WHOOP</span>
-                    </div>
-                  </Button>
-                )}
+                <Button
+                  onClick={() => window.open('/api/whoop/login', '_blank')}
+                  variant="outline"
+                  size="sm"
+                  className="relative overflow-hidden border-transparent bg-gradient-to-r from-blue-500 to-purple-600 text-white hover:from-blue-600 hover:to-purple-700"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-purple-500 opacity-30 animate-pulse"></div>
+                  <div className="relative flex items-center space-x-2">
+                    <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                    <RefreshCw className="h-4 w-4" />
+                    <span className="text-sm font-medium hidden sm:inline">Reconnect WHOOP</span>
+                    <span className="text-sm font-medium sm:hidden">Reconnect</span>
+                  </div>
+                </Button>
               </>
+            ) : (
+              <div className="flex items-center space-x-2 px-3 py-1 bg-red-600/20 border border-red-500/30 rounded-full">
+                <div className="w-2 h-2 bg-red-400 rounded-full"></div>
+                <span className="text-red-400 text-sm font-medium">Disconnected</span>
+              </div>
             )}
           </div>
         </div>
