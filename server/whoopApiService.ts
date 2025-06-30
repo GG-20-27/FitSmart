@@ -38,6 +38,7 @@ export interface WhoopTodayData {
   hrv?: number;
   resting_heart_rate?: number;
   sleep_score?: number;
+  sleep_hours?: number;
   raw?: {
     cycle?: any;
     recovery?: any;
@@ -289,7 +290,7 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestSleepScore(): Promise<number | null> {
+  async getLatestSleepData(): Promise<{ score: number | null; hours: number | null }> {
     try {
       // Get recent cycles - sleep data is typically in previous cycle
       const headers = await this.authHeader();
@@ -301,9 +302,12 @@ export class WhoopApiService {
           const cycle = response.data.records[i];
           try {
             const sleepData = await this.getSleep(cycle.id);
-            if (sleepData?.score?.sleep_score) {
-              console.log(`Found sleep score ${sleepData.score.sleep_score} for cycle ${cycle.id}`);
-              return sleepData.score.sleep_score;
+            if (sleepData?.score?.sleep_score && sleepData?.stage_summary?.total_in_bed_time_milli) {
+              const sleepScore = sleepData.score.sleep_score;
+              // Convert milliseconds to hours
+              const sleepHours = Math.round((sleepData.stage_summary.total_in_bed_time_milli / (1000 * 60 * 60)) * 10) / 10;
+              console.log(`Found sleep data for cycle ${cycle.id}: ${sleepScore}% score, ${sleepHours} hours`);
+              return { score: sleepScore, hours: sleepHours };
             }
           } catch (error) {
             // Skip cycles without sleep data (404 errors are normal)
@@ -313,11 +317,16 @@ export class WhoopApiService {
       }
       
       console.log('No sleep data found in recent cycles');
-      return null;
+      return { score: null, hours: null };
     } catch (error) {
-      console.error('Error fetching latest sleep score:', error);
-      return null;
+      console.error('Error fetching latest sleep data:', error);
+      return { score: null, hours: null };
     }
+  }
+
+  async getLatestSleepScore(): Promise<number | null> {
+    const data = await this.getLatestSleepData();
+    return data.score;
   }
 
   async getWeeklyAverages(): Promise<{

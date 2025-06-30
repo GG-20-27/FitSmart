@@ -76,6 +76,7 @@ export interface WhoopTodayResponse {
   hrv?: number;
   resting_heart_rate?: number;
   sleep_score?: number;
+  sleep_hours?: number;
   raw?: {
     cycle?: any;
     recovery?: any;
