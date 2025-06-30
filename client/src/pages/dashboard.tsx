@@ -339,13 +339,13 @@ export default function Dashboard() {
                   <Moon className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-purple-400">
-                  {whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
-                    <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
+                  {whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
+                    <><CountUp end={whoopData.sleep_hours} duration={1200} decimals={1} /> hrs</>
                   ) : (
                     <span className="text-slate-500">N/A</span>
                   )}
                 </div>
-                {(whoopData?.sleep_score === null || whoopData?.sleep_score === undefined) && (
+                {(whoopData?.sleep_hours === null || whoopData?.sleep_hours === undefined) && (
                   <div className="text-xs text-slate-500 mt-1 text-center">
                     Sleep data not available yet
                   </div>

@@ -206,6 +206,7 @@ export class WhoopApiService {
       
       if (response.status === 200) {
         console.log('Sleep data found for cycle:', cycleId);
+        console.log('Sleep data structure:', JSON.stringify(response.data, null, 2));
         return response.data;
       }
       return null;
@@ -232,6 +233,7 @@ export class WhoopApiService {
               
               if (previousSleepResponse.status === 200) {
                 console.log('Sleep data found in previous cycle:', previousCycleId);
+                console.log('Previous cycle sleep data structure:', JSON.stringify(previousSleepResponse.data, null, 2));
                 return previousSleepResponse.data;
               }
             }
