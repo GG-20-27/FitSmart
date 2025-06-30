@@ -339,8 +339,8 @@ export default function Dashboard() {
                   <Moon className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-purple-400">
-                  {whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
-                    <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
+                  {whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
+                    <><CountUp end={whoopData.sleep_hours} duration={1200} decimals={1} /> hrs</>
                   ) : (
                     <span className="text-slate-500">Sleep data processing – check back in 10 minutes</span>
                   )}
@@ -348,7 +348,7 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center justify-center space-x-2">
                 <Moon className="h-5 w-5 text-purple-400" />
-                <span className="text-slate-300 font-medium">Sleep</span>
+                <span className="text-slate-300 font-medium">Total Sleep (hrs)</span>
               </div>
             </CardContent>
           </Card>

@@ -37,7 +37,7 @@ export interface WhoopTodayData {
   recovery_score?: number;
   hrv?: number;
   resting_heart_rate?: number;
-  sleep_score?: number;
+  sleep_hours?: number;
   raw?: {
     cycle?: any;
     recovery?: any;
@@ -291,7 +291,7 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestSleepScore(): Promise<number | null> {
+  async getLatestSleepHours(): Promise<number | null> {
     try {
       // Get 5 most recent cycles and iterate backwards starting from yesterday
       const headers = await this.authHeader();
@@ -314,11 +314,11 @@ export class WhoopApiService {
               const sleepData = sleepResponse.data;
               
               // Check that nap === false and sleep_hours is not null/undefined
-              if (sleepData.nap === false && sleepData.score?.sleep_score != null) {
-                console.log(`Found valid sleep data for cycle ${cycle.id}: ${sleepData.score.sleep_score}% (non-nap)`);
-                return sleepData.score.sleep_score;
+              if (sleepData.nap === false && sleepData.sleep_hours != null) {
+                console.log(`Found valid sleep data for cycle ${cycle.id}: ${sleepData.sleep_hours} hours (non-nap)`);
+                return Math.round(sleepData.sleep_hours * 10) / 10; // Round to 1 decimal place
               } else {
-                console.log(`Skipping cycle ${cycle.id}: nap=${sleepData.nap}, sleep_score=${sleepData.score?.sleep_score}`);
+                console.log(`Skipping cycle ${cycle.id}: nap=${sleepData.nap}, sleep_hours=${sleepData.sleep_hours}`);
               }
             }
           } catch (error: any) {
@@ -332,7 +332,7 @@ export class WhoopApiService {
       console.log('No valid sleep data found in recent 5 cycles');
       return null;
     } catch (error) {
-      console.error('Error fetching latest sleep score:', error);
+      console.error('Error fetching latest sleep hours:', error);
       return null;
     }
   }
