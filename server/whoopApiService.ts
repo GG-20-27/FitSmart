@@ -38,7 +38,6 @@ export interface WhoopTodayData {
   hrv?: number;
   resting_heart_rate?: number;
   sleep_score?: number;
-  sleep_hours?: number;
   raw?: {
     cycle?: any;
     recovery?: any;
@@ -292,43 +291,50 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestSleepData(): Promise<{ score: number | null; hours: number | null }> {
+  async getLatestSleepScore(): Promise<number | null> {
     try {
-      // Get recent cycles - sleep data is typically in previous cycle
+      // Get 5 most recent cycles and iterate backwards starting from yesterday
       const headers = await this.authHeader();
       const response = await axios.get(`${BASE}/cycle?limit=5`, { headers });
       
       if (response.data.records && response.data.records.length > 1) {
-        // Start from second cycle (previous night) as sleep is processed from previous cycle
+        // Start from second cycle (yesterday) and iterate through older cycles
         for (let i = 1; i < response.data.records.length; i++) {
           const cycle = response.data.records[i];
+          
           try {
-            const sleepData = await this.getSleep(cycle.id);
-            if (sleepData?.score?.sleep_score && sleepData?.stage_summary?.total_in_bed_time_milli) {
-              const sleepScore = sleepData.score.sleep_score;
-              // Convert milliseconds to hours
-              const sleepHours = Math.round((sleepData.stage_summary.total_in_bed_time_milli / (1000 * 60 * 60)) * 10) / 10;
-              console.log(`Found sleep data for cycle ${cycle.id}: ${sleepScore}% score, ${sleepHours} hours`);
-              return { score: sleepScore, hours: sleepHours };
+            // Add retry delay for most recent cycle to account for WHOOP scoring lag
+            if (i === 1) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
             }
-          } catch (error) {
+            
+            const sleepResponse = await axios.get(`${BASE}/cycle/${cycle.id}/sleep`, { headers });
+            
+            if (sleepResponse.status === 200 && sleepResponse.data) {
+              const sleepData = sleepResponse.data;
+              
+              // Check that nap === false and sleep_hours is not null/undefined
+              if (sleepData.nap === false && sleepData.score?.sleep_score != null) {
+                console.log(`Found valid sleep data for cycle ${cycle.id}: ${sleepData.score.sleep_score}% (non-nap)`);
+                return sleepData.score.sleep_score;
+              } else {
+                console.log(`Skipping cycle ${cycle.id}: nap=${sleepData.nap}, sleep_score=${sleepData.score?.sleep_score}`);
+              }
+            }
+          } catch (error: any) {
             // Skip cycles without sleep data (404 errors are normal)
+            console.log(`No sleep data for cycle ${cycle.id}: ${error.response?.status}`);
             continue;
           }
         }
       }
       
-      console.log('No sleep data found in recent cycles');
-      return { score: null, hours: null };
+      console.log('No valid sleep data found in recent 5 cycles');
+      return null;
     } catch (error) {
-      console.error('Error fetching latest sleep data:', error);
-      return { score: null, hours: null };
+      console.error('Error fetching latest sleep score:', error);
+      return null;
     }
-  }
-
-  async getLatestSleepScore(): Promise<number | null> {
-    const data = await this.getLatestSleepData();
-    return data.score;
   }
 
   async getWeeklyAverages(): Promise<{
@@ -447,7 +453,7 @@ export class WhoopApiService {
         recovery_score: recovery?.score?.recovery_score || null,
         hrv: recovery?.score?.hrv_rmssd_milli || null,
         resting_heart_rate: recovery?.score?.resting_heart_rate || null,
-        sleep_score: sleepData.sleep_score,
+        sleep_score: result.sleep_score,
         raw: {
           cycle: latestCycle,
           recovery: recovery,
