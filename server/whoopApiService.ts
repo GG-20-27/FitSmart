@@ -444,8 +444,16 @@ export class WhoopApiService {
       const recovery = await this.getRecovery(latestCycle.id);
       console.log('Recovery data found for cycle:', latestCycle.id);
 
-      // Get latest sleep data (today or yesterday)
-      const sleepData = await this.getLatestSleepData();
+      // Get sleep data - try to find any recent cycle with valid sleep data
+      let sleepHours = null;
+      try {
+        sleepHours = await this.getLatestSleepHours();
+        if (sleepHours !== null) {
+          console.log(`Using sleep hours ${sleepHours} from recent cycles`);
+        }
+      } catch (error) {
+        console.log('Sleep data not available in recent cycles');
+      }
 
       const result: WhoopTodayData = {
         cycle_id: latestCycle.id,
@@ -453,11 +461,11 @@ export class WhoopApiService {
         recovery_score: recovery?.score?.recovery_score || null,
         hrv: recovery?.score?.hrv_rmssd_milli || null,
         resting_heart_rate: recovery?.score?.resting_heart_rate || null,
-        sleep_score: result.sleep_score,
+        sleep_hours: sleepHours,
         raw: {
           cycle: latestCycle,
           recovery: recovery,
-          sleep: sleepData
+          sleep: sleepHours
         }
       };
 
@@ -470,7 +478,7 @@ export class WhoopApiService {
         recovery_score: result.recovery_score,
         hrv: result.hrv,
         resting_heart_rate: result.resting_heart_rate,
-        sleep_score: result.sleep_score,
+        sleep_hours: result.sleep_hours,
         raw_data: result.raw
       };
 
