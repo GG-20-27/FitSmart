@@ -118,6 +118,13 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 1, 2025: Enhanced WHOOP API integration for reliable sleep data display
+  - Implemented getLatestSleepSession() method with date range queries using GET /sleep?start=${yesterday}&end=${today}
+  - Added automatic fallback to previous cycles when current sleep data is not available
+  - Enhanced sleep data filtering to exclude naps and prioritize most recent valid sessions
+  - Updated frontend sleep metric label from "Total Sleep (hrs)" to "Sleep (hrs)"
+  - Improved fallback messaging: "Sleep data still syncing from WHOOP" when data unavailable
+  - Expanded cycle search range to 7 days for better sleep data availability
 - July 1, 2025: Implemented comprehensive error handling for API data fetching
   - Added WhoopApiError class with detailed error types (AUTHENTICATION_ERROR, RATE_LIMIT_ERROR, NETWORK_ERROR, etc.)
   - Implemented retry logic with exponential backoff and jitter for all WHOOP API calls

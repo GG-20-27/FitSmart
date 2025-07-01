@@ -342,13 +342,13 @@ export default function Dashboard() {
                   {whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
                     <><CountUp end={whoopData.sleep_hours} duration={1200} decimals={1} /> hrs</>
                   ) : (
-                    <span className="text-slate-500">Sleep data processing – check back in 10 minutes</span>
+                    <span className="text-sm text-slate-500">Sleep data still syncing from WHOOP</span>
                   )}
                 </div>
               </div>
               <div className="flex items-center justify-center space-x-2">
                 <Moon className="h-5 w-5 text-purple-400" />
-                <span className="text-slate-300 font-medium">Total Sleep (hrs)</span>
+                <span className="text-slate-300 font-medium">Sleep (hrs)</span>
               </div>
             </CardContent>
           </Card>
