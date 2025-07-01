@@ -187,6 +187,29 @@ export default function Dashboard() {
     refetchInterval: 10 * 60 * 1000, // Refresh every 10 minutes
   });
 
+  // Reset OAuth connection mutation
+  const resetAuthMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest('POST', '/api/whoop/reset');
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      console.log('WHOOP OAuth reset successful');
+      if (data.auth_url) {
+        // Open new OAuth window with fresh scopes
+        window.open(data.auth_url, '_blank', 'width=600,height=700');
+        
+        // Refresh auth status after a delay
+        setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ['/api/whoop/status'] });
+        }, 2000);
+      }
+    },
+    onError: (error) => {
+      console.error('Failed to reset WHOOP OAuth:', error);
+    }
+  });
+
   const isWhoopConnected = whoopAuthStatus?.authenticated;
   const isLoading = whoopLoading || authLoading;
   const hasError = whoopError || authError;
@@ -316,13 +339,13 @@ export default function Dashboard() {
                       )}
                     </Button>
                     <Button
-                      onClick={() => refetchData()}
-                      disabled={dataLoading}
+                      onClick={() => refetchWhoop()}
+                      disabled={whoopLoading}
                       variant="outline"
                       size="sm"
                       className="border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white"
                     >
-                      {dataLoading ? (
+                      {whoopLoading ? (
                         <RefreshCw className="w-4 h-4 animate-spin" />
                       ) : (
                         <RefreshCw className="w-4 h-4" />
