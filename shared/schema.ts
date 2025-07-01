@@ -81,6 +81,11 @@ export interface WhoopTodayResponse {
     recovery?: any;
     sleep?: any;
   };
+  error?: {
+    type: string;
+    message: string;
+    retryable: boolean;
+  };
 }
 
 export interface MealResponse {

@@ -1,8 +1,43 @@
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
 import { whoopTokenStorage } from './whoopTokenStorage';
 
 const BASE = 'https://api.prod.whoop.com/developer/v1';
 const WHOOP_OAUTH_BASE = 'https://api.prod.whoop.com/oauth';
+
+// Error types for better error handling
+export enum WhoopErrorType {
+  AUTHENTICATION_ERROR = 'AUTHENTICATION_ERROR',
+  RATE_LIMIT_ERROR = 'RATE_LIMIT_ERROR',
+  NETWORK_ERROR = 'NETWORK_ERROR',
+  DATA_NOT_FOUND = 'DATA_NOT_FOUND',
+  INVALID_TOKEN = 'INVALID_TOKEN',
+  API_ERROR = 'API_ERROR',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR'
+}
+
+export interface WhoopError {
+  type: WhoopErrorType;
+  message: string;
+  statusCode?: number;
+  retryable: boolean;
+  details?: any;
+}
+
+class WhoopApiError extends Error {
+  public readonly type: WhoopErrorType;
+  public readonly statusCode?: number;
+  public readonly retryable: boolean;
+  public readonly details?: any;
+
+  constructor(error: WhoopError) {
+    super(error.message);
+    this.name = 'WhoopApiError';
+    this.type = error.type;
+    this.statusCode = error.statusCode;
+    this.retryable = error.retryable;
+    this.details = error.details;
+  }
+}
 
 export interface WhoopRecoveryData {
   recovery_score: number;
@@ -42,6 +77,11 @@ export interface WhoopTodayData {
     cycle?: any;
     recovery?: any;
     sleep?: any;
+  };
+  error?: {
+    type: string;
+    message: string;
+    retryable: boolean;
   };
 }
 
@@ -294,61 +334,101 @@ export class WhoopApiService {
   async getLatestSleepHours(): Promise<number | null> {
     try {
       // Try direct sleep endpoint first
-      const headers = await this.authHeader();
+      console.log('Attempting to fetch sleep data from direct endpoint...');
       
-      // Get recent sleep data directly
-      const sleepResponse = await axios.get(`${BASE}/sleep?limit=5`, { headers });
-      
-      if (sleepResponse.data && sleepResponse.data.records && sleepResponse.data.records.length > 0) {
-        // Find the most recent non-nap sleep
-        for (const sleep of sleepResponse.data.records) {
-          if (sleep.nap === false && sleep.sleep_hours != null && sleep.sleep_hours > 0) {
-            console.log(`Found valid sleep data: ${sleep.sleep_hours} hours (non-nap)`);
-            return Math.round(sleep.sleep_hours * 10) / 10; // Round to 1 decimal place
+      const directSleepData = await this.retryWithBackoff(async () => {
+        const headers = await this.authHeader();
+        const response = await axios.get(`${BASE}/sleep?limit=5`, { 
+          headers,
+          timeout: 10000
+        });
+        
+        if (response.data && response.data.records && response.data.records.length > 0) {
+          // Find the most recent non-nap sleep
+          for (const sleep of response.data.records) {
+            if (sleep.nap === false && sleep.sleep_hours != null && sleep.sleep_hours > 0) {
+              console.log(`Found valid sleep data from direct endpoint: ${sleep.sleep_hours} hours`);
+              return Math.round(sleep.sleep_hours * 10) / 10;
+            }
           }
         }
-      }
+        
+        throw new WhoopApiError({
+          type: WhoopErrorType.DATA_NOT_FOUND,
+          message: 'No valid sleep data in direct endpoint',
+          retryable: false
+        });
+      }, 'direct sleep endpoint');
       
-      // Fallback to cycle-based approach if direct sleep endpoint doesn't work
-      const cycleResponse = await axios.get(`${BASE}/cycle?limit=5`, { headers });
+      return directSleepData;
       
-      if (cycleResponse.data.records && cycleResponse.data.records.length > 1) {
-        // Start from second cycle (yesterday) and iterate through older cycles
-        for (let i = 1; i < cycleResponse.data.records.length; i++) {
-          const cycle = cycleResponse.data.records[i];
+    } catch (directError) {
+      console.log('Direct sleep endpoint failed, trying cycle-based approach...');
+      
+      try {
+        // Fallback to cycle-based approach
+        const cycleBasedData = await this.retryWithBackoff(async () => {
+          const headers = await this.authHeader();
+          const cycleResponse = await axios.get(`${BASE}/cycle?limit=5`, { 
+            headers,
+            timeout: 10000
+          });
           
-          try {
-            // Add retry delay for most recent cycle to account for WHOOP scoring lag
-            if (i === 1) {
-              await new Promise(resolve => setTimeout(resolve, 2000));
-            }
+          if (!cycleResponse.data.records || cycleResponse.data.records.length < 2) {
+            throw new WhoopApiError({
+              type: WhoopErrorType.DATA_NOT_FOUND,
+              message: 'Insufficient cycle data for sleep lookup',
+              retryable: false
+            });
+          }
+          
+          // Start from second cycle (yesterday) and iterate through older cycles
+          for (let i = 1; i < cycleResponse.data.records.length; i++) {
+            const cycle = cycleResponse.data.records[i];
             
-            const sleepResponse = await axios.get(`${BASE}/cycle/${cycle.id}/sleep`, { headers });
-            
-            if (sleepResponse.status === 200 && sleepResponse.data) {
-              const sleepData = sleepResponse.data;
+            try {
+              // Add retry delay for most recent cycle to account for WHOOP scoring lag
+              if (i === 1) {
+                console.log('Adding delay for most recent cycle processing...');
+                await new Promise(resolve => setTimeout(resolve, 2000));
+              }
+              
+              const sleepData = await this.getSleep(cycle.id);
               
               // Check that nap === false and sleep_hours is not null/undefined
-              if (sleepData.nap === false && sleepData.sleep_hours != null) {
-                console.log(`Found valid sleep data for cycle ${cycle.id}: ${sleepData.sleep_hours} hours (non-nap)`);
-                return Math.round(sleepData.sleep_hours * 10) / 10; // Round to 1 decimal place
+              if (sleepData.nap === false && sleepData.sleep_hours != null && sleepData.sleep_hours > 0) {
+                console.log(`Found valid sleep data for cycle ${cycle.id}: ${sleepData.sleep_hours} hours`);
+                return Math.round(sleepData.sleep_hours * 10) / 10;
               } else {
                 console.log(`Skipping cycle ${cycle.id}: nap=${sleepData.nap}, sleep_hours=${sleepData.sleep_hours}`);
               }
+            } catch (cycleError) {
+              if (cycleError instanceof WhoopApiError && cycleError.type === WhoopErrorType.DATA_NOT_FOUND) {
+                console.log(`No sleep data for cycle ${cycle.id}, continuing to next cycle`);
+                continue;
+              }
+              throw cycleError;
             }
-          } catch (error: any) {
-            // Skip cycles without sleep data (404 errors are normal)
-            console.log(`No sleep data for cycle ${cycle.id}: ${error.response?.status}`);
-            continue;
           }
-        }
+          
+          throw new WhoopApiError({
+            type: WhoopErrorType.DATA_NOT_FOUND,
+            message: 'No valid sleep data found in recent cycles',
+            retryable: false
+          });
+        }, 'cycle-based sleep lookup');
+        
+        return cycleBasedData;
+        
+      } catch (cycleError) {
+        console.error('Both direct and cycle-based sleep data retrieval failed:', {
+          directError: directError instanceof WhoopApiError ? directError.message : directError,
+          cycleError: cycleError instanceof WhoopApiError ? cycleError.message : cycleError
+        });
+        
+        // Return null instead of throwing to allow graceful degradation
+        return null;
       }
-      
-      console.log('No valid sleep data found in recent 5 cycles');
-      return null;
-    } catch (error) {
-      console.error('Error fetching latest sleep hours:', error);
-      return null;
     }
   }
 

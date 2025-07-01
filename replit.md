@@ -118,6 +118,15 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 1, 2025: Implemented comprehensive error handling for API data fetching
+  - Added WhoopApiError class with detailed error types (AUTHENTICATION_ERROR, RATE_LIMIT_ERROR, NETWORK_ERROR, etc.)
+  - Implemented retry logic with exponential backoff and jitter for all WHOOP API calls
+  - Enhanced error logging with context and structured error information
+  - Added graceful degradation - API returns partial data when possible instead of complete failure
+  - Updated frontend with retry buttons and better error messages for users
+  - Added timeout handling (10-15 seconds) for all API requests
+  - Implemented individual error handling for each data type (recovery, sleep, strain, HRV)
+  - Enhanced weekly averages calculation with better error resilience
 - June 20, 2025: Completed FitScore Health Dashboard redesign (Phase 2)
   - Implemented complete UI redesign with FitScore branding and dark theme
   - Created custom SVG FitScore logo with gradient blue/purple styling and health icons
