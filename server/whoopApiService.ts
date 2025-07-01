@@ -293,14 +293,29 @@ export class WhoopApiService {
 
   async getLatestSleepHours(): Promise<number | null> {
     try {
-      // Get 5 most recent cycles and iterate backwards starting from yesterday
+      // Try direct sleep endpoint first
       const headers = await this.authHeader();
-      const response = await axios.get(`${BASE}/cycle?limit=5`, { headers });
       
-      if (response.data.records && response.data.records.length > 1) {
+      // Get recent sleep data directly
+      const sleepResponse = await axios.get(`${BASE}/sleep?limit=5`, { headers });
+      
+      if (sleepResponse.data && sleepResponse.data.records && sleepResponse.data.records.length > 0) {
+        // Find the most recent non-nap sleep
+        for (const sleep of sleepResponse.data.records) {
+          if (sleep.nap === false && sleep.sleep_hours != null && sleep.sleep_hours > 0) {
+            console.log(`Found valid sleep data: ${sleep.sleep_hours} hours (non-nap)`);
+            return Math.round(sleep.sleep_hours * 10) / 10; // Round to 1 decimal place
+          }
+        }
+      }
+      
+      // Fallback to cycle-based approach if direct sleep endpoint doesn't work
+      const cycleResponse = await axios.get(`${BASE}/cycle?limit=5`, { headers });
+      
+      if (cycleResponse.data.records && cycleResponse.data.records.length > 1) {
         // Start from second cycle (yesterday) and iterate through older cycles
-        for (let i = 1; i < response.data.records.length; i++) {
-          const cycle = response.data.records[i];
+        for (let i = 1; i < cycleResponse.data.records.length; i++) {
+          const cycle = cycleResponse.data.records[i];
           
           try {
             // Add retry delay for most recent cycle to account for WHOOP scoring lag
