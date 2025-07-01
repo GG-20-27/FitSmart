@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw } from 'lucide-react';
+import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw } from 'lucide-react';
 import { formatTime } from '@/lib/utils';
 import { WhoopTodayResponse } from '@shared/schema';
+import { apiRequest, queryClient } from '@/lib/queryClient';
 
 interface WhoopAuthStatus {
   authenticated: boolean;
@@ -279,6 +280,56 @@ export default function Dashboard() {
                     </>
                   )}
                 </Button>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Connection Controls - Show when connected */}
+        {isWhoopConnected && (
+          <div className="max-w-2xl mx-auto mb-8">
+            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-slate-300 font-medium">WHOOP Connected</span>
+                  </div>
+                  <div className="flex space-x-2">
+                    <Button
+                      onClick={() => resetAuthMutation.mutate()}
+                      disabled={resetAuthMutation.isPending}
+                      variant="outline"
+                      size="sm"
+                      className="border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white"
+                    >
+                      {resetAuthMutation.isPending ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Resetting...
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw className="w-4 h-4 mr-2" />
+                          Reset Auth
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      onClick={() => refetchData()}
+                      disabled={dataLoading}
+                      variant="outline"
+                      size="sm"
+                      className="border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white"
+                    >
+                      {dataLoading ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>

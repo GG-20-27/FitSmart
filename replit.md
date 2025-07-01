@@ -118,6 +118,11 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 1, 2025: Added Reset Auth button to dashboard for WHOOP OAuth re-authentication
+  - Integrated reset functionality directly into dashboard connection controls
+  - Added visual connection status indicator with Reset Auth and Refresh buttons
+  - Maintains existing UI design while providing easy access to OAuth reset
+  - Button appears only when WHOOP is connected for better UX
 - July 1, 2025: Implemented WHOOP OAuth reset functionality for complete re-authentication
   - Added OAuth reset endpoint (/api/whoop/reset) to clear stored tokens and generate fresh auth URL
   - Updated WHOOP token storage with deleteWhoopToken functionality for proper token cleanup
