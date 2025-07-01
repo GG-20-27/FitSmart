@@ -15,6 +15,11 @@ export interface IStorage {
   // WHOOP data operations
   getWhoopDataByDate(date: string): Promise<WhoopData | undefined>;
   createOrUpdateWhoopData(data: InsertWhoopData): Promise<WhoopData>;
+  
+  // WHOOP token operations
+  getWhoopToken(userId: string): Promise<WhoopToken | undefined>;
+  createOrUpdateWhoopToken(data: InsertWhoopToken): Promise<WhoopToken>;
+  deleteWhoopToken(userId: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {

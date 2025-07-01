@@ -106,7 +106,7 @@ export class WhoopApiService {
       }
     }
 
-    return { Authorization: `Bearer ${tokenData.access_token}` };
+    return { Authorization: `Bearer ${tokenData!.access_token}` };
   }
 
   private async refreshToken(refreshToken: string): Promise<any> {
@@ -354,8 +354,8 @@ export class WhoopApiService {
         if (response.data && response.data.records && response.data.records.length > 0) {
           // Find the most recent non-nap sleep session
           const sleepSessions = response.data.records
-            .filter(sleep => sleep.nap === false && sleep.sleep_hours != null && sleep.sleep_hours > 0)
-            .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime()); // Sort by most recent
+            .filter((sleep: any) => sleep.nap === false && sleep.sleep_hours != null && sleep.sleep_hours > 0)
+            .sort((a: any, b: any) => new Date(b.start).getTime() - new Date(a.start).getTime()); // Sort by most recent
           
           if (sleepSessions.length > 0) {
             const mostRecentSleep = sleepSessions[0];
@@ -527,15 +527,17 @@ export class WhoopApiService {
       const recovery = await this.getRecovery(latestCycle.id);
       console.log('Recovery data found for cycle:', latestCycle.id);
 
-      // Get sleep data - try to find any recent cycle with valid sleep data
+      // Get sleep data - try to find any recent valid sleep session
       let sleepHours = null;
       try {
-        sleepHours = await this.getLatestSleepHours();
+        sleepHours = await this.getLatestSleepSession();
         if (sleepHours !== null) {
-          console.log(`Using sleep hours ${sleepHours} from recent cycles`);
+          console.log(`Sleep hours retrieved: ${sleepHours}`);
+        } else {
+          console.log('No sleep data available - this is normal if sleep hasn\'t been processed yet');
         }
       } catch (error) {
-        console.log('Sleep data not available in recent cycles');
+        console.log('Sleep data retrieval failed:', error instanceof WhoopApiError ? error.message : error);
       }
 
       const result: WhoopTodayData = {

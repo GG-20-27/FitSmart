@@ -118,6 +118,12 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 1, 2025: Implemented WHOOP OAuth reset functionality for complete re-authentication
+  - Added OAuth reset endpoint (/api/whoop/reset) to clear stored tokens and generate fresh auth URL
+  - Updated WHOOP token storage with deleteWhoopToken functionality for proper token cleanup
+  - Enhanced OAuth scopes verification with explicit read:sleep scope logging
+  - Added Reset Auth button to frontend with proper loading states and error handling
+  - Implemented complete OAuth connection reset preserving all existing UI and backend structure
 - July 1, 2025: Enhanced WHOOP API integration for reliable sleep data display
   - Implemented getLatestSleepSession() method with date range queries using GET /sleep?start=${yesterday}&end=${today}
   - Added automatic fallback to previous cycles when current sleep data is not available
