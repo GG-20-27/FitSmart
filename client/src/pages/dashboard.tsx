@@ -218,18 +218,18 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-12">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-12 space-y-6 lg:space-y-0">
           <div className="flex items-center space-x-4">
             <div className="flex-shrink-0 p-1">
               <FitScoreLogo size={48} />
             </div>
-            <div>
-              <h1 className="text-3xl font-bold text-white">FitScore Health Dashboard</h1>
-              <p className="text-slate-400">Real-time WHOOP health analytics</p>
+            <div className="min-w-0">
+              <h1 className="text-2xl lg:text-3xl font-bold text-white">FitScore Health Dashboard</h1>
+              <p className="text-slate-400 text-sm lg:text-base">Real-time WHOOP health analytics</p>
             </div>
           </div>
           
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center justify-center lg:justify-end space-x-3">
             {isWhoopConnected ? (
               <>
                 <div className="flex items-center space-x-2 px-3 py-1 bg-green-600/20 border border-green-500/30 rounded-full">
