@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw } from 'lucide-react';
+import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar } from 'lucide-react';
 import { formatTime } from '@/lib/utils';
 import { WhoopTodayResponse } from '@shared/schema';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -230,6 +230,21 @@ export default function Dashboard() {
           </div>
           
           <div className="flex items-center justify-center lg:justify-end space-x-3">
+            {/* Calendar Button */}
+            <Button
+              onClick={() => window.open('/api/calendar/today', '_blank')}
+              variant="outline"
+              size="sm"
+              className="relative overflow-hidden border-transparent bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-600 hover:to-teal-700"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-teal-500 opacity-30 animate-pulse"></div>
+              <div className="relative flex items-center space-x-2">
+                <Calendar className="h-4 w-4" />
+                <span className="text-sm font-medium hidden sm:inline">Today's Calendar</span>
+                <span className="text-sm font-medium sm:hidden">Calendar</span>
+              </div>
+            </Button>
+            
             {isWhoopConnected ? (
               <>
                 <div className="flex items-center space-x-2 px-3 py-1 bg-green-600/20 border border-green-500/30 rounded-full">
