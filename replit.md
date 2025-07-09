@@ -43,6 +43,7 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - **WHOOP Authentication** (`/api/whoop/login`, `/api/whoop/callback`, `/api/whoop/status`): OAuth flow endpoints
 - **WHOOP Integration** (`/api/whoop/today`): Fetches daily health metrics from live API
 - **Meal Management** (`/api/meals`): File upload and meal data management
+- **Calendar Integration** (`/api/calendar/today`): Fetches today's events from Google Calendar .ics feeds
 - **File Upload**: Multer middleware for handling meal image uploads (10MB limit)
 
 ### Frontend Components
@@ -118,6 +119,13 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 9, 2025: Added Google Calendar integration with today's events endpoint
+  - Implemented GET /api/calendar/today route to fetch and parse public Google Calendar .ics feeds
+  - Parses events using node-ical library to extract title, start time, and location
+  - Filters events to only return today's future/active events (excludes past events)
+  - Returns JSON response with date and events array in Custom GPT compatible format
+  - Handles errors gracefully when calendar feeds are unreachable
+  - Supports multiple calendar feeds with fallback when one fails
 - July 1, 2025: Added Reset Auth button to dashboard for WHOOP OAuth re-authentication
   - Integrated reset functionality directly into dashboard connection controls
   - Added visual connection status indicator with Reset Auth and Refresh buttons

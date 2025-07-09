@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { WhoopTodayResponse, MealResponse, ApiStatusResponse } from "@shared/schema";
 import { whoopApiService } from "./whoopApiService";
 import { whoopTokenStorage } from "./whoopTokenStorage";
+import ical from "ical";
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -145,11 +146,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('🏃 WHOOP Data: GET /api/whoop/today');
   console.log('📸 Upload Meals: POST /api/meals (field: mealPhotos)');
   console.log('🍽️ Today\'s Meals: GET /api/meals/today');
+  console.log('📅 Calendar Today: GET /api/calendar/today');
   console.log('\n📝 Test with curl:');
   console.log('curl http://localhost:5000/api/health');
   console.log('curl http://localhost:5000/api/whoop/login');
   console.log('curl http://localhost:5000/api/whoop/today');
   console.log('curl http://localhost:5000/api/meals/today');
+  console.log('curl http://localhost:5000/api/calendar/today');
   console.log('curl -F "mealPhotos=@image.jpg" http://localhost:5000/api/meals');
   console.log('');
 
@@ -559,6 +562,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching all meals:', error);
       res.status(500).json({ error: 'Failed to fetch meals' });
+    }
+  });
+
+  // Google Calendar today's events endpoint
+  app.get('/api/calendar/today', async (req, res) => {
+    try {
+      console.log('Fetching today\'s calendar events...');
+      
+      // Extract calendar IDs from the embed URL
+      const calendarUrls = [
+        'https://calendar.google.com/calendar/ical/gguussttaavvss%40gmail.com/public/basic.ics',
+        'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics'
+      ];
+      
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+      
+      const allEvents: any[] = [];
+      
+      // Fetch and parse each calendar
+      for (const calendarUrl of calendarUrls) {
+        try {
+          console.log(`Fetching calendar from: ${calendarUrl}`);
+          const response = await fetch(calendarUrl);
+          
+          if (!response.ok) {
+            console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
+            continue;
+          }
+          
+          const icsData = await response.text();
+          const parsedCal = ical.parseICS(icsData);
+          
+          // Filter events for today
+          Object.keys(parsedCal).forEach(key => {
+            const event = parsedCal[key];
+            
+            if (event.type === 'VEVENT' && event.start && event.summary) {
+              const eventStart = new Date(event.start);
+              const eventEnd = event.end ? new Date(event.end) : eventStart;
+              
+              // Check if event is today and not in the past
+              const now = new Date();
+              const isToday = eventStart >= todayStart && eventStart < todayEnd;
+              const isFutureOrActive = eventEnd >= now;
+              
+              if (isToday && isFutureOrActive) {
+                allEvents.push({
+                  title: event.summary,
+                  start: eventStart.toISOString(),
+                  location: event.location || null
+                });
+              }
+            }
+          });
+        } catch (error) {
+          console.error(`Error parsing calendar ${calendarUrl}:`, error);
+        }
+      }
+      
+      // Sort events by start time
+      allEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+      
+      const result = {
+        date: today.toISOString().split('T')[0],
+        events: allEvents
+      };
+      
+      console.log(`Found ${allEvents.length} events for today`);
+      res.json(result);
+      
+    } catch (error) {
+      console.error('Error fetching calendar events:', error);
+      res.status(500).json({ 
+        error: 'Failed to fetch calendar events',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
     }
   });
 
