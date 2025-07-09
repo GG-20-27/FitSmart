@@ -119,13 +119,16 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
-- July 9, 2025: Added Google Calendar integration with today's events endpoint
-  - Implemented GET /api/calendar/today route to fetch and parse public Google Calendar .ics feeds
-  - Parses events using node-ical library to extract title, start time, and location
-  - Filters events to only return today's future/active events (excludes past events)
-  - Returns JSON response with date and events array in Custom GPT compatible format
-  - Handles errors gracefully when calendar feeds are unreachable
-  - Supports multiple calendar feeds with fallback when one fails
+- July 9, 2025: Implemented comprehensive calendar system with Europe/Zurich timezone support
+  - Added full calendar UI with React Big Calendar library supporting Day/Week/Month views
+  - Implemented Europe/Zurich timezone handling using luxon and moment-timezone libraries
+  - Created GET /api/calendar/events endpoint for date range queries supporting calendar views
+  - Enhanced existing GET /api/calendar/today endpoint with proper timezone conversion
+  - All event times now display in 24-hour format (HH:mm) localized to Europe/Zurich
+  - Calendar UI features Google Calendar-style clean design with dark theme integration
+  - Added calendar navigation button to dashboard linking to /calendar page
+  - Events automatically update based on selected view with proper timezone display
+  - Custom CSS styling for modern, responsive calendar interface matching project design
 - July 1, 2025: Added Reset Auth button to dashboard for WHOOP OAuth re-authentication
   - Integrated reset functionality directly into dashboard connection controls
   - Added visual connection status indicator with Reset Auth and Refresh buttons

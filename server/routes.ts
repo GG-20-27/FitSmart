@@ -11,6 +11,7 @@ import type { WhoopTodayResponse, MealResponse, ApiStatusResponse } from "@share
 import { whoopApiService } from "./whoopApiService";
 import { whoopTokenStorage } from "./whoopTokenStorage";
 import ical from "ical";
+import { DateTime } from "luxon";
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -576,9 +577,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics'
       ];
       
-      const today = new Date();
-      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-      const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+      // Use Europe/Zurich timezone for accurate date/time handling
+      const zurichTime = DateTime.now().setZone('Europe/Zurich');
+      const todayStart = zurichTime.startOf('day');
+      const todayEnd = zurichTime.endOf('day');
       
       const allEvents: any[] = [];
       
@@ -601,19 +603,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const event = parsedCal[key];
             
             if (event.type === 'VEVENT' && event.start && event.summary) {
-              const eventStart = new Date(event.start);
-              const eventEnd = event.end ? new Date(event.end) : eventStart;
+              // Convert event times to Europe/Zurich timezone
+              const eventStart = DateTime.fromJSDate(new Date(event.start)).setZone('Europe/Zurich');
+              const eventEnd = event.end ? DateTime.fromJSDate(new Date(event.end)).setZone('Europe/Zurich') : eventStart;
               
               // Check if event is today and not in the past
-              const now = new Date();
-              const isToday = eventStart >= todayStart && eventStart < todayEnd;
+              const now = DateTime.now().setZone('Europe/Zurich');
+              const isToday = eventStart >= todayStart && eventStart <= todayEnd;
               const isFutureOrActive = eventEnd >= now;
               
               if (isToday && isFutureOrActive) {
                 allEvents.push({
                   title: event.summary,
-                  start: eventStart.toISOString(),
-                  location: event.location || null
+                  start: eventStart.toISO(), // Returns ISO string with timezone info
+                  location: event.location || null,
+                  startTime: eventStart.toFormat('HH:mm'), // 24-hour format for display
+                  endTime: eventEnd.toFormat('HH:mm')
                 });
               }
             }
@@ -624,14 +629,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Sort events by start time
-      allEvents.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+      allEvents.sort((a, b) => DateTime.fromISO(a.start).toMillis() - DateTime.fromISO(b.start).toMillis());
       
       const result = {
-        date: today.toISOString().split('T')[0],
+        date: zurichTime.toISODate(), // Returns YYYY-MM-DD format
         events: allEvents
       };
       
       console.log(`Found ${allEvents.length} events for today`);
+      res.json(result);
+      
+    } catch (error) {
+      console.error('Error fetching calendar events:', error);
+      res.status(500).json({ 
+        error: 'Failed to fetch calendar events',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Calendar events endpoint with date range support
+  app.get('/api/calendar/events', async (req, res) => {
+    try {
+      const { start, end } = req.query as { start?: string; end?: string };
+      
+      if (!start || !end) {
+        return res.status(400).json({ error: 'start and end date parameters are required' });
+      }
+
+      console.log(`Fetching calendar events from ${start} to ${end}...`);
+      
+      const calendarUrls = [
+        'https://calendar.google.com/calendar/ical/gguussttaavvss%40gmail.com/public/basic.ics',
+        'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics'
+      ];
+      
+      // Use Europe/Zurich timezone for date range
+      const rangeStart = DateTime.fromISO(start).setZone('Europe/Zurich').startOf('day');
+      const rangeEnd = DateTime.fromISO(end).setZone('Europe/Zurich').endOf('day');
+      
+      const allEvents: any[] = [];
+      
+      // Fetch and parse each calendar
+      for (const calendarUrl of calendarUrls) {
+        try {
+          console.log(`Fetching calendar from: ${calendarUrl}`);
+          const response = await fetch(calendarUrl);
+          
+          if (!response.ok) {
+            console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
+            continue;
+          }
+          
+          const icsData = await response.text();
+          const parsedCal = ical.parseICS(icsData);
+          
+          // Filter events for date range
+          Object.keys(parsedCal).forEach(key => {
+            const event = parsedCal[key];
+            
+            if (event.type === 'VEVENT' && event.start && event.summary) {
+              const eventStart = DateTime.fromJSDate(new Date(event.start)).setZone('Europe/Zurich');
+              const eventEnd = event.end ? DateTime.fromJSDate(new Date(event.end)).setZone('Europe/Zurich') : eventStart;
+              
+              // Check if event overlaps with the requested range
+              const eventOverlaps = eventStart <= rangeEnd && eventEnd >= rangeStart;
+              
+              if (eventOverlaps) {
+                allEvents.push({
+                  id: key,
+                  title: event.summary,
+                  start: eventStart.toISO(),
+                  end: eventEnd.toISO(),
+                  startTime: eventStart.toFormat('HH:mm'),
+                  endTime: eventEnd.toFormat('HH:mm'),
+                  location: event.location || null,
+                  date: eventStart.toISODate()
+                });
+              }
+            }
+          });
+        } catch (error) {
+          console.error(`Error parsing calendar ${calendarUrl}:`, error);
+        }
+      }
+      
+      // Sort events by start time
+      allEvents.sort((a, b) => DateTime.fromISO(a.start).toMillis() - DateTime.fromISO(b.start).toMillis());
+      
+      const result = {
+        events: allEvents,
+        range: {
+          start: rangeStart.toISODate(),
+          end: rangeEnd.toISODate()
+        }
+      };
+      
+      console.log(`Found ${allEvents.length} events in date range`);
       res.json(result);
       
     } catch (error) {
