@@ -67,4 +67,13 @@ app.use((req, res, next) => {
   }, () => {
     log(`serving on port ${port}`);
   });
+
+  // Utility to print all registered routes (for debugging)
+  app._router.stack
+    .filter((r) => r.route)
+    .forEach((r) => {
+      const method = Object.keys(r.route.methods)[0].toUpperCase();
+      const path = r.route.path;
+      console.log(`[ROUTE] ${method} ${path}`);
+    });
 })();
