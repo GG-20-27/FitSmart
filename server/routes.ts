@@ -429,6 +429,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Secure WHOOP data endpoint for n8n automation
+  app.get('/api/whoop/n8n', async (req, res) => {
+    const token = req.headers['authorization'];
+
+    // Check for secret token passed by n8n
+    if (token !== `Bearer ${process.env.N8N_SECRET_TOKEN}`) {
+      return res.status(403).json({ error: 'Unauthorized: Invalid token' });
+    }
+
+    try {
+      console.log('Fetching WHOOP data for n8n automation...');
+      
+      // Token validation - use existing WHOOP token logic
+      const tokenData = await whoopTokenStorage.getDefaultToken();
+      if (!tokenData?.access_token) {
+        return res.status(401).json({ error: 'Missing WHOOP access token' });
+      }
+
+      if (!whoopTokenStorage.isTokenValid(tokenData)) {
+        console.warn('WHOOP access token has expired. Re-authentication required.');
+        return res.status(401).json({ 
+          error: 'WHOOP token expired',
+          message: 'Please visit /api/whoop/login to re-authenticate with WHOOP',
+          auth_url: '/api/whoop/login'
+        });
+      }
+      
+      // Fetch real WHOOP data using existing service
+      const whoopData = await whoopApiService.getTodaysData();
+      
+      // Store in database for caching
+      const todayDate = getTodayDate();
+      await storage.createOrUpdateWhoopData({
+        date: todayDate,
+        recoveryScore: Math.round(whoopData.recovery_score || 0),
+        sleepScore: Math.round(whoopData.sleep_score || 0),
+        strainScore: Math.round((whoopData.strain || 0) * 10), // Store as integer * 10
+        restingHeartRate: Math.round(whoopData.resting_heart_rate || 0)
+      });
+
+      // Log daily stats to userProfile.json
+      const dailyEntry = {
+        date: todayDate,
+        recovery_score: whoopData.recovery_score,
+        strain_score: whoopData.strain,
+        sleep_score: whoopData.sleep_score,
+        hrv: whoopData.hrv
+      };
+      logDailyStats(dailyEntry);
+
+      // Return the response format optimized for n8n
+      const result = {
+        cycle_id: whoopData.cycle_id,
+        strain: whoopData.strain,
+        recovery_score: whoopData.recovery_score,
+        hrv: whoopData.hrv,
+        resting_heart_rate: whoopData.resting_heart_rate,
+        sleep_score: whoopData.sleep_score,
+        date: todayDate,
+        raw: whoopData.raw
+      };
+
+      console.log('WHOOP data retrieved successfully for n8n');
+      res.json(result);
+    } catch (error: any) {
+      console.error('n8n WHOOP fetch failed:', error.message);
+      res.status(500).json({ error: 'Failed to fetch WHOOP data' });
+    }
+  });
+
   // WHOOP weekly averages endpoint
   app.get('/api/whoop/weekly', async (req, res) => {
     try {
