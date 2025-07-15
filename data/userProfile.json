@@ -106,5 +106,11 @@
     "recovery_score": 58,
     "strain_score": 8.201423,
     "hrv": 91.759674
+  },
+  {
+    "date": "2025-07-15",
+    "recovery_score": 84,
+    "strain_score": 5.972094,
+    "hrv": 98.00377
   }
 ]
