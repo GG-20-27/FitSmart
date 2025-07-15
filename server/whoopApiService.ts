@@ -608,8 +608,11 @@ export class WhoopApiService {
   getOAuthUrl(): string {
     const clientId = process.env.WHOOP_CLIENT_ID;
     const redirectUri = 'https://health-data-hub.replit.app/api/whoop/callback';
-    const scope = 'read:cycles read:recovery read:sleep read:profile read:workout read:body_measurement';
+    const scope = 'read:cycles read:recovery read:sleep read:profile read:workout read:body_measurement offline';
     const state = 'whoop_auth_' + Date.now();
+    
+    console.log('[OAUTH] Requesting scopes:', scope);
+    console.log('[OAUTH] Including offline scope for refresh token capability');
     
     return `${WHOOP_OAUTH_BASE}/oauth2/auth?` +
       `client_id=${clientId}&` +

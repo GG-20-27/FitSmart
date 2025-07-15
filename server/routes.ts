@@ -498,6 +498,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Token refresh test endpoint
+  app.post('/api/whoop/test-token-refresh', async (req, res) => {
+    try {
+      console.log('[TOKEN REFRESH TEST] Starting token refresh test...');
+      
+      // Get current token
+      const currentToken = await whoopTokenStorage.getDefaultToken();
+      if (!currentToken) {
+        return res.status(401).json({ error: 'No token found to test' });
+      }
+
+      console.log('[TOKEN REFRESH TEST] Current token expires at:', currentToken.expires_at);
+      console.log('[TOKEN REFRESH TEST] Current time:', Math.floor(Date.now() / 1000));
+      console.log('[TOKEN REFRESH TEST] Token valid:', whoopTokenStorage.isTokenValid(currentToken));
+      
+      // Simulate token expiration by temporarily setting expires_at to past
+      if (currentToken.expires_at) {
+        const expiredToken = {
+          ...currentToken,
+          expires_at: Math.floor(Date.now() / 1000) - 3600 // 1 hour ago
+        };
+        
+        await whoopTokenStorage.setDefaultToken(expiredToken);
+        console.log('[TOKEN REFRESH TEST] Token manually expired for testing');
+      }
+      
+      // Test the automatic refresh via getValidWhoopToken
+      try {
+        const refreshedToken = await whoopApiService.getValidWhoopToken();
+        console.log('[TOKEN REFRESH TEST] Token refresh successful');
+        
+        res.json({
+          success: true,
+          message: 'Token refresh test completed successfully',
+          original_expires_at: currentToken.expires_at,
+          new_expires_at: refreshedToken.expires_at,
+          refresh_worked: true
+        });
+      } catch (refreshError: any) {
+        console.error('[TOKEN REFRESH TEST] Token refresh failed:', refreshError.message);
+        
+        // Restore original token
+        await whoopTokenStorage.setDefaultToken(currentToken);
+        
+        res.json({
+          success: false,
+          message: 'Token refresh failed',
+          error: refreshError.message,
+          refresh_worked: false,
+          reason: refreshError.message.includes('refresh token') ? 'No refresh token available' : 'Refresh API failed'
+        });
+      }
+    } catch (error: any) {
+      console.error('[TOKEN REFRESH TEST] Test failed:', error.message);
+      res.status(500).json({ 
+        error: 'Token refresh test failed',
+        message: error.message
+      });
+    }
+  });
+
   // WHOOP weekly averages endpoint
   app.get('/api/whoop/weekly', async (req, res) => {
     try {
