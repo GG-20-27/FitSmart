@@ -119,6 +119,11 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 15, 2025: Enhanced WHOOP authentication flow with automatic dashboard redirect
+  - Added message event listener to handle authentication success messages
+  - Fixed authentication callback to automatically redirect to dashboard after successful login
+  - Improved user experience by eliminating manual refresh requirement
+  - Authentication now seamlessly transitions from popup to dashboard view
 - July 15, 2025: Implemented automatic WHOOP token refreshing for n8n automation endpoint
   - Added `getValidWhoopToken()` method that automatically refreshes expired tokens
   - Enhanced `refreshToken()` method with proper OAuth2 flow including offline scope

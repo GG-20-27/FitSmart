@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { AlertCircle, CheckCircle, ExternalLink, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { apiRequest, queryClient } from '@/lib/queryClient';
+import { useLocation } from 'wouter';
 
 interface WhoopAuthStatus {
   authenticated: boolean;
@@ -16,6 +17,7 @@ interface WhoopAuthStatus {
 
 export function WhoopAuth() {
   const [authWindow, setAuthWindow] = useState<Window | null>(null);
+  const [, setLocation] = useLocation();
 
   const { data: authStatus, isLoading, error } = useQuery<WhoopAuthStatus>({
     queryKey: ['/api/whoop/status'],
@@ -49,13 +51,32 @@ export function WhoopAuth() {
   });
 
   useEffect(() => {
+    // Listen for authentication success message
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'WHOOP_AUTH_SUCCESS') {
+        console.log('WHOOP authentication successful, redirecting to dashboard...');
+        // Close the auth window
+        if (authWindow && !authWindow.closed) {
+          authWindow.close();
+        }
+        setAuthWindow(null);
+        // Refresh auth status
+        queryClient.invalidateQueries({ queryKey: ['/api/whoop/status'] });
+        // Redirect to dashboard
+        setLocation('/');
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    
     // Clean up auth window on unmount
     return () => {
+      window.removeEventListener('message', handleMessage);
       if (authWindow && !authWindow.closed) {
         authWindow.close();
       }
     };
-  }, [authWindow]);
+  }, [authWindow, setLocation]);
 
   if (isLoading) {
     return (
