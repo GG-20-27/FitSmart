@@ -12,6 +12,7 @@ import { whoopApiService } from "./whoopApiService";
 import { whoopTokenStorage } from "./whoopTokenStorage";
 import ical from "ical";
 import { DateTime } from "luxon";
+import axios from "axios";
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -286,6 +287,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // WHOOP authentication status endpoint
   app.get('/api/whoop/status', async (req, res) => {
+    // Disable caching for this endpoint
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    
     try {
       const tokenData = await whoopTokenStorage.getDefaultToken();
       
@@ -299,12 +305,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const isValid = whoopTokenStorage.isTokenValid(tokenData);
       
-      res.json({
-        authenticated: isValid,
-        message: isValid ? 'WHOOP token is valid' : 'WHOOP token has expired',
-        auth_url: isValid ? null : '/api/whoop/login',
-        expires_at: tokenData.expires_at
-      });
+      if (!isValid) {
+        return res.json({
+          authenticated: false,
+          message: 'WHOOP token has expired',
+          auth_url: '/api/whoop/login',
+          expires_at: tokenData.expires_at
+        });
+      }
+
+      // Test the token against the WHOOP API to make sure it's actually valid
+      try {
+        const headers = { Authorization: `Bearer ${tokenData.access_token}` };
+        console.log('[TOKEN TEST] Testing token against WHOOP API...');
+        const testResponse = await axios.get('https://api.prod.whoop.com/developer/v1/user/profile/basic', { 
+          headers,
+          timeout: 5000
+        });
+        
+        console.log('[TOKEN TEST] Token test successful, status:', testResponse.status);
+        res.json({
+          authenticated: true,
+          message: 'WHOOP token is valid',
+          auth_url: null,
+          expires_at: tokenData.expires_at
+        });
+      } catch (tokenError: any) {
+        // Token appears valid but fails API validation
+        console.error('[TOKEN TEST] Token validation failed:', tokenError.response?.status || tokenError.message);
+        res.json({
+          authenticated: false,
+          message: 'WHOOP token is invalid or expired',
+          auth_url: '/api/whoop/login',
+          expires_at: tokenData.expires_at
+        });
+      }
     } catch (error) {
       console.error('Error checking WHOOP status:', error);
       res.status(500).json({ error: 'Failed to check WHOOP authentication status' });

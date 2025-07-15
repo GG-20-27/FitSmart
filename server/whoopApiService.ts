@@ -138,7 +138,11 @@ export class WhoopApiService {
     
     if (!tokenData?.access_token) {
       console.log('[TOKEN VALIDATION] No WHOOP access token found');
-      throw new Error('Missing WHOOP access token');
+      throw new WhoopApiError({
+        type: WhoopErrorType.AUTHENTICATION_ERROR,
+        message: 'Missing WHOOP access token',
+        retryable: false
+      });
     }
 
     // Check if token is expired
@@ -147,7 +151,11 @@ export class WhoopApiService {
       
       if (!tokenData.refresh_token) {
         console.log('[TOKEN VALIDATION] No refresh token available');
-        throw new Error('WHOOP token expired and no refresh token available');
+        throw new WhoopApiError({
+          type: WhoopErrorType.INVALID_TOKEN,
+          message: 'WHOOP token expired and no refresh token available',
+          retryable: false
+        });
       }
 
       try {
@@ -157,7 +165,11 @@ export class WhoopApiService {
         return refreshedToken;
       } catch (error) {
         console.error('[TOKEN VALIDATION] Failed to refresh token:', error);
-        throw new Error('WHOOP token expired and refresh failed');
+        throw new WhoopApiError({
+          type: WhoopErrorType.INVALID_TOKEN,
+          message: 'WHOOP token expired and refresh failed',
+          retryable: false
+        });
       }
     } else {
       console.log('[TOKEN VALIDATION] Token is still valid');

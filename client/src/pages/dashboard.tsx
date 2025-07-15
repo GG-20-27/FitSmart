@@ -167,11 +167,13 @@ export default function Dashboard() {
     enabled: whoopAuthStatus?.authenticated === true,
     retry: (failureCount, error: any) => {
       if (error?.response?.status === 401) {
+        // Force refresh auth status when 401 error occurs
+        queryClient.invalidateQueries({ queryKey: ['/api/whoop/status'] });
         return false;
       }
       return failureCount < 3;
     },
-    refetchInterval: 5 * 60 * 1000, // Auto-refresh every 5 minutes
+    refetchInterval: whoopAuthStatus?.authenticated ? 5 * 60 * 1000 : false, // Auto-refresh every 5 minutes if authenticated
   });
 
   // Set last sync when data changes
