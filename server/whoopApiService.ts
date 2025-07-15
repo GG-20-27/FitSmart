@@ -278,7 +278,7 @@ export class WhoopApiService {
       const headers = await this.authHeader();
       console.log(`Fetching sleep for cycle ${cycleId}...`);
       
-      const response = await axios.get(`${BASE}/cycle/${cycleId}/sleep`, { headers });
+      const response = await axios.get(`${BASE}/activity/sleep/${cycleId}`, { headers });
       
       if (response.status === 200) {
         console.log('Sleep data found for cycle:', cycleId);
@@ -305,7 +305,7 @@ export class WhoopApiService {
               const previousCycleId = cycles[currentCycleIndex + 1].id;
               console.log(`Trying to fetch sleep data from previous cycle: ${previousCycleId}`);
               
-              const previousSleepResponse = await axios.get(`${BASE}/cycle/${previousCycleId}/sleep`, { headers });
+              const previousSleepResponse = await axios.get(`${BASE}/activity/sleep/${previousCycleId}`, { headers });
               
               if (previousSleepResponse.status === 200) {
                 console.log('Sleep data found in previous cycle:', previousCycleId);
@@ -383,7 +383,7 @@ export class WhoopApiService {
       // Try direct sleep endpoint with date range first
       try {
         const headers = await this.authHeader();
-        const response = await axios.get(`${BASE}/sleep?start=${yesterdayStr}&end=${todayStr}`, { 
+        const response = await axios.get(`${BASE}/activity/sleep?start=${yesterdayStr}&end=${todayStr}`, { 
           headers,
           timeout: 10000
         });
@@ -564,17 +564,48 @@ export class WhoopApiService {
       const recovery = await this.getRecovery(latestCycle.id);
       console.log('Recovery data found for cycle:', latestCycle.id);
 
-      // Get sleep data - try to find any recent valid sleep session
+      // Get sleep data using sleep_id from recovery data if available
+      let sleepData = null;
       let sleepHours = null;
-      try {
-        sleepHours = await this.getLatestSleepSession();
-        if (sleepHours !== null) {
-          console.log(`Sleep hours retrieved: ${sleepHours}`);
-        } else {
-          console.log('No sleep data available - this is normal if sleep hasn\'t been processed yet');
+      
+      if (recovery?.sleep_id) {
+        console.log(`Found sleep_id in recovery data: ${recovery.sleep_id}`);
+        try {
+          const headers = await this.authHeader();
+          const response = await axios.get(`${BASE}/activity/sleep/${recovery.sleep_id}`, { headers });
+          if (response.status === 200) {
+            sleepData = response.data;
+            console.log('Sleep data retrieved via sleep_id:', JSON.stringify(sleepData, null, 2));
+            
+            // Extract sleep hours and score from response
+            if (sleepData.score?.sleep_score) {
+              sleepHours = sleepData.score.sleep_score;
+              console.log(`Sleep score from sleep_id: ${sleepHours}`);
+            }
+            
+            // Try to get sleep hours from stage_summary if available
+            if (!sleepHours && sleepData.score?.stage_summary?.total_in_bed_time_milli) {
+              sleepHours = Math.round(sleepData.score.stage_summary.total_in_bed_time_milli / (1000 * 60 * 60) * 10) / 10;
+              console.log(`Sleep hours calculated from stage_summary: ${sleepHours}`);
+            }
+          }
+        } catch (sleepError: any) {
+          console.log(`Failed to get sleep data via sleep_id ${recovery.sleep_id}:`, sleepError.response?.status);
         }
-      } catch (error) {
-        console.log('Sleep data retrieval failed:', error instanceof WhoopApiError ? error.message : error);
+      }
+
+      // Fallback to previous sleep retrieval method if sleep_id approach failed
+      if (!sleepHours) {
+        try {
+          sleepHours = await this.getLatestSleepSession();
+          if (sleepHours !== null) {
+            console.log(`Sleep hours retrieved via fallback method: ${sleepHours}`);
+          } else {
+            console.log('No sleep data available - this is normal if sleep hasn\'t been processed yet');
+          }
+        } catch (error) {
+          console.log('Sleep data retrieval failed:', error instanceof WhoopApiError ? error.message : error);
+        }
       }
 
       const result: WhoopTodayData = {
@@ -587,9 +618,11 @@ export class WhoopApiService {
         raw: {
           cycle: latestCycle,
           recovery: recovery,
-          sleep: sleepHours
+          sleep: sleepData || sleepHours
         }
       };
+
+
 
       // Store in database for historical tracking
       const today = new Date().toISOString().split('T')[0];

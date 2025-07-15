@@ -439,7 +439,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         recovery_score: whoopData.recovery_score,
         hrv: whoopData.hrv,
         resting_heart_rate: whoopData.resting_heart_rate,
-        sleep_score: whoopData.sleep_score,
+        sleep_hours: whoopData.sleep_hours,
         raw: whoopData.raw
       };
 
