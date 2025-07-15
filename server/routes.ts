@@ -439,24 +439,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     try {
-      console.log('Fetching WHOOP data for n8n automation...');
+      console.log('[N8N ENDPOINT] Fetching WHOOP data for n8n automation...');
       
-      // Token validation - use existing WHOOP token logic
-      const tokenData = await whoopTokenStorage.getDefaultToken();
-      if (!tokenData?.access_token) {
-        return res.status(401).json({ error: 'Missing WHOOP access token' });
-      }
-
-      if (!whoopTokenStorage.isTokenValid(tokenData)) {
-        console.warn('WHOOP access token has expired. Re-authentication required.');
-        return res.status(401).json({ 
-          error: 'WHOOP token expired',
-          message: 'Please visit /api/whoop/login to re-authenticate with WHOOP',
-          auth_url: '/api/whoop/login'
-        });
-      }
-      
-      // Fetch real WHOOP data using existing service
+      // Use the enhanced token validation that includes automatic refresh
       const whoopData = await whoopApiService.getTodaysData();
       
       // Store in database for caching
@@ -464,7 +449,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.createOrUpdateWhoopData({
         date: todayDate,
         recoveryScore: Math.round(whoopData.recovery_score || 0),
-        sleepScore: Math.round(whoopData.sleep_score || 0),
+        sleepScore: Math.round(whoopData.sleep_hours || 0), // Fixed: use sleep_hours instead of sleep_score
         strainScore: Math.round((whoopData.strain || 0) * 10), // Store as integer * 10
         restingHeartRate: Math.round(whoopData.resting_heart_rate || 0)
       });
@@ -474,7 +459,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         date: todayDate,
         recovery_score: whoopData.recovery_score,
         strain_score: whoopData.strain,
-        sleep_score: whoopData.sleep_score,
+        sleep_hours: whoopData.sleep_hours,
         hrv: whoopData.hrv
       };
       logDailyStats(dailyEntry);
@@ -486,16 +471,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         recovery_score: whoopData.recovery_score,
         hrv: whoopData.hrv,
         resting_heart_rate: whoopData.resting_heart_rate,
-        sleep_score: whoopData.sleep_score,
+        sleep_hours: whoopData.sleep_hours,
         date: todayDate,
+        timestamp: new Date().toISOString(),
         raw: whoopData.raw
       };
 
-      console.log('WHOOP data retrieved successfully for n8n');
+      console.log('[N8N ENDPOINT] WHOOP data retrieved successfully for n8n');
       res.json(result);
     } catch (error: any) {
-      console.error('n8n WHOOP fetch failed:', error.message);
-      res.status(500).json({ error: 'Failed to fetch WHOOP data' });
+      console.error('[N8N ENDPOINT] n8n WHOOP fetch failed:', error.message);
+      
+      // Check if it's a token-related error and provide helpful message
+      if (error.message.includes('token') || error.message.includes('access')) {
+        return res.status(401).json({ 
+          error: 'WHOOP authentication failed',
+          message: 'Please visit /api/whoop/login to re-authenticate with WHOOP',
+          auth_url: '/api/whoop/login'
+        });
+      }
+      
+      res.status(500).json({ 
+        error: 'Failed to fetch WHOOP data',
+        message: error.message
+      });
     }
   });
 

@@ -110,7 +110,8 @@
   {
     "date": "2025-07-15",
     "recovery_score": 84,
-    "strain_score": 5.972094,
+    "strain_score": 5.9722495,
+    "sleep_hours": null,
     "hrv": 98.00377
   }
 ]

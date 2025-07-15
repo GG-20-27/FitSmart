@@ -69,6 +69,15 @@ export class WhoopTokenStorage {
     if (!token.expires_at) return true; // No expiry info, assume valid
     return Date.now() / 1000 < token.expires_at;
   }
+
+  async deleteWhoopToken(userId: string): Promise<void> {
+    try {
+      await db.delete(whoopTokens).where(eq(whoopTokens.userId, userId));
+      console.log(`WHOOP token deleted for user: ${userId}`);
+    } catch (error) {
+      console.error('Failed to delete WHOOP token:', error);
+    }
+  }
 }
 
 export const whoopTokenStorage = new WhoopTokenStorage();
