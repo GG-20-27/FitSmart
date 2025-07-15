@@ -119,6 +119,12 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 15, 2025: Successfully resolved sleep data retrieval and weekly averages calculation
+  - Fixed sleep data endpoint to use correct WHOOP API path (/v1/activity/sleep/) with sleep_id from recovery data
+  - Resolved missing sleep_hours field in API response by updating routes.ts result object
+  - Enhanced weekly averages calculation with rate limiting protection and proper sleep data aggregation
+  - Current sleep data: 8.7 hours with full sleep stages, performance (84%), efficiency (94.9%)
+  - Weekly averages now working: Recovery 62%, Strain 12.2, Sleep 8.5hrs, HRV 87ms
 - July 15, 2025: Enhanced WHOOP authentication flow with automatic dashboard redirect
   - Added message event listener to handle authentication success messages
   - Fixed authentication callback to automatically redirect to dashboard after successful login

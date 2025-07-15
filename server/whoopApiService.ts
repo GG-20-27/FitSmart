@@ -489,9 +489,15 @@ export class WhoopApiService {
       const sleepScores: number[] = [];
       const hrvScores: number[] = [];
       
-      // Process each cycle
-      for (const cycle of cycles) {
+      // Process each cycle with rate limiting protection
+      for (let i = 0; i < Math.min(cycles.length, 5); i++) {
+        const cycle = cycles[i];
         try {
+          // Add delay between API calls to respect rate limits
+          if (i > 0) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+          
           // Get recovery data
           const recovery = await this.getRecovery(cycle.id);
           if (recovery?.score?.recovery_score) {
@@ -506,18 +512,34 @@ export class WhoopApiService {
             strainScores.push(cycle.score.strain);
           }
           
-          // Get sleep data
-          try {
-            const sleep = await this.getSleep(cycle.id);
-            if (sleep?.score?.sleep_score) {
-              sleepScores.push(sleep.score.sleep_score);
+          // Get sleep data using sleep_id from recovery data if available
+          if (recovery?.sleep_id) {
+            try {
+              // Add delay before sleep API call
+              await new Promise(resolve => setTimeout(resolve, 100));
+              
+              const headers = await this.authHeader();
+              const response = await axios.get(`${BASE}/activity/sleep/${recovery.sleep_id}`, { headers });
+              if (response.status === 200) {
+                const sleepData = response.data;
+                
+                // Calculate sleep hours from stage_summary
+                if (sleepData.score?.stage_summary?.total_in_bed_time_milli) {
+                  const sleepHours = Math.round(sleepData.score.stage_summary.total_in_bed_time_milli / (1000 * 60 * 60) * 10) / 10;
+                  sleepScores.push(sleepHours);
+                }
+              }
+            } catch (error) {
+              // Sleep data may not be available for all cycles or rate limited
             }
-          } catch (error) {
-            // Sleep data often missing, continue silently
           }
           
         } catch (error) {
-          console.error(`Error processing cycle ${cycle.id}:`, error);
+          if (error.response?.status === 429) {
+            console.log(`Rate limit hit for cycle ${cycle.id}, skipping remaining cycles`);
+            break;
+          }
+          console.error(`Error processing cycle ${cycle.id}:`, error.message);
           // Continue with other cycles
         }
       }
@@ -539,7 +561,7 @@ export class WhoopApiService {
         ? Math.round((hrvScores.reduce((a, b) => a + b, 0) / hrvScores.length) * 10) / 10
         : null;
       
-      console.log(`Weekly averages calculated: Recovery: ${avgRecovery}%, Strain: ${avgStrain}, Sleep: ${avgSleep}%, HRV: ${avgHRV}ms`);
+      console.log(`Weekly averages calculated: Recovery: ${avgRecovery}%, Strain: ${avgStrain}, Sleep: ${avgSleep}hrs, HRV: ${avgHRV}ms`);
       
       return { avgRecovery, avgStrain, avgSleep, avgHRV };
       
