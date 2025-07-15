@@ -1,3 +1,9 @@
+// Fallback for manual injection in Replit (optional safety net)
+if (!process.env.N8N_SECRET_TOKEN) {
+  process.env.N8N_SECRET_TOKEN = 'fitgpt-secret-2025';
+  console.log('[INFO] Set default N8N_SECRET_TOKEN to: fitgpt-secret-2025');
+}
+
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
