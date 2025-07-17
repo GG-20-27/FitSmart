@@ -119,6 +119,13 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 17, 2025: Implemented automatic token refresh system for persistent WHOOP connection
+  - Added background token refresh service that runs every 5 minutes
+  - Proactive token refresh when token expires within 10 minutes
+  - Enhanced health check endpoint to show token status and expiry information
+  - Dashboard now stays connected automatically without manual re-authentication
+  - Eliminated the need for users to reconnect WHOOP every few hours
+  - System now provides continuous, always-on access to health data
 - July 15, 2025: Successfully resolved sleep data retrieval and weekly averages calculation
   - Fixed sleep data endpoint to use correct WHOOP API path (/v1/activity/sleep/) with sleep_id from recovery data
   - Resolved missing sleep_hours field in API response by updating routes.ts result object

@@ -159,12 +159,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('');
 
   // Health check endpoint (moved from root to avoid conflicts with frontend)
-  app.get('/api/health', (req, res) => {
-    const response: ApiStatusResponse = {
-      status: "success",
-      message: "✅ FitScore GPT API is running"
-    };
-    res.json(response);
+  app.get('/api/health', async (req, res) => {
+    try {
+      const tokenData = await whoopTokenStorage.getDefaultToken();
+      const tokenStatus = tokenData?.access_token ? 'connected' : 'not connected';
+      
+      let expiryInfo = '';
+      if (tokenData?.expires_at) {
+        const expiryTime = new Date(tokenData.expires_at * 1000);
+        const now = new Date();
+        const timeUntilExpiry = expiryTime.getTime() - now.getTime();
+        const hoursUntilExpiry = Math.round(timeUntilExpiry / (1000 * 60 * 60));
+        
+        if (hoursUntilExpiry > 0) {
+          expiryInfo = ` (expires in ${hoursUntilExpiry} hours)`;
+        } else {
+          expiryInfo = ' (expired, auto-refresh active)';
+        }
+      }
+      
+      const response: ApiStatusResponse = {
+        status: "success",
+        message: `✅ FitScore GPT API is running - WHOOP: ${tokenStatus}${expiryInfo} - Auto-refresh: enabled`
+      };
+      res.json(response);
+    } catch (error) {
+      const response: ApiStatusResponse = {
+        status: "success",
+        message: "✅ FitScore GPT API is running - WHOOP: not connected - Auto-refresh: enabled"
+      };
+      res.json(response);
+    }
   });
 
   // WHOOP OAuth login endpoint

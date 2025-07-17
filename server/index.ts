@@ -7,8 +7,28 @@ if (!process.env.N8N_SECRET_TOKEN) {
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
+import { whoopApiService } from "./whoopApiService";
 
 const app = express();
+
+// Background token refresh service
+function startTokenRefreshService() {
+  console.log('[TOKEN SERVICE] Starting background token refresh service...');
+  
+  // Check and refresh tokens every 5 minutes
+  const refreshTokens = async () => {
+    try {
+      await whoopApiService.getValidWhoopToken();
+      console.log('[TOKEN SERVICE] Token validation completed successfully');
+    } catch (error) {
+      console.log('[TOKEN SERVICE] Token validation failed, user may need to re-authenticate');
+    }
+  };
+
+  // Run immediately and then every 5 minutes
+  refreshTokens();
+  setInterval(refreshTokens, 5 * 60 * 1000); // 5 minutes
+}
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -73,6 +93,9 @@ app.use((req, res, next) => {
   }, () => {
     log(`serving on port ${port}`);
   });
+
+  // Start background token refresh service
+  startTokenRefreshService();
 
   // Utility to print all registered routes (for debugging)
   app._router.stack

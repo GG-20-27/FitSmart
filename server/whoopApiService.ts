@@ -145,9 +145,14 @@ export class WhoopApiService {
       });
     }
 
-    // Check if token is expired
-    if (!whoopTokenStorage.isTokenValid(tokenData)) {
-      console.log('[TOKEN VALIDATION] Token expired, attempting to refresh...');
+    // Check if token is expired OR will expire within the next 10 minutes (proactive refresh)
+    const currentTime = Date.now() / 1000;
+    const tenMinutesFromNow = currentTime + (10 * 60);
+    const isExpiredOrExpiringSoon = tokenData.expires_at && tokenData.expires_at < tenMinutesFromNow;
+
+    if (!whoopTokenStorage.isTokenValid(tokenData) || isExpiredOrExpiringSoon) {
+      const status = !whoopTokenStorage.isTokenValid(tokenData) ? 'expired' : 'expiring soon';
+      console.log(`[TOKEN VALIDATION] Token ${status}, attempting to refresh...`);
       
       if (!tokenData.refresh_token) {
         console.log('[TOKEN VALIDATION] No refresh token available');
