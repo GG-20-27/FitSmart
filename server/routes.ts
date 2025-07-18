@@ -764,7 +764,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Extract calendar IDs from the embed URL
       const calendarUrls = [
         'https://calendar.google.com/calendar/ical/gguussttaavvss%40gmail.com/public/basic.ics',
-        'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics'
+        'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics',
+        'https://calendar.google.com/calendar/ical/florbolists13%40gmail.com/public/basic.ics'
       ];
       
       // Use Europe/Zurich timezone for accurate date/time handling
@@ -851,7 +852,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const calendarUrls = [
         'https://calendar.google.com/calendar/ical/gguussttaavvss%40gmail.com/public/basic.ics',
-        'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics'
+        'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics',
+        'https://calendar.google.com/calendar/ical/florbolists13%40gmail.com/public/basic.ics'
       ];
       
       // Use Europe/Zurich timezone for date range
