@@ -4,7 +4,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { CalendarIcon, MapPin, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { CalendarIcon, MapPin, Clock, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
 import { Link } from 'wouter';
 import moment from 'moment-timezone';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
@@ -36,6 +37,8 @@ interface CalendarEventsResponse {
 export default function CalendarPage() {
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<'month' | 'week' | 'day'>('month');
+  const [selectedEvent, setSelectedEvent] = useState<any>(null);
+  const [showEventDialog, setShowEventDialog] = useState(false);
 
   // Calculate date range for API query based on current view
   const { startDate, endDate } = useMemo(() => {
@@ -104,32 +107,35 @@ export default function CalendarPage() {
     setView(newView);
   };
 
+  // Handle event selection
+  const handleEventClick = (event: any) => {
+    setSelectedEvent(event);
+    setShowEventDialog(true);
+  };
+
   // Custom event component
   const EventComponent = ({ event }: { event: any }) => (
-    <div className="text-xs p-1 text-white bg-blue-600 rounded truncate">
+    <div 
+      className="text-xs p-1 text-slate-200 bg-slate-700/80 hover:bg-slate-600/80 rounded cursor-pointer transition-colors duration-200 backdrop-blur-sm border border-slate-600/30"
+      onClick={() => handleEventClick(event)}
+    >
       <div className="font-medium truncate">{event.title}</div>
-      <div className="flex items-center space-x-1 mt-1">
+      <div className="flex items-center space-x-1 mt-1 text-slate-300">
         <Clock className="h-3 w-3" />
         <span>{event.resource.startTime}</span>
-        {event.resource.location && (
-          <>
-            <MapPin className="h-3 w-3 ml-1" />
-            <span className="truncate">{event.resource.location}</span>
-          </>
-        )}
       </div>
     </div>
   );
 
   // Custom toolbar component
   const CustomToolbar = ({ label, onNavigate, onView }: any) => (
-    <div className="flex items-center justify-between mb-4 p-4 bg-slate-800/50 rounded-lg border border-slate-700">
+    <div className="flex items-center justify-between mb-6 p-4 bg-slate-800/30 rounded-lg border border-slate-700/30 backdrop-blur-sm">
       <div className="flex items-center space-x-4">
         <Button
           variant="ghost"
           size="sm"
           onClick={() => onNavigate('PREV')}
-          className="text-slate-300 hover:text-white"
+          className="text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors duration-200"
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
@@ -138,7 +144,7 @@ export default function CalendarPage() {
           variant="ghost"
           size="sm"
           onClick={() => onNavigate('NEXT')}
-          className="text-slate-300 hover:text-white"
+          className="text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors duration-200"
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -149,11 +155,11 @@ export default function CalendarPage() {
           variant="ghost"
           size="sm"
           onClick={() => onNavigate('TODAY')}
-          className="text-slate-300 hover:text-white"
+          className="text-slate-300 hover:text-white hover:bg-slate-700/50 transition-colors duration-200"
         >
           Today
         </Button>
-        <div className="flex border border-slate-600 rounded-md overflow-hidden">
+        <div className="flex border border-slate-600/50 rounded-md overflow-hidden">
           {['month', 'week', 'day'].map((v) => (
             <Button
               key={v}
@@ -161,10 +167,10 @@ export default function CalendarPage() {
               size="sm"
               onClick={() => onView(v)}
               className={`
-                capitalize rounded-none border-0
+                capitalize rounded-none border-0 transition-colors duration-200
                 ${view === v 
-                  ? 'bg-blue-600 text-white' 
-                  : 'text-slate-300 hover:text-white hover:bg-slate-700'
+                  ? 'bg-slate-600 text-white' 
+                  : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
                 }
               `}
             >
@@ -267,28 +273,92 @@ export default function CalendarPage() {
                 }}
                 views={[Views.MONTH, Views.WEEK, Views.DAY]}
                 step={60}
-                showMultiDayTimes
-                culture="en-GB"
-                formats={{
-                  timeGutterFormat: 'HH:mm',
-                  eventTimeRangeFormat: ({ start, end }) => 
-                    `${moment(start).format('HH:mm')} - ${moment(end).format('HH:mm')}`,
-                  agendaTimeFormat: 'HH:mm',
-                  agendaTimeRangeFormat: ({ start, end }) => 
-                    `${moment(start).format('HH:mm')} - ${moment(end).format('HH:mm')}`,
-                  dayHeaderFormat: 'dddd, MMMM Do',
-                  dayRangeHeaderFormat: ({ start, end }) => 
-                    `${moment(start).format('MMMM Do')} - ${moment(end).format('MMMM Do')}`,
-                  monthHeaderFormat: 'MMMM YYYY'
-                }}
-                min={new Date(2025, 0, 1, 6, 0, 0)} // 6:00 AM
-                max={new Date(2025, 0, 1, 23, 59, 59)} // 11:59 PM
-                timeslots={2}
+                onSelectEvent={handleEventClick}
+                eventPropGetter={() => ({
+                  style: {
+                    backgroundColor: 'transparent',
+                    border: 'none',
+                    color: 'inherit'
+                  }
+                })}
+                dayPropGetter={() => ({
+                  style: {
+                    backgroundColor: 'transparent'
+                  }
+                })}
+                slotPropGetter={() => ({
+                  style: {
+                    backgroundColor: 'transparent'
+                  }
+                })}
                 className="custom-calendar"
               />
             </div>
           </CardContent>
         </Card>
+
+        {/* Event Detail Dialog */}
+        <Dialog open={showEventDialog} onOpenChange={setShowEventDialog}>
+          <DialogContent className="bg-slate-800 border-slate-700 text-white">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-semibold text-white">
+                Event Details
+              </DialogTitle>
+            </DialogHeader>
+            {selectedEvent && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-lg font-medium text-white mb-2">
+                    {selectedEvent.title}
+                  </h3>
+                </div>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="flex items-center space-x-2 text-slate-300">
+                      <Clock className="h-4 w-4" />
+                      <span className="text-sm">Time</span>
+                    </div>
+                    <div className="text-white mt-1">
+                      {selectedEvent.resource?.startTime} - {selectedEvent.resource?.endTime}
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="flex items-center space-x-2 text-slate-300">
+                      <CalendarIcon className="h-4 w-4" />
+                      <span className="text-sm">Date</span>
+                    </div>
+                    <div className="text-white mt-1">
+                      {moment(selectedEvent.start).format('MMMM Do, YYYY')}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedEvent.resource?.location && (
+                  <div>
+                    <div className="flex items-center space-x-2 text-slate-300">
+                      <MapPin className="h-4 w-4" />
+                      <span className="text-sm">Location</span>
+                    </div>
+                    <div className="text-white mt-1">
+                      {selectedEvent.resource.location}
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-4 border-t border-slate-600">
+                  <Button 
+                    onClick={() => setShowEventDialog(false)}
+                    className="w-full bg-slate-600 hover:bg-slate-500 text-white"
+                  >
+                    Close
+                  </Button>
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );
