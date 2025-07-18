@@ -119,6 +119,14 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 18, 2025: Enhanced mobile UX with responsive calendar interface
+  - Added comprehensive mobile responsive CSS for calendar component
+  - Optimized font sizes, padding, and layout for mobile devices (768px and 480px breakpoints)
+  - Made calendar header responsive with flexible layout for mobile screens
+  - Reduced calendar height on mobile (500px) vs desktop (700px) for better viewport usage
+  - Improved text readability with smaller font sizes and better spacing on mobile
+  - Mobile-optimized event display with compact styling and touch-friendly interactions
+  - Responsive toolbar and navigation controls for better mobile usability
 - July 18, 2025: Implemented comprehensive additional health insights dashboard
   - Added "Other Insights from Today" section with detailed physiological metrics
   - Integrated resting heart rate, sleep performance, sleep efficiency, respiratory rate, and sleep consistency

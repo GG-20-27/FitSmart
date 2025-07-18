@@ -222,10 +222,10 @@ export default function CalendarPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center space-x-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
             <Link href="/dashboard">
               <Button variant="ghost" size="sm" className="text-slate-300 hover:text-white">
                 <ChevronLeft className="h-4 w-4 mr-2" />
@@ -233,20 +233,20 @@ export default function CalendarPage() {
               </Button>
             </Link>
             <div>
-              <h1 className="text-3xl font-bold text-white">Calendar</h1>
-              <p className="text-slate-400">Your schedule in Europe/Zurich time</p>
+              <h1 className="text-2xl sm:text-3xl font-bold text-white">Calendar</h1>
+              <p className="text-slate-400 text-sm sm:text-base">Your schedule in Europe/Zurich time</p>
             </div>
           </div>
           
           <div className="flex items-center space-x-2">
-            <Badge variant="secondary" className="bg-slate-700 text-slate-300">
+            <Badge variant="secondary" className="bg-slate-700 text-slate-300 text-xs sm:text-sm">
               {calendarEvents.length} events
             </Badge>
             <Button
               onClick={() => refetch()}
               variant="outline"
               size="sm"
-              className="border-slate-600 text-slate-300 hover:text-white"
+              className="border-slate-600 text-slate-300 hover:text-white text-xs sm:text-sm"
             >
               <CalendarIcon className="h-4 w-4 mr-2" />
               Refresh
@@ -256,8 +256,8 @@ export default function CalendarPage() {
 
         {/* Calendar */}
         <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-          <CardContent className="p-6">
-            <div className="calendar-container" style={{ height: '700px' }}>
+          <CardContent className="p-2 sm:p-6">
+            <div className="calendar-container h-[500px] sm:h-[700px]">
               <Calendar
                 localizer={localizer}
                 events={calendarEvents}

@@ -144,6 +144,132 @@
     color: white !important;
   }
 
+  /* Mobile Responsive Calendar Styles */
+  @media (max-width: 768px) {
+    .custom-calendar {
+      font-size: 12px;
+    }
+    
+    .custom-calendar .rbc-header {
+      padding: 6px 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    
+    .custom-calendar .rbc-date-cell {
+      padding: 4px 2px;
+      font-size: 11px;
+      min-height: 30px;
+    }
+    
+    .custom-calendar .rbc-date-cell a {
+      font-size: 11px;
+      font-weight: 500;
+    }
+    
+    .custom-calendar .rbc-show-more {
+      font-size: 10px;
+      padding: 1px 4px;
+      margin-top: 2px;
+    }
+    
+    .custom-calendar .rbc-month-view {
+      font-size: 11px;
+    }
+    
+    .custom-calendar .rbc-event {
+      font-size: 10px;
+      padding: 1px 2px;
+      margin-bottom: 1px;
+    }
+    
+    .custom-calendar .rbc-toolbar {
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    
+    .custom-calendar .rbc-toolbar-label {
+      font-size: 16px;
+      font-weight: 600;
+    }
+    
+    .custom-calendar .rbc-btn-group {
+      display: flex;
+      gap: 4px;
+    }
+    
+    .custom-calendar .rbc-btn-group button {
+      padding: 4px 8px;
+      font-size: 12px;
+      min-height: 32px;
+    }
+    
+    .custom-calendar .rbc-time-view .rbc-time-header {
+      font-size: 11px;
+    }
+    
+    .custom-calendar .rbc-time-view .rbc-time-gutter {
+      font-size: 10px;
+    }
+    
+    .custom-calendar .rbc-agenda-view .rbc-agenda-date-cell {
+      font-size: 11px;
+      padding: 6px 4px;
+    }
+    
+    .custom-calendar .rbc-agenda-view .rbc-agenda-time-cell {
+      font-size: 10px;
+      padding: 6px 4px;
+    }
+    
+    .custom-calendar .rbc-agenda-view .rbc-agenda-event-cell {
+      font-size: 11px;
+      padding: 6px 4px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .custom-calendar {
+      font-size: 11px;
+    }
+    
+    .custom-calendar .rbc-header {
+      padding: 4px 2px;
+      font-size: 11px;
+    }
+    
+    .custom-calendar .rbc-date-cell {
+      padding: 2px 1px;
+      font-size: 10px;
+      min-height: 28px;
+    }
+    
+    .custom-calendar .rbc-date-cell a {
+      font-size: 10px;
+    }
+    
+    .custom-calendar .rbc-show-more {
+      font-size: 9px;
+      padding: 0px 2px;
+    }
+    
+    .custom-calendar .rbc-event {
+      font-size: 9px;
+      padding: 0px 1px;
+    }
+    
+    .custom-calendar .rbc-toolbar-label {
+      font-size: 14px;
+    }
+    
+    .custom-calendar .rbc-btn-group button {
+      padding: 3px 6px;
+      font-size: 11px;
+      min-height: 28px;
+    }
+  }
+
   .custom-calendar .rbc-event {
     background: #3b82f6;
     border: none;
