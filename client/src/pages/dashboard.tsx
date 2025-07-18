@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar } from 'lucide-react';
+import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind } from 'lucide-react';
 import { formatTime } from '@/lib/utils';
 import { WhoopTodayResponse } from '@shared/schema';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -470,6 +470,286 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Additional Health Insights */}
+        {isWhoopConnected && whoopData && (
+          <div className="mt-16">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
+                <TrendingUp className="h-8 w-8 mr-3 text-cyan-400" />
+                Other Insights from Today
+              </h2>
+              <p className="text-slate-400">Detailed physiological metrics and sleep analytics</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+              {/* Resting Heart Rate */}
+              {whoopData.resting_heart_rate && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
+                        <Heart className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Resting Heart Rate</p>
+                        <p className="text-2xl font-bold text-red-400">
+                          <CountUp end={whoopData.resting_heart_rate} duration={1000} /> bpm
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Your heart rate during rest periods
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Sleep Performance */}
+              {whoopData.raw?.sleep?.score?.sleep_performance_percentage && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-indigo-500 rounded-full flex items-center justify-center">
+                        <Moon className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Sleep Performance</p>
+                        <p className="text-2xl font-bold text-indigo-400">
+                          <CountUp end={whoopData.raw.sleep.score.sleep_performance_percentage} duration={1000} />%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      How well you slept vs. your need
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Sleep Efficiency */}
+              {whoopData.raw?.sleep?.score?.sleep_efficiency_percentage && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-teal-500 rounded-full flex items-center justify-center">
+                        <Activity className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Sleep Efficiency</p>
+                        <p className="text-2xl font-bold text-teal-400">
+                          <CountUp end={whoopData.raw.sleep.score.sleep_efficiency_percentage} decimals={1} duration={1000} />%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Time asleep vs. time in bed
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Respiratory Rate */}
+              {whoopData.raw?.sleep?.score?.respiratory_rate && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-cyan-500 rounded-full flex items-center justify-center">
+                        <Wind className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Respiratory Rate</p>
+                        <p className="text-2xl font-bold text-cyan-400">
+                          <CountUp end={whoopData.raw.sleep.score.respiratory_rate} decimals={1} duration={1000} /> bpm
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Breaths per minute during sleep
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Sleep Consistency */}
+              {whoopData.raw?.sleep?.score?.sleep_consistency_percentage && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-violet-500 rounded-full flex items-center justify-center">
+                        <Clock className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Sleep Consistency</p>
+                        <p className="text-2xl font-bold text-violet-400">
+                          <CountUp end={whoopData.raw.sleep.score.sleep_consistency_percentage} duration={1000} />%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Consistency of sleep schedule
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Sleep Cycles */}
+              {whoopData.raw?.sleep?.score?.stage_summary?.sleep_cycle_count && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center">
+                        <RotateCcw className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Sleep Cycles</p>
+                        <p className="text-2xl font-bold text-amber-400">
+                          <CountUp end={whoopData.raw.sleep.score.stage_summary.sleep_cycle_count} duration={1000} />
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Complete sleep cycles completed
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Recent Workout */}
+              {whoopData.raw?.workout && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center">
+                        <Zap className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Recent Workout</p>
+                        <p className="text-2xl font-bold text-emerald-400">
+                          <CountUp end={whoopData.raw.workout.score?.strain || 0} decimals={1} duration={1000} />
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      {whoopData.raw.workout.sport_name || 'Workout'} strain
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Max Heart Rate */}
+              {whoopData.raw?.workout?.score?.max_heart_rate && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center">
+                        <Heart className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Max Heart Rate</p>
+                        <p className="text-2xl font-bold text-rose-400">
+                          <CountUp end={whoopData.raw.workout.score.max_heart_rate} duration={1000} /> bpm
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Peak heart rate during workout
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Body Weight */}
+              {whoopData.raw?.body_measurements?.weight_kilogram && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-slate-500 rounded-full flex items-center justify-center">
+                        <Activity className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Body Weight</p>
+                        <p className="text-2xl font-bold text-slate-400">
+                          <CountUp end={whoopData.raw.body_measurements.weight_kilogram} decimals={1} duration={1000} /> kg
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Current recorded weight
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            {/* Sleep Stages Breakdown */}
+            {whoopData.raw?.sleep?.score?.stage_summary && (
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-6">
+                    <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                      <Moon className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Sleep Stages Breakdown</h3>
+                      <p className="text-slate-400 text-sm">Time spent in each sleep stage</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* Light Sleep */}
+                    <div className="text-center p-4 bg-slate-700/30 rounded-lg">
+                      <div className="text-2xl font-bold text-blue-400 mb-2">
+                        <CountUp 
+                          end={Math.round(whoopData.raw.sleep.score.stage_summary.total_light_sleep_time_milli / (1000 * 60))} 
+                          duration={1000} 
+                        /> min
+                      </div>
+                      <p className="text-slate-300 text-sm font-medium">Light Sleep</p>
+                      <p className="text-xs text-slate-500">Easy to wake from</p>
+                    </div>
+
+                    {/* Deep Sleep */}
+                    <div className="text-center p-4 bg-slate-700/30 rounded-lg">
+                      <div className="text-2xl font-bold text-purple-400 mb-2">
+                        <CountUp 
+                          end={Math.round(whoopData.raw.sleep.score.stage_summary.total_slow_wave_sleep_time_milli / (1000 * 60))} 
+                          duration={1000} 
+                        /> min
+                      </div>
+                      <p className="text-slate-300 text-sm font-medium">Deep Sleep</p>
+                      <p className="text-xs text-slate-500">Physical recovery</p>
+                    </div>
+
+                    {/* REM Sleep */}
+                    <div className="text-center p-4 bg-slate-700/30 rounded-lg">
+                      <div className="text-2xl font-bold text-green-400 mb-2">
+                        <CountUp 
+                          end={Math.round(whoopData.raw.sleep.score.stage_summary.total_rem_sleep_time_milli / (1000 * 60))} 
+                          duration={1000} 
+                        /> min
+                      </div>
+                      <p className="text-slate-300 text-sm font-medium">REM Sleep</p>
+                      <p className="text-xs text-slate-500">Mental recovery</p>
+                    </div>
+
+                    {/* Awake Time */}
+                    <div className="text-center p-4 bg-slate-700/30 rounded-lg">
+                      <div className="text-2xl font-bold text-orange-400 mb-2">
+                        <CountUp 
+                          end={Math.round(whoopData.raw.sleep.score.stage_summary.total_awake_time_milli / (1000 * 60))} 
+                          duration={1000} 
+                        /> min
+                      </div>
+                      <p className="text-slate-300 text-sm font-medium">Awake</p>
+                      <p className="text-xs text-slate-500">Time spent awake</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+
         {/* Weekly Averages */}
         {isWhoopConnected && (
           <div className="mt-16">
@@ -525,7 +805,7 @@ export default function Dashboard() {
                 </div>
                 <div className="text-3xl font-bold">
                   {whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
-                    <CountUp end={whoopSummary.avgSleep} suffix="%" duration={1500} />
+                    <CountUp end={whoopSummary.avgSleep} suffix=" hrs" decimals={1} duration={1500} />
                   ) : (
                     "N/A"
                   )}

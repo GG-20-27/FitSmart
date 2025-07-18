@@ -462,6 +462,64 @@ export class WhoopApiService {
     }
   }
 
+  async getWorkoutData(): Promise<any> {
+    try {
+      console.log('Fetching recent workout data...');
+      
+      // Get today and yesterday dates for workout data range
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      const todayStr = today.toISOString().split('T')[0];
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      
+      const headers = await this.authHeader();
+      const response = await axios.get(`${BASE}/activity/workout?start=${yesterdayStr}&end=${todayStr}`, { 
+        headers,
+        timeout: 10000
+      });
+      
+      if (response.data && response.data.records && response.data.records.length > 0) {
+        // Return the most recent workout
+        const workouts = response.data.records
+          .sort((a: any, b: any) => new Date(b.start).getTime() - new Date(a.start).getTime());
+        
+        console.log(`Found ${workouts.length} workouts from today`);
+        return workouts[0] || null;
+      }
+      
+      console.log('No recent workouts found');
+      return null;
+    } catch (error) {
+      console.error('Error fetching workout data:', error);
+      return null;
+    }
+  }
+
+  async getBodyMeasurements(): Promise<any> {
+    try {
+      console.log('Fetching body measurements...');
+      
+      const headers = await this.authHeader();
+      const response = await axios.get(`${BASE}/user/measurement`, { 
+        headers,
+        timeout: 10000
+      });
+      
+      if (response.data) {
+        console.log('Body measurements retrieved successfully');
+        return response.data;
+      }
+      
+      console.log('No body measurements found');
+      return null;
+    } catch (error) {
+      console.error('Error fetching body measurements:', error);
+      return null;
+    }
+  }
+
   async getWeeklyAverages(): Promise<{
     avgRecovery: number | null;
     avgStrain: number | null;
@@ -635,6 +693,23 @@ export class WhoopApiService {
         }
       }
 
+      // Get additional insights: workout and body measurements
+      let workoutData = null;
+      let bodyMeasurements = null;
+      
+      try {
+        console.log('Fetching additional insights...');
+        
+        // Get recent workout data
+        workoutData = await this.getWorkoutData();
+        
+        // Get body measurements  
+        bodyMeasurements = await this.getBodyMeasurements();
+        
+      } catch (error) {
+        console.log('Error fetching additional insights:', error);
+      }
+
       const result: WhoopTodayData = {
         cycle_id: latestCycle.id,
         strain: latestCycle.score?.strain || null,
@@ -645,7 +720,9 @@ export class WhoopApiService {
         raw: {
           cycle: latestCycle,
           recovery: recovery,
-          sleep: sleepData || sleepHours
+          sleep: sleepData || sleepHours,
+          workout: workoutData,
+          body_measurements: bodyMeasurements
         }
       };
 

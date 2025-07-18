@@ -119,6 +119,16 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 18, 2025: Implemented comprehensive additional health insights dashboard
+  - Added "Other Insights from Today" section with detailed physiological metrics
+  - Integrated resting heart rate, sleep performance, sleep efficiency, respiratory rate, and sleep consistency
+  - Added detailed sleep stages breakdown showing Light, Deep, REM, and Awake time in minutes
+  - Implemented workout data integration showing recent workout strain and max heart rate
+  - Added body measurements integration displaying current weight and health metrics
+  - Enhanced WHOOP API service with getWorkoutData() and getBodyMeasurements() methods
+  - Fixed weekly averages sleep display from percentage to hours format
+  - All new insights use modern card design with consistent colors and animations
+  - Real-time data from WHOOP API endpoints: workout, body measurements, detailed sleep analytics
 - July 17, 2025: Implemented automatic token refresh system for persistent WHOOP connection
   - Added background token refresh service that runs every 5 minutes
   - Proactive token refresh when token expires within 10 minutes
