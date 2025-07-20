@@ -119,6 +119,12 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 20, 2025: Fixed database admin user issue and restored app preview access
+  - Recreated missing default admin user that was causing WHOOP status check failures
+  - Enhanced getDefaultUserId() function to auto-create admin user if missing
+  - All API endpoints now responding correctly (health, WHOOP status, admin users)
+  - App preview is fully accessible with working dashboard and profile pages
+  - System ready for WHOOP authentication and multi-user functionality
 - July 20, 2025: Fixed WHOOP authentication flow and added social authentication options
   - Cleared invalid test tokens that were preventing proper WHOOP authentication
   - Added comprehensive social authentication component with Google, Apple, and WHOOP options

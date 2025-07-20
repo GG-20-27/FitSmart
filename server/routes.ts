@@ -49,9 +49,12 @@ const upload = multer({
 
 // Helper function to get default admin user ID
 async function getDefaultUserId(): Promise<string> {
-  const adminUser = await userService.getUserByEmail('admin@fitscore.local');
+  let adminUser = await userService.getUserByEmail('admin@fitscore.local');
   if (!adminUser) {
-    throw new Error('Default admin user not found');
+    // Create default admin user if it doesn't exist
+    console.log('[USER SERVICE] Creating default admin user...');
+    adminUser = await userService.createUser('admin@fitscore.local');
+    console.log('[USER SERVICE] Default admin user created:', adminUser.id);
   }
   return adminUser.id;
 }
