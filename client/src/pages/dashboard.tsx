@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind } from 'lucide-react';
+import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind, User } from 'lucide-react';
 import { formatTime } from '@/lib/utils';
 import { WhoopTodayResponse } from '@shared/schema';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -233,7 +233,7 @@ export default function Dashboard() {
           </div>
           
           <div className="flex items-center justify-center lg:justify-end space-x-3">
-            {/* Calendar Button */}
+            {/* Navigation Buttons */}
             <Link href="/calendar">
               <Button
                 variant="outline"
@@ -244,7 +244,20 @@ export default function Dashboard() {
                 <div className="relative flex items-center space-x-2">
                   <Calendar className="h-4 w-4" />
                   <span className="text-sm font-medium hidden sm:inline">Calendar</span>
-                  <span className="text-sm font-medium sm:hidden">Calendar</span>
+                </div>
+              </Button>
+            </Link>
+            
+            <Link href="/profile">
+              <Button
+                variant="outline"
+                size="sm"
+                className="relative overflow-hidden border-transparent bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-indigo-500 opacity-30 animate-pulse"></div>
+                <div className="relative flex items-center space-x-2">
+                  <User className="h-4 w-4" />
+                  <span className="text-sm font-medium hidden sm:inline">Profile</span>
                 </div>
               </Button>
             </Link>

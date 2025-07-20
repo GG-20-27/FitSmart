@@ -169,6 +169,92 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('curl -F "mealPhotos=@image.jpg" http://localhost:5000/api/meals');
   console.log('');
 
+  // Admin routes for multi-user management
+  console.log('[ROUTE] POST /api/admin/users');
+  app.post('/api/admin/users', async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required' });
+      }
+
+      const existingUser = await userService.getUserByEmail(email);
+      if (existingUser) {
+        return res.json({ message: 'User already exists', user: existingUser });
+      }
+
+      const user = await userService.createUser(email);
+      res.json({ message: 'User created successfully', user });
+    } catch (error) {
+      console.error('Error creating user:', error);
+      res.status(500).json({ error: 'Failed to create user' });
+    }
+  });
+
+  console.log('[ROUTE] GET /api/admin/users');
+  app.get('/api/admin/users', async (req, res) => {
+    try {
+      const users = await userService.getAllUsers();
+      const usersWithTokens = await Promise.all(
+        users.map(async (user) => {
+          const token = await userService.getWhoopToken(user.id);
+          return {
+            ...user,
+            hasWhoopToken: !!token,
+            tokenExpiry: token?.expiresAt || null
+          };
+        })
+      );
+      res.json(usersWithTokens);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      res.status(500).json({ error: 'Failed to fetch users' });
+    }
+  });
+
+  console.log('[ROUTE] POST /api/admin/users/:userId/whoop-token');
+  app.post('/api/admin/users/:userId/whoop-token', async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { accessToken, refreshToken, expiresAt } = req.body;
+      
+      if (!accessToken) {
+        return res.status(400).json({ error: 'Access token is required' });
+      }
+
+      const user = await userService.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const expiry = expiresAt ? new Date(expiresAt * 1000) : undefined;
+      await userService.addWhoopToken(userId, accessToken, refreshToken, expiry);
+      
+      res.json({ message: 'WHOOP token added successfully' });
+    } catch (error) {
+      console.error('Error adding WHOOP token:', error);
+      res.status(500).json({ error: 'Failed to add WHOOP token' });
+    }
+  });
+
+  console.log('[ROUTE] DELETE /api/admin/users/:userId');
+  app.delete('/api/admin/users/:userId', async (req, res) => {
+    try {
+      const { userId } = req.params;
+      
+      const user = await userService.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      await userService.deleteUser(userId);
+      res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      res.status(500).json({ error: 'Failed to delete user' });
+    }
+  });
+
   // Health check endpoint (moved from root to avoid conflicts with frontend)
   app.get('/api/health', async (req, res) => {
     try {
@@ -452,7 +538,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Fetch real WHOOP data using the corrected API structure
-      const whoopData = await whoopApiService.getTodaysData();
+      const whoopData = await whoopApiService.getTodaysData(defaultUserId);
       
       // Store in database for caching
       const todayDate = getTodayDate();
@@ -519,7 +605,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[N8N ENDPOINT] Fetching WHOOP data for n8n automation...');
       
       // Use the enhanced token validation that includes automatic refresh
-      const whoopData = await whoopApiService.getTodaysData();
+      const defaultUserId = await getDefaultUserId();
+      const whoopData = await whoopApiService.getTodaysData(defaultUserId);
       
       // Store in database for caching
       const todayDate = getTodayDate();
@@ -581,7 +668,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('[TOKEN REFRESH TEST] Starting token refresh test...');
       
       // Get current token
-      const currentToken = await whoopTokenStorage.getDefaultToken();
+      const defaultUserId = await getDefaultUserId();
+      const currentToken = await whoopTokenStorage.getToken(defaultUserId);
       if (!currentToken) {
         return res.status(401).json({ error: 'No token found to test' });
       }
