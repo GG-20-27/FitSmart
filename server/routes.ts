@@ -346,7 +346,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         access_token: tokenResponse.access_token,
         refresh_token: tokenResponse.refresh_token,
         expires_at: tokenResponse.expires_in ? Math.floor(Date.now() / 1000) + tokenResponse.expires_in : undefined,
-        user_id: tokenResponse.user?.id || 'default'
+        user_id: tokenResponse.user?.id
       };
       
       const defaultUserId = await getDefaultUserId();

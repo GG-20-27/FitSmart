@@ -105,18 +105,8 @@ export default function Profile() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Social Authentication */}
           <SocialAuth
-            onGoogleAuth={() => {
-              // Placeholder for Google OAuth implementation
-              console.log('Google authentication not yet implemented');
-            }}
-            onAppleAuth={() => {
-              // Placeholder for Apple OAuth implementation  
-              console.log('Apple authentication not yet implemented');
-            }}
             onWhoopAuth={() => authMutation.mutate()}
             connectedServices={{
-              google: false, // Will be implemented later
-              apple: false,  // Will be implemented later
               whoop: authStatus?.authenticated || false
             }}
           />
@@ -302,28 +292,28 @@ export default function Profile() {
               <Button
                 onClick={() => window.open('/api/health', '_blank')}
                 variant="outline"
-                className="h-auto p-4 flex flex-col items-center space-y-2 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-slate-600/50"
+                className="h-auto p-6 flex flex-col items-center space-y-3 bg-gradient-to-br from-slate-800 to-slate-700 border-slate-600 text-white hover:from-slate-700 hover:to-slate-600 transition-all duration-300"
               >
-                <Activity className="h-6 w-6" />
-                <span>API Health Check</span>
+                <Activity className="h-8 w-8 text-green-400" />
+                <span className="font-medium">API Health Check</span>
               </Button>
               
               <Button
                 onClick={() => window.open('/', '_blank')}
                 variant="outline"
-                className="h-auto p-4 flex flex-col items-center space-y-2 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-slate-600/50"
+                className="h-auto p-6 flex flex-col items-center space-y-3 bg-gradient-to-br from-slate-800 to-slate-700 border-slate-600 text-white hover:from-slate-700 hover:to-slate-600 transition-all duration-300"
               >
-                <Calendar className="h-6 w-6" />
-                <span>Dashboard</span>
+                <User className="h-8 w-8 text-blue-400" />
+                <span className="font-medium">Dashboard</span>
               </Button>
               
               <Button
                 onClick={() => window.open('/calendar', '_blank')}
                 variant="outline"
-                className="h-auto p-4 flex flex-col items-center space-y-2 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-slate-600/50"
+                className="h-auto p-6 flex flex-col items-center space-y-3 bg-gradient-to-br from-slate-800 to-slate-700 border-slate-600 text-white hover:from-slate-700 hover:to-slate-600 transition-all duration-300"
               >
-                <Calendar className="h-6 w-6" />
-                <span>Calendar View</span>
+                <Calendar className="h-8 w-8 text-purple-400" />
+                <span className="font-medium">Calendar View</span>
               </Button>
             </div>
           </CardContent>
