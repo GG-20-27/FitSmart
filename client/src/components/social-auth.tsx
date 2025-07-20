@@ -29,39 +29,41 @@ export default function SocialAuth({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* WHOOP Authentication Only */}
-        <div className="flex items-center justify-between p-6 bg-gradient-to-r from-slate-800 to-slate-700 rounded-lg border border-slate-600">
-          <div className="flex items-center space-x-4">
-            <div className="p-3 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg">
-              <User className="h-6 w-6 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-white font-semibold text-lg">WHOOP Account</span>
-                {connectedServices.whoop && (
-                  <Badge variant="default" className="text-xs bg-green-600 text-white">
-                    Connected
-                  </Badge>
-                )}
+        <div className="p-6 bg-gradient-to-r from-slate-800 to-slate-700 rounded-lg border border-slate-600">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between space-y-4 sm:space-y-0">
+            <div className="flex items-center space-x-4">
+              <div className="p-3 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg">
+                <User className="h-6 w-6 text-white" />
               </div>
-              <span className="text-slate-300 text-sm">Access comprehensive health data and metrics</span>
+              <div className="flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-white font-semibold text-lg">WHOOP Account</span>
+                  {connectedServices.whoop && (
+                    <Badge variant="default" className="text-xs bg-green-600 text-white">
+                      Connected
+                    </Badge>
+                  )}
+                </div>
+                <span className="text-slate-300 text-sm">Access comprehensive health data and metrics</span>
+              </div>
             </div>
+            <Button
+              onClick={onWhoopAuth}
+              disabled={isLoading}
+              variant="outline"
+              size="lg"
+              className="bg-gradient-to-r from-blue-600 to-purple-600 border-0 text-white hover:from-blue-700 hover:to-purple-700 font-medium px-6 py-3 w-full sm:w-auto"
+            >
+              {connectedServices.whoop ? (
+                'Reconnect'
+              ) : (
+                <>
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Connect WHOOP
+                </>
+              )}
+            </Button>
           </div>
-          <Button
-            onClick={onWhoopAuth}
-            disabled={isLoading}
-            variant="outline"
-            size="lg"
-            className="bg-gradient-to-r from-blue-600 to-purple-600 border-0 text-white hover:from-blue-700 hover:to-purple-700 font-medium px-6 py-3"
-          >
-            {connectedServices.whoop ? (
-              'Reconnect'
-            ) : (
-              <>
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Connect WHOOP
-              </>
-            )}
-          </Button>
         </div>
 
         {/* Info Box */}

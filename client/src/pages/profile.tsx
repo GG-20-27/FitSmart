@@ -90,7 +90,7 @@ export default function Profile() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
         <div className="flex items-center space-x-4 mb-8">
           <div className="p-3 bg-blue-600/20 border border-blue-500/30 rounded-lg">
@@ -102,7 +102,7 @@ export default function Profile() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 gap-8">
           {/* Social Authentication */}
           <SocialAuth
             onWhoopAuth={() => authMutation.mutate()}
@@ -201,18 +201,19 @@ export default function Profile() {
               {/* Create New User */}
               <div className="space-y-3">
                 <Label className="text-slate-300">Create New User</Label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <Input
                     type="email"
                     placeholder="user@example.com"
                     value={newUserEmail}
                     onChange={(e) => setNewUserEmail(e.target.value)}
-                    className="bg-slate-700 border-slate-600 text-white"
+                    className="bg-slate-700 border-slate-600 text-white flex-1"
                   />
                   <Button
                     onClick={() => createUserMutation.mutate(newUserEmail)}
                     disabled={!newUserEmail || createUserMutation.isPending}
                     size="sm"
+                    className="w-full sm:w-auto"
                   >
                     {createUserMutation.isPending ? (
                       <RefreshCw className="h-4 w-4 animate-spin" />
@@ -241,10 +242,10 @@ export default function Profile() {
                   {users?.map((user) => (
                     <div
                       key={user.id}
-                      className="flex items-center justify-between p-3 bg-slate-700/50 rounded-lg border border-slate-600"
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-slate-700/50 rounded-lg border border-slate-600 space-y-2 sm:space-y-0"
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-white text-sm font-medium truncate">
                             {user.email}
                           </span>
@@ -263,6 +264,7 @@ export default function Profile() {
                         variant="destructive"
                         size="sm"
                         disabled={deleteUserMutation.isPending}
+                        className="w-full sm:w-auto"
                       >
                         Delete
                       </Button>
