@@ -59,11 +59,11 @@ export class WhoopTokenStorage {
   }
 
   async setDefaultToken(tokenData: WhoopTokenData) {
-    await this.setToken('default', tokenData);
+    await this.setToken('d5fc289b-82a1-4e7c-b6fb-df042cb2c5a5', tokenData);
   }
 
   async getDefaultToken(): Promise<WhoopTokenData | undefined> {
-    return await this.getToken('default');
+    return await this.getToken('d5fc289b-82a1-4e7c-b6fb-df042cb2c5a5');
   }
 
   isTokenValid(token: WhoopTokenData): boolean {

@@ -86,12 +86,12 @@ export interface WhoopTodayData {
 }
 
 export class WhoopApiService {
-  private async authHeader(userId: string = 'default') {
+  private async authHeader(userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5') {
     const tokenData = await this.getValidWhoopToken(userId);
     return { Authorization: `Bearer ${tokenData.access_token}` };
   }
 
-  private async refreshToken(refreshToken: string): Promise<any> {
+  private async refreshToken(refreshToken: string, userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
     const clientId = process.env.WHOOP_CLIENT_ID;
     const clientSecret = process.env.WHOOP_CLIENT_SECRET;
     
@@ -124,7 +124,7 @@ export class WhoopApiService {
         access_token,
         refresh_token: refresh_token || refreshToken,
         expires_at: expiresAt ? Math.floor(expiresAt / 1000) : undefined,
-        user_id: 'default'
+        user_id: userId
       };
     } catch (error: any) {
       console.error('[TOKEN REFRESH] Token refresh failed:', error.response?.data || error.message);
@@ -133,7 +133,7 @@ export class WhoopApiService {
   }
 
   // New function to ensure we always have a valid token
-  async getValidWhoopToken(userId: string = 'default'): Promise<any> {
+  async getValidWhoopToken(userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
     let tokenData = await whoopTokenStorage.getToken(userId);
     
     if (!tokenData?.access_token) {
@@ -164,7 +164,7 @@ export class WhoopApiService {
       }
 
       try {
-        const refreshedToken = await this.refreshToken(tokenData.refresh_token);
+        const refreshedToken = await this.refreshToken(tokenData.refresh_token, userId);
         await whoopTokenStorage.setToken(userId, refreshedToken);
         console.log('[TOKEN VALIDATION] Token refreshed and stored successfully');
         return refreshedToken;
@@ -232,7 +232,7 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestCycle(userId: string = 'default'): Promise<any> {
+  async getLatestCycle(userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
     try {
       const headers = await this.authHeader(userId);
       console.log('Fetching latest cycle from WHOOP API...');
@@ -256,7 +256,7 @@ export class WhoopApiService {
     }
   }
 
-  async getRecovery(cycleId: string, userId: string = 'default'): Promise<any> {
+  async getRecovery(cycleId: string, userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
     try {
       const headers = await this.authHeader(userId);
       console.log(`Fetching recovery for cycle ${cycleId}...`);

@@ -541,11 +541,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Fetch real WHOOP data using the corrected API structure
-      const whoopData = await whoopApiService.getTodaysData(defaultUserId);
+      const whoopData = await whoopApiService.getTodaysData();
       
-      // Store in database for caching
+      // Store in database for caching with user_id
       const todayDate = getTodayDate();
       await storage.createOrUpdateWhoopData({
+        userId: defaultUserId,
         date: todayDate,
         recoveryScore: Math.round(whoopData.recovery_score || 0),
         sleepScore: Math.round(whoopData.sleep_score || 0),
