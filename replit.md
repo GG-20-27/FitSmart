@@ -119,6 +119,20 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 20, 2025: Completed multi-user database schema upgrade with UUID-based user management
+  - Migrated from single-user to multi-user support with proper foreign key relationships
+  - Created UUID-based users table (id, email, created_at, updated_at)
+  - Updated whoop_tokens table with user_id foreign key referencing users table
+  - Enhanced meals and whoop_data tables with user_id for data isolation
+  - Implemented UserService class for complete user lifecycle management
+  - Created admin functionality for manual user creation and WHOOP token assignment
+  - Added comprehensive user management API endpoints for admin operations
+  - Updated WHOOP API service to support user context in all methods
+  - Fixed all token storage operations to use UUID-based user identification
+  - Background token refresh service now properly handles multi-user tokens
+  - Database schema supports cascading deletes for data consistency
+  - Default admin user (admin@fitscore.local) created for backward compatibility
+  - All existing API endpoints preserve functionality while supporting multi-user backend
 - July 18, 2025: Enhanced mobile UX with responsive calendar interface
   - Added comprehensive mobile responsive CSS for calendar component
   - Optimized font sizes, padding, and layout for mobile devices (768px and 480px breakpoints)

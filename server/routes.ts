@@ -10,6 +10,7 @@ import { z } from "zod";
 import type { WhoopTodayResponse, MealResponse, ApiStatusResponse } from "@shared/schema";
 import { whoopApiService } from "./whoopApiService";
 import { whoopTokenStorage } from "./whoopTokenStorage";
+import { userService } from "./userService";
 import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
@@ -46,10 +47,20 @@ const upload = multer({
   }
 });
 
+// Helper function to get default admin user ID
+async function getDefaultUserId(): Promise<string> {
+  const adminUser = await userService.getUserByEmail('admin@fitscore.local');
+  if (!adminUser) {
+    throw new Error('Default admin user not found');
+  }
+  return adminUser.id;
+}
+
 // Fetch live WHOOP data using OAuth access token
-async function fetchWhoopData(): Promise<WhoopTodayResponse> {
+async function fetchWhoopData(userId?: string): Promise<WhoopTodayResponse> {
   try {
-    const data = await whoopApiService.getTodaysData();
+    const actualUserId = userId || await getDefaultUserId();
+    const data = await whoopApiService.today(actualUserId);
     return data;
   } catch (error) {
     console.error('Failed to fetch live WHOOP data:', error);
@@ -161,7 +172,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Health check endpoint (moved from root to avoid conflicts with frontend)
   app.get('/api/health', async (req, res) => {
     try {
-      const tokenData = await whoopTokenStorage.getDefaultToken();
+      const defaultUserId = await getDefaultUserId();
+      const tokenData = await whoopTokenStorage.getToken(defaultUserId);
       const tokenStatus = tokenData?.access_token ? 'connected' : 'not connected';
       
       let expiryInfo = '';
@@ -248,7 +260,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         user_id: tokenResponse.user?.id || 'default'
       };
       
-      await whoopTokenStorage.setDefaultToken(tokenData);
+      const defaultUserId = await getDefaultUserId();
+      await whoopTokenStorage.setToken(defaultUserId, tokenData);
       console.log('WHOOP authentication successful! Token stored with expiration:', tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
 
       // Return HTML that closes the popup and notifies parent
@@ -318,7 +331,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.set('Expires', '0');
     
     try {
-      const tokenData = await whoopTokenStorage.getDefaultToken();
+      const defaultUserId = await getDefaultUserId();
+      const tokenData = await whoopTokenStorage.getToken(defaultUserId);
       
       if (!tokenData) {
         return res.json({
@@ -375,7 +389,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/whoop/debug', async (req, res) => {
     try {
       const oauthUrl = whoopApiService.getOAuthUrl();
-      const tokenData = await whoopTokenStorage.getDefaultToken();
+      const defaultUserId = await getDefaultUserId();
+      const tokenData = await whoopTokenStorage.getToken(defaultUserId);
       res.json({
         oauth_url: oauthUrl,
         client_id: process.env.WHOOP_CLIENT_ID,
@@ -398,10 +413,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Store the test token
-      await whoopTokenStorage.setDefaultToken({
+      const defaultUserId = await getDefaultUserId();
+      await whoopTokenStorage.setToken(defaultUserId, {
         access_token: access_token,
         expires_at: Date.now() / 1000 + (24 * 60 * 60), // 24 hours from now in seconds
-        user_id: 'test_user'
+        user_id: defaultUserId
       });
 
       res.json({ 
@@ -420,7 +436,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Fetching live WHOOP data for today...');
       
       // Token validation at the top
-      const tokenData = await whoopTokenStorage.getDefaultToken();
+      const defaultUserId = await getDefaultUserId();
+      const tokenData = await whoopTokenStorage.getToken(defaultUserId);
       if (!tokenData?.access_token) {
         return res.status(401).json({ error: 'Missing WHOOP access token' });
       }
@@ -580,13 +597,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           expires_at: Math.floor(Date.now() / 1000) - 3600 // 1 hour ago
         };
         
-        await whoopTokenStorage.setDefaultToken(expiredToken);
+        await whoopTokenStorage.setToken(defaultUserId, expiredToken);
         console.log('[TOKEN REFRESH TEST] Token manually expired for testing');
       }
       
       // Test the automatic refresh via getValidWhoopToken
       try {
-        const refreshedToken = await whoopApiService.getValidWhoopToken();
+        const refreshedToken = await whoopApiService.getValidWhoopToken(defaultUserId);
         console.log('[TOKEN REFRESH TEST] Token refresh successful');
         
         res.json({
@@ -600,7 +617,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error('[TOKEN REFRESH TEST] Token refresh failed:', refreshError.message);
         
         // Restore original token
-        await whoopTokenStorage.setDefaultToken(currentToken);
+        await whoopTokenStorage.setToken(defaultUserId, currentToken);
         
         res.json({
           success: false,

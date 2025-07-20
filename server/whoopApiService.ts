@@ -86,8 +86,8 @@ export interface WhoopTodayData {
 }
 
 export class WhoopApiService {
-  private async authHeader() {
-    const tokenData = await this.getValidWhoopToken();
+  private async authHeader(userId: string = 'default') {
+    const tokenData = await this.getValidWhoopToken(userId);
     return { Authorization: `Bearer ${tokenData.access_token}` };
   }
 
@@ -133,8 +133,8 @@ export class WhoopApiService {
   }
 
   // New function to ensure we always have a valid token
-  async getValidWhoopToken(): Promise<any> {
-    let tokenData = await whoopTokenStorage.getDefaultToken();
+  async getValidWhoopToken(userId: string = 'default'): Promise<any> {
+    let tokenData = await whoopTokenStorage.getToken(userId);
     
     if (!tokenData?.access_token) {
       console.log('[TOKEN VALIDATION] No WHOOP access token found');
@@ -165,7 +165,7 @@ export class WhoopApiService {
 
       try {
         const refreshedToken = await this.refreshToken(tokenData.refresh_token);
-        await whoopTokenStorage.setDefaultToken(refreshedToken);
+        await whoopTokenStorage.setToken(userId, refreshedToken);
         console.log('[TOKEN VALIDATION] Token refreshed and stored successfully');
         return refreshedToken;
       } catch (error) {
@@ -232,9 +232,9 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestCycle(): Promise<any> {
+  async getLatestCycle(userId: string = 'default'): Promise<any> {
     try {
-      const headers = await this.authHeader();
+      const headers = await this.authHeader(userId);
       console.log('Fetching latest cycle from WHOOP API...');
       
       const response = await axios.get(`${BASE}/cycle?limit=1`, { headers });
@@ -256,9 +256,9 @@ export class WhoopApiService {
     }
   }
 
-  async getRecovery(cycleId: string): Promise<any> {
+  async getRecovery(cycleId: string, userId: string = 'default'): Promise<any> {
     try {
-      const headers = await this.authHeader();
+      const headers = await this.authHeader(userId);
       console.log(`Fetching recovery for cycle ${cycleId}...`);
       
       const response = await axios.get(`${BASE}/cycle/${cycleId}/recovery`, { headers });
@@ -278,9 +278,9 @@ export class WhoopApiService {
     }
   }
 
-  async getSleep(cycleId: string): Promise<any> {
+  async getSleep(cycleId: string, userId: string = 'default'): Promise<any> {
     try {
-      const headers = await this.authHeader();
+      const headers = await this.authHeader(userId);
       console.log(`Fetching sleep for cycle ${cycleId}...`);
       
       const response = await axios.get(`${BASE}/activity/sleep/${cycleId}`, { headers });
@@ -298,7 +298,7 @@ export class WhoopApiService {
         
         // Try to get previous cycle's sleep data
         try {
-          const headers = await this.authHeader();
+          const headers = await this.authHeader(userId);
           const cycleResponse = await axios.get(`${BASE}/cycle?limit=10`, { headers });
           
           if (cycleResponse.data.records && cycleResponse.data.records.length > 0) {
@@ -329,9 +329,9 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestSleepData(): Promise<{ sleep_score: number | null; cycleDate: string | null }> {
+  async getLatestSleepData(userId: string = 'default'): Promise<{ sleep_score: number | null; cycleDate: string | null }> {
     try {
-      const headers = await this.authHeader();
+      const headers = await this.authHeader(userId);
       const response = await axios.get(`${BASE}/cycle?limit=3`, { headers });
       
       if (!response.data.records || response.data.records.length === 0) {
@@ -343,7 +343,7 @@ export class WhoopApiService {
       // Check today's cycle first
       const todayCycle = cycles[0];
       if (todayCycle?.id) {
-        const todaySleep = await this.getSleep(todayCycle.id);
+        const todaySleep = await this.getSleep(todayCycle.id, userId);
         if (todaySleep?.score?.sleep_score) {
           return { 
             sleep_score: todaySleep.score.sleep_score, 
@@ -356,7 +356,7 @@ export class WhoopApiService {
       if (cycles.length > 1) {
         const yesterdayCycle = cycles[1];
         if (yesterdayCycle?.id) {
-          const yesterdaySleep = await this.getSleep(yesterdayCycle.id);
+          const yesterdaySleep = await this.getSleep(yesterdayCycle.id, userId);
           if (yesterdaySleep?.score?.sleep_score) {
             return { 
               sleep_score: yesterdaySleep.score.sleep_score, 
@@ -373,7 +373,7 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestSleepSession(): Promise<number | null> {
+  async getLatestSleepSession(userId: string = 'default'): Promise<number | null> {
     try {
       console.log('Fetching latest sleep session data...');
       
@@ -387,7 +387,7 @@ export class WhoopApiService {
       
       // Try direct sleep endpoint with date range first
       try {
-        const headers = await this.authHeader();
+        const headers = await this.authHeader(userId);
         const response = await axios.get(`${BASE}/activity/sleep?start=${yesterdayStr}&end=${todayStr}`, { 
           headers,
           timeout: 10000
@@ -413,7 +413,7 @@ export class WhoopApiService {
       
       // Fallback to cycle-based approach with broader range
       try {
-        const headers = await this.authHeader();
+        const headers = await this.authHeader(userId);
         const cycleResponse = await axios.get(`${BASE}/cycle?limit=7`, { // Increased to 7 days
           headers,
           timeout: 10000
@@ -434,7 +434,7 @@ export class WhoopApiService {
               await new Promise(resolve => setTimeout(resolve, 500));
             }
             
-            const sleepData = await this.getSleep(cycle.id);
+            const sleepData = await this.getSleep(cycle.id, userId);
             
             // Check for valid sleep data
             if (sleepData && sleepData.nap === false && sleepData.sleep_hours != null && sleepData.sleep_hours > 0) {

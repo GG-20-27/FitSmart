@@ -1,15 +1,28 @@
-import { pgTable, text, serial, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// Multi-user support with UUID primary keys
 export const users = pgTable("users", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: text("email").notNull().unique(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const whoopTokens = pgTable("whoop_tokens", {
   id: serial("id").primaryKey(),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  accessToken: text("access_token").notNull(),
+  refreshToken: text("refresh_token"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
 export const meals = pgTable("meals", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
   filename: text("filename").notNull(),
   originalName: text("original_name").notNull(),
   mimetype: text("mimetype").notNull(),
@@ -20,6 +33,7 @@ export const meals = pgTable("meals", {
 
 export const whoopData = pgTable("whoop_data", {
   id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
   date: text("date").notNull(), // YYYY-MM-DD format
   recoveryScore: integer("recovery_score").notNull(),
   sleepScore: integer("sleep_score").notNull(),
@@ -28,19 +42,8 @@ export const whoopData = pgTable("whoop_data", {
   lastSync: timestamp("last_sync").defaultNow().notNull(),
 });
 
-export const whoopTokens = pgTable("whoop_tokens", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id").notNull().default('default'),
-  accessToken: text("access_token").notNull(),
-  refreshToken: text("refresh_token"),
-  expiresAt: timestamp("expires_at"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
 export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
+  email: true,
 });
 
 export const insertMealSchema = createInsertSchema(meals).omit({

@@ -16,6 +16,9 @@ export class WhoopTokenStorage {
 
   async setToken(userId: string, tokenData: WhoopTokenData) {
     try {
+      // Delete existing token for this user
+      await db.delete(whoopTokens).where(eq(whoopTokens.userId, userId));
+      
       const insertData: InsertWhoopToken = {
         userId,
         accessToken: tokenData.access_token,
@@ -23,15 +26,13 @@ export class WhoopTokenStorage {
         expiresAt: tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : null,
       };
 
-      // Delete existing token for this user
-      await db.delete(whoopTokens).where(eq(whoopTokens.userId, userId));
-      
       // Insert new token
       await db.insert(whoopTokens).values(insertData);
       
       console.log(`WHOOP token saved to database for user: ${userId}`);
     } catch (error) {
       console.error('Failed to save WHOOP token to database:', error);
+      throw error;
     }
   }
 

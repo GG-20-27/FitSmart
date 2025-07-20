@@ -8,6 +8,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { whoopApiService } from "./whoopApiService";
+import { userService } from "./userService";
 
 const app = express();
 
@@ -18,8 +19,13 @@ function startTokenRefreshService() {
   // Check and refresh tokens every 5 minutes
   const refreshTokens = async () => {
     try {
-      await whoopApiService.getValidWhoopToken();
-      console.log('[TOKEN SERVICE] Token validation completed successfully');
+      const adminUser = await userService.getUserByEmail('admin@fitscore.local');
+      if (adminUser) {
+        await whoopApiService.getValidWhoopToken(adminUser.id);
+        console.log('[TOKEN SERVICE] Token validation completed successfully');
+      } else {
+        console.log('[TOKEN SERVICE] Default admin user not found');
+      }
     } catch (error) {
       console.log('[TOKEN SERVICE] Token validation failed, user may need to re-authenticate');
     }
