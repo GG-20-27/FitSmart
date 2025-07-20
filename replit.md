@@ -119,6 +119,13 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 20, 2025: Fixed WHOOP authentication flow and added social authentication options
+  - Cleared invalid test tokens that were preventing proper WHOOP authentication
+  - Added comprehensive social authentication component with Google, Apple, and WHOOP options
+  - Fixed white color inconsistencies in Quick Actions buttons and profile UI elements
+  - Enhanced user profile page with proper color scheme matching overall dark theme design
+  - WHOOP authentication now works correctly with proper OAuth flow
+  - Multi-user system fully functional with proper data isolation and token management
 - July 20, 2025: Completed multi-user database schema upgrade with UUID-based user management
   - Migrated from single-user to multi-user support with proper foreign key relationships
   - Created UUID-based users table (id, email, created_at, updated_at)

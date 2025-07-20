@@ -8,6 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useState } from 'react';
+import SocialAuth from '@/components/social-auth';
 
 interface UserProfile {
   id: string;
@@ -102,6 +103,26 @@ export default function Profile() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Social Authentication */}
+          <SocialAuth
+            onGoogleAuth={() => {
+              // Placeholder for Google OAuth implementation
+              console.log('Google authentication not yet implemented');
+            }}
+            onAppleAuth={() => {
+              // Placeholder for Apple OAuth implementation  
+              console.log('Apple authentication not yet implemented');
+            }}
+            onWhoopAuth={() => authMutation.mutate()}
+            connectedServices={{
+              google: false, // Will be implemented later
+              apple: false,  // Will be implemented later
+              whoop: authStatus?.authenticated || false
+            }}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-8">
           {/* Current User Profile */}
           <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
             <CardHeader>
@@ -281,7 +302,7 @@ export default function Profile() {
               <Button
                 onClick={() => window.open('/api/health', '_blank')}
                 variant="outline"
-                className="h-auto p-4 flex flex-col items-center space-y-2"
+                className="h-auto p-4 flex flex-col items-center space-y-2 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-slate-600/50"
               >
                 <Activity className="h-6 w-6" />
                 <span>API Health Check</span>
@@ -290,7 +311,7 @@ export default function Profile() {
               <Button
                 onClick={() => window.open('/', '_blank')}
                 variant="outline"
-                className="h-auto p-4 flex flex-col items-center space-y-2"
+                className="h-auto p-4 flex flex-col items-center space-y-2 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-slate-600/50"
               >
                 <Calendar className="h-6 w-6" />
                 <span>Dashboard</span>
@@ -299,7 +320,7 @@ export default function Profile() {
               <Button
                 onClick={() => window.open('/calendar', '_blank')}
                 variant="outline"
-                className="h-auto p-4 flex flex-col items-center space-y-2"
+                className="h-auto p-4 flex flex-col items-center space-y-2 bg-slate-700/50 border-slate-600 text-slate-200 hover:bg-slate-600/50"
               >
                 <Calendar className="h-6 w-6" />
                 <span>Calendar View</span>
