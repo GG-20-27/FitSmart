@@ -228,7 +228,7 @@ export function CalendarManagement() {
                     setCalendarName('');
                   }}
                   size="sm"
-                  className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+                  className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
                 >
                   Cancel
                 </Button>
@@ -275,7 +275,7 @@ export function CalendarManagement() {
                       isActive: !calendar.isActive 
                     })}
                     disabled={toggleCalendarMutation.isPending}
-                    className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+                    className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
                   >
                     {calendar.isActive ? (
                       <ToggleRight className="h-4 w-4" />
@@ -287,7 +287,7 @@ export function CalendarManagement() {
                     variant="outline"
                     size="sm"
                     onClick={() => window.open(calendar.calendarUrl, '_blank')}
-                    className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+                    className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
                   >
                     <ExternalLink className="h-4 w-4" />
                   </Button>

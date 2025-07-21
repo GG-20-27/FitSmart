@@ -356,7 +356,7 @@ export default function Dashboard() {
                       disabled={resetAuthMutation.isPending}
                       variant="outline"
                       size="sm"
-                      className="border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white"
+                      className="bg-transparent border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white transition-all duration-200"
                     >
                       {resetAuthMutation.isPending ? (
                         <>
@@ -375,7 +375,7 @@ export default function Dashboard() {
                       disabled={whoopLoading}
                       variant="outline"
                       size="sm"
-                      className="border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white"
+                      className="bg-transparent border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-all duration-200"
                     >
                       {whoopLoading ? (
                         <RefreshCw className="w-4 h-4 animate-spin" />
