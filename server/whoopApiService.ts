@@ -77,6 +77,8 @@ export interface WhoopTodayData {
     cycle?: any;
     recovery?: any;
     sleep?: any;
+    workout?: any;
+    body_measurements?: any;
   };
   error?: {
     type: string;
@@ -462,7 +464,7 @@ export class WhoopApiService {
     }
   }
 
-  async getWorkoutData(): Promise<any> {
+  async getWorkoutData(userId?: string): Promise<any> {
     try {
       console.log('Fetching recent workout data...');
       
@@ -474,7 +476,7 @@ export class WhoopApiService {
       const todayStr = today.toISOString().split('T')[0];
       const yesterdayStr = yesterday.toISOString().split('T')[0];
       
-      const headers = await this.authHeader();
+      const headers = await this.authHeader(userId);
       const response = await axios.get(`${BASE}/activity/workout?start=${yesterdayStr}&end=${todayStr}`, { 
         headers,
         timeout: 10000
@@ -497,11 +499,11 @@ export class WhoopApiService {
     }
   }
 
-  async getBodyMeasurements(): Promise<any> {
+  async getBodyMeasurements(userId?: string): Promise<any> {
     try {
       console.log('Fetching body measurements...');
       
-      const headers = await this.authHeader();
+      const headers = await this.authHeader(userId);
       const response = await axios.get(`${BASE}/user/measurement`, { 
         headers,
         timeout: 10000
@@ -520,14 +522,14 @@ export class WhoopApiService {
     }
   }
 
-  async getWeeklyAverages(): Promise<{
+  async getWeeklyAverages(userId?: string): Promise<{
     avgRecovery: number | null;
     avgStrain: number | null;
     avgSleep: number | null;
     avgHRV: number | null;
   }> {
     try {
-      const headers = await this.authHeader();
+      const headers = await this.authHeader(userId);
       
       // Get cycles from the past 7 days
       const endDate = new Date();
@@ -562,7 +564,7 @@ export class WhoopApiService {
           }
           
           // Get recovery data
-          const recovery = await this.getRecovery(cycle.id);
+          const recovery = await this.getRecovery(cycle.id, userId);
           if (recovery?.score?.recovery_score) {
             recoveryScores.push(recovery.score.recovery_score);
           }
@@ -581,7 +583,7 @@ export class WhoopApiService {
               // Add delay before sleep API call
               await new Promise(resolve => setTimeout(resolve, 100));
               
-              const headers = await this.authHeader();
+              const headers = await this.authHeader(userId);
               const response = await axios.get(`${BASE}/activity/sleep/${recovery.sleep_id}`, { headers });
               if (response.status === 200) {
                 const sleepData = response.data;
@@ -634,10 +636,10 @@ export class WhoopApiService {
     }
   }
 
-  async getTodaysData(): Promise<WhoopTodayData> {
+  async getTodaysData(userId?: string): Promise<WhoopTodayData> {
     try {
-      // Get the latest cycle
-      const latestCycle = await this.getLatestCycle();
+      // Get the latest cycle with user-specific authentication
+      const latestCycle = await this.getLatestCycle(userId);
       if (!latestCycle) {
         console.log('No cycles found');
         return {};
@@ -645,8 +647,8 @@ export class WhoopApiService {
 
       console.log(`Using cycle: ${latestCycle.id}`);
 
-      // Get recovery data
-      const recovery = await this.getRecovery(latestCycle.id);
+      // Get recovery data with user-specific authentication
+      const recovery = await this.getRecovery(latestCycle.id, userId);
       console.log('Recovery data found for cycle:', latestCycle.id);
 
       // Get sleep data using sleep_id from recovery data if available
@@ -656,7 +658,7 @@ export class WhoopApiService {
       if (recovery?.sleep_id) {
         console.log(`Found sleep_id in recovery data: ${recovery.sleep_id}`);
         try {
-          const headers = await this.authHeader();
+          const headers = await this.authHeader(userId);
           const response = await axios.get(`${BASE}/activity/sleep/${recovery.sleep_id}`, { headers });
           if (response.status === 200) {
             sleepData = response.data;
@@ -682,7 +684,7 @@ export class WhoopApiService {
       // Fallback to previous sleep retrieval method if sleep_id approach failed
       if (!sleepHours) {
         try {
-          sleepHours = await this.getLatestSleepSession();
+          sleepHours = await this.getLatestSleepSession(userId);
           if (sleepHours !== null) {
             console.log(`Sleep hours retrieved via fallback method: ${sleepHours}`);
           } else {
@@ -701,10 +703,10 @@ export class WhoopApiService {
         console.log('Fetching additional insights...');
         
         // Get recent workout data
-        workoutData = await this.getWorkoutData();
+        workoutData = await this.getWorkoutData(userId);
         
         // Get body measurements  
-        bodyMeasurements = await this.getBodyMeasurements();
+        bodyMeasurements = await this.getBodyMeasurements(userId);
         
       } catch (error) {
         console.log('Error fetching additional insights:', error);

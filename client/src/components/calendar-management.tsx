@@ -4,7 +4,7 @@ import { apiRequest, queryClient } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Plus, ExternalLink, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Trash2, Plus, ExternalLink, ToggleLeft, ToggleRight, CalendarDays } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface UserCalendar {
@@ -164,29 +164,30 @@ export function CalendarManagement() {
   }
 
   return (
-    <Card>
+    <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
+        <CardTitle className="flex items-center gap-2 text-white">
+          <CalendarDays className="h-5 w-5" />
           Calendar Management
           <Button
             variant="outline"
             size="sm"
             onClick={() => setIsAdding(!isAdding)}
-            className="ml-auto"
+            className="ml-auto border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
           >
             <Plus className="h-4 w-4 mr-1" />
             Add Calendar
           </Button>
         </CardTitle>
-        <CardDescription>
+        <CardDescription className="text-slate-400">
           Manage your personal calendars. Add Google Calendar ICS links to see your events in the dashboard.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {isAdding && (
-          <div className="p-4 border rounded-lg bg-muted/50 space-y-3">
-            <h4 className="font-medium">Add New Calendar</h4>
-            <p className="text-sm text-muted-foreground">
+          <div className="p-4 border border-slate-600 rounded-lg bg-slate-900/50 space-y-3">
+            <h4 className="font-medium text-white">Add New Calendar</h4>
+            <p className="text-sm text-slate-400">
               To add your Google Calendar:
               <br />
               1. Go to your Google Calendar settings
@@ -202,17 +203,20 @@ export function CalendarManagement() {
                 placeholder="Calendar Name (e.g., Personal, Work)"
                 value={calendarName}
                 onChange={(e) => setCalendarName(e.target.value)}
+                className="bg-slate-700 border-slate-600 text-white placeholder-slate-400 focus:border-blue-500 focus:ring-blue-500"
               />
               <Input
                 placeholder="Calendar ICS URL (https://calendar.google.com/calendar/ical/...)"
                 value={calendarUrl}
                 onChange={(e) => setCalendarUrl(e.target.value)}
+                className="bg-slate-700 border-slate-600 text-white placeholder-slate-400 focus:border-blue-500 focus:ring-blue-500"
               />
               <div className="flex gap-2">
                 <Button 
                   onClick={handleAddCalendar}
                   disabled={addCalendarMutation.isPending}
                   size="sm"
+                  className="bg-blue-600 hover:bg-blue-700 text-white border-0"
                 >
                   {addCalendarMutation.isPending ? 'Adding...' : 'Add Calendar'}
                 </Button>
@@ -224,6 +228,7 @@ export function CalendarManagement() {
                     setCalendarName('');
                   }}
                   size="sm"
+                  className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
                 >
                   Cancel
                 </Button>
@@ -233,7 +238,7 @@ export function CalendarManagement() {
         )}
 
         {calendars.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
+          <div className="text-center py-8 text-slate-400">
             <p>No calendars configured.</p>
             <p className="text-sm">Add a calendar to see your events in the dashboard.</p>
           </div>
@@ -242,22 +247,22 @@ export function CalendarManagement() {
             {calendars.map((calendar) => (
               <div
                 key={calendar.id}
-                className="flex items-center justify-between p-3 border rounded-lg"
+                className="flex items-center justify-between p-3 border border-slate-600 rounded-lg bg-slate-900/30"
               >
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <h4 className="font-medium">{calendar.calendarName}</h4>
+                    <h4 className="font-medium text-white">{calendar.calendarName}</h4>
                     {calendar.isActive ? (
-                      <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                      <span className="text-xs bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/30">
                         Active
                       </span>
                     ) : (
-                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded">
+                      <span className="text-xs bg-slate-600/20 text-slate-400 px-2 py-1 rounded border border-slate-600/30">
                         Inactive
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-muted-foreground truncate max-w-md">
+                  <p className="text-sm text-slate-400 truncate max-w-md">
                     {calendar.calendarUrl}
                   </p>
                 </div>
@@ -270,6 +275,7 @@ export function CalendarManagement() {
                       isActive: !calendar.isActive 
                     })}
                     disabled={toggleCalendarMutation.isPending}
+                    className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
                   >
                     {calendar.isActive ? (
                       <ToggleRight className="h-4 w-4" />
@@ -281,6 +287,7 @@ export function CalendarManagement() {
                     variant="outline"
                     size="sm"
                     onClick={() => window.open(calendar.calendarUrl, '_blank')}
+                    className="border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
                   >
                     <ExternalLink className="h-4 w-4" />
                   </Button>
@@ -289,6 +296,7 @@ export function CalendarManagement() {
                     size="sm"
                     onClick={() => deleteCalendarMutation.mutate(calendar.id)}
                     disabled={deleteCalendarMutation.isPending}
+                    className="bg-red-600/20 border-red-600/50 text-red-400 hover:bg-red-600/30 hover:text-red-300"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

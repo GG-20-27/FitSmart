@@ -524,11 +524,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('Fetching live WHOOP data for today...');
       
-      // Token validation at the top
-      const defaultUserId = await getDefaultUserId();
-      const tokenData = await whoopTokenStorage.getToken(defaultUserId);
+      // Get user ID from query parameter or use default admin user
+      const userId = req.query.userId as string || await getDefaultUserId();
+      console.log(`Fetching WHOOP data for user: ${userId}`);
+      
+      // Token validation using user-specific token
+      const tokenData = await whoopTokenStorage.getToken(userId);
       if (!tokenData?.access_token) {
-        return res.status(401).json({ error: 'Missing WHOOP access token' });
+        return res.status(401).json({ error: 'Missing WHOOP access token for user' });
       }
 
       if (!whoopTokenStorage.isTokenValid(tokenData)) {
@@ -540,13 +543,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Fetch real WHOOP data using the corrected API structure
-      const whoopData = await whoopApiService.getTodaysData();
+      // Fetch real WHOOP data using user-specific authentication
+      const whoopData = await whoopApiService.getTodaysData(userId);
       
-      // Store in database for caching with user_id
+      // Store in database for caching with correct user_id
       const todayDate = getTodayDate();
       await storage.createOrUpdateWhoopData({
-        userId: defaultUserId,
+        userId: userId,
         date: todayDate,
         recoveryScore: Math.round(whoopData.recovery_score || 0),
         sleepScore: Math.round(whoopData.sleep_score || 0),
@@ -733,10 +736,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       console.log('Fetching weekly WHOOP averages...');
       
-      // Token validation
-      const tokenData = await whoopTokenStorage.getDefaultToken();
+      // Get user ID from query parameter or use default admin user
+      const userId = req.query.userId as string || await getDefaultUserId();
+      
+      // Token validation using user-specific token
+      const tokenData = await whoopTokenStorage.getToken(userId);
       if (!tokenData?.access_token) {
-        return res.status(401).json({ error: 'Missing WHOOP access token' });
+        return res.status(401).json({ error: 'Missing WHOOP access token for user' });
       }
 
       if (!whoopTokenStorage.isTokenValid(tokenData)) {
@@ -748,7 +754,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const weeklyData = await whoopApiService.getWeeklyAverages();
+      const weeklyData = await whoopApiService.getWeeklyAverages(userId);
       
       console.log('Weekly WHOOP averages retrieved successfully');
       res.json(weeklyData);
@@ -959,7 +965,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Calendar events endpoint with date range support
+  // User-specific calendar events endpoint with date range support
   app.get('/api/calendar/events', async (req, res) => {
     try {
       const { start, end } = req.query as { start?: string; end?: string };
@@ -970,11 +976,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`Fetching calendar events from ${start} to ${end}...`);
       
-      const calendarUrls = [
-        'https://calendar.google.com/calendar/ical/gguussttaavvss%40gmail.com/public/basic.ics',
-        'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics',
-        'https://calendar.google.com/calendar/ical/florbolists13%40gmail.com/public/basic.ics'
-      ];
+      // Get user ID from query or use default admin user
+      const userId = req.query.userId as string || await getDefaultUserId();
+      
+      // Get user's calendars from database
+      const userCalendars = await storage.getUserCalendars(userId);
+      
+      if (userCalendars.length === 0) {
+        return res.json({
+          events: [],
+          range: { start, end },
+          message: 'No calendars configured. Add a calendar in your profile to see events.'
+        });
+      }
+      
+      const calendarUrls = userCalendars
+        .filter(cal => cal.isActive)
+        .map(cal => cal.calendarUrl);
       
       // Use Europe/Zurich timezone for date range
       const rangeStart = DateTime.fromISO(start).setZone('Europe/Zurich').startOf('day');
