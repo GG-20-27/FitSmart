@@ -1,4 +1,4 @@
-import { users, meals, whoopData, type User, type InsertUser, type Meal, type InsertMeal, type WhoopData, type InsertWhoopData } from "@shared/schema";
+import { users, meals, whoopData, userCalendars, type User, type InsertUser, type Meal, type InsertMeal, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar } from "@shared/schema";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 
@@ -20,6 +20,12 @@ export interface IStorage {
   getWhoopToken(userId: string): Promise<WhoopToken | undefined>;
   createOrUpdateWhoopToken(data: InsertWhoopToken): Promise<WhoopToken>;
   deleteWhoopToken(userId: string): Promise<void>;
+  
+  // Calendar operations
+  getUserCalendars(userId: string): Promise<UserCalendar[]>;
+  createUserCalendar(data: InsertUserCalendar): Promise<UserCalendar>;
+  deleteUserCalendar(id: number): Promise<void>;
+  updateUserCalendar(id: number, data: Partial<InsertUserCalendar>): Promise<UserCalendar>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -82,6 +88,32 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return data;
     }
+  }
+
+  // Calendar operations
+  async getUserCalendars(userId: string): Promise<UserCalendar[]> {
+    return await db.select().from(userCalendars).where(eq(userCalendars.userId, userId));
+  }
+
+  async createUserCalendar(data: InsertUserCalendar): Promise<UserCalendar> {
+    const [calendar] = await db
+      .insert(userCalendars)
+      .values(data)
+      .returning();
+    return calendar;
+  }
+
+  async deleteUserCalendar(id: number): Promise<void> {
+    await db.delete(userCalendars).where(eq(userCalendars.id, id));
+  }
+
+  async updateUserCalendar(id: number, data: Partial<InsertUserCalendar>): Promise<UserCalendar> {
+    const [calendar] = await db
+      .update(userCalendars)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(userCalendars.id, id))
+      .returning();
+    return calendar;
   }
 }
 

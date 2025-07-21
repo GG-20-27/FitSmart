@@ -865,17 +865,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Google Calendar today's events endpoint
+  // User-specific calendar today's events endpoint
   app.get('/api/calendar/today', async (req, res) => {
     try {
       console.log('Fetching today\'s calendar events...');
       
-      // Extract calendar IDs from the embed URL
-      const calendarUrls = [
-        'https://calendar.google.com/calendar/ical/gguussttaavvss%40gmail.com/public/basic.ics',
-        'https://calendar.google.com/calendar/ical/f384eb70bee502233b35fb8e1d69b6edda889364ac5e8ccd098fe165cad24bd9%40group.calendar.google.com/public/basic.ics',
-        'https://calendar.google.com/calendar/ical/florbolists13%40gmail.com/public/basic.ics'
-      ];
+      // Get user ID from query or use default admin user
+      const userId = req.query.userId as string || await getDefaultUserId();
+      
+      // Get user's calendars from database
+      const userCalendars = await storage.getUserCalendars(userId);
+      
+      if (userCalendars.length === 0) {
+        return res.json({
+          date: DateTime.now().setZone('Europe/Zurich').toISODate(),
+          events: [],
+          message: 'No calendars configured. Add a calendar in your profile to see events.'
+        });
+      }
+      
+      const calendarUrls = userCalendars
+        .filter(cal => cal.isActive)
+        .map(cal => cal.calendarUrl);
       
       // Use Europe/Zurich timezone for accurate date/time handling
       const zurichTime = DateTime.now().setZone('Europe/Zurich');
@@ -1035,6 +1046,71 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Failed to fetch calendar events',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
+    }
+  });
+
+  // Calendar Management Endpoints
+  
+  // Get user's calendars
+  app.get('/api/calendars', async (req, res) => {
+    try {
+      const userId = req.query.userId as string || await getDefaultUserId();
+      const calendars = await storage.getUserCalendars(userId);
+      res.json(calendars);
+    } catch (error) {
+      console.error('Error fetching calendars:', error);
+      res.status(500).json({ error: 'Failed to fetch calendars' });
+    }
+  });
+
+  // Add new calendar
+  app.post('/api/calendars', async (req, res) => {
+    try {
+      const { userId, calendarUrl, calendarName } = req.body;
+      
+      if (!calendarUrl || !calendarName) {
+        return res.status(400).json({ error: 'Calendar URL and name are required' });
+      }
+      
+      const finalUserId = userId || await getDefaultUserId();
+      
+      const calendar = await storage.createUserCalendar({
+        userId: finalUserId,
+        calendarUrl,
+        calendarName,
+        isActive: true
+      });
+      
+      res.json(calendar);
+    } catch (error) {
+      console.error('Error creating calendar:', error);
+      res.status(500).json({ error: 'Failed to create calendar' });
+    }
+  });
+
+  // Delete calendar
+  app.delete('/api/calendars/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteUserCalendar(id);
+      res.json({ message: 'Calendar deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting calendar:', error);
+      res.status(500).json({ error: 'Failed to delete calendar' });
+    }
+  });
+
+  // Update calendar (toggle active status or change name)
+  app.patch('/api/calendars/:id', async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updates = req.body;
+      
+      const calendar = await storage.updateUserCalendar(id, updates);
+      res.json(calendar);
+    } catch (error) {
+      console.error('Error updating calendar:', error);
+      res.status(500).json({ error: 'Failed to update calendar' });
     }
   });
 

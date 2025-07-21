@@ -9,6 +9,7 @@ import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, External
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useState } from 'react';
 import SocialAuth from '@/components/social-auth';
+import { CalendarManagement } from '@/components/calendar-management';
 
 interface UserProfile {
   id: string;
@@ -278,6 +279,9 @@ export default function Profile() {
               </div>
             </CardContent>
           </Card>
+          
+          {/* Calendar Management */}
+          <CalendarManagement />
         </div>
 
         {/* Quick Actions */}

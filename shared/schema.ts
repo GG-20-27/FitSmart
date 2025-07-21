@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, uuid, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -42,6 +42,16 @@ export const whoopData = pgTable("whoop_data", {
   lastSync: timestamp("last_sync").defaultNow().notNull(),
 });
 
+export const userCalendars = pgTable("user_calendars", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  calendarUrl: text("calendar_url").notNull(),
+  calendarName: text("calendar_name").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   email: true,
 });
@@ -62,6 +72,12 @@ export const insertWhoopTokenSchema = createInsertSchema(whoopTokens).omit({
   updatedAt: true,
 });
 
+export const insertUserCalendarSchema = createInsertSchema(userCalendars).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertMeal = z.infer<typeof insertMealSchema>;
@@ -70,6 +86,8 @@ export type InsertWhoopData = z.infer<typeof insertWhoopDataSchema>;
 export type WhoopData = typeof whoopData.$inferSelect;
 export type InsertWhoopToken = z.infer<typeof insertWhoopTokenSchema>;
 export type WhoopToken = typeof whoopTokens.$inferSelect;
+export type InsertUserCalendar = z.infer<typeof insertUserCalendarSchema>;
+export type UserCalendar = typeof userCalendars.$inferSelect;
 
 // WHOOP API response types
 export interface WhoopTodayResponse {

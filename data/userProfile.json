@@ -134,7 +134,13 @@
   {
     "date": "2025-07-20",
     "recovery_score": 67,
-    "strain_score": 9.797938,
+    "strain_score": 9.798039,
     "hrv": 88.896835
+  },
+  {
+    "date": "2025-07-21",
+    "recovery_score": 95,
+    "strain_score": 6.915554,
+    "hrv": 103.71309
   }
 ]
