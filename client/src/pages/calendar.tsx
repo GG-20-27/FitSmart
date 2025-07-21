@@ -242,6 +242,18 @@ export default function CalendarPage() {
             <Badge variant="secondary" className="bg-slate-700 text-slate-300 text-xs sm:text-sm">
               {calendarEvents.length} events
             </Badge>
+            {calendarEvents.length === 0 && (
+              <Link href="/profile">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 transition-colors"
+                >
+                  <CalendarIcon className="h-4 w-4 mr-2" />
+                  Add Calendars
+                </Button>
+              </Link>
+            )}
             <Button
               onClick={() => refetch()}
               variant="outline"
@@ -254,12 +266,31 @@ export default function CalendarPage() {
           </div>
         </div>
 
-        {/* Calendar */}
-        <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-          <CardContent className="p-2 sm:p-6">
-            <div className="calendar-container h-[500px] sm:h-[700px]">
-              <Calendar
-                localizer={localizer}
+        {/* Calendar or Empty State */}
+        {calendarEvents.length === 0 ? (
+          <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+            <CardContent className="p-8 text-center">
+              <div className="max-w-md mx-auto">
+                <CalendarIcon className="h-16 w-16 mx-auto text-slate-500 mb-4" />
+                <h3 className="text-xl font-semibold text-white mb-2">No Calendars Connected</h3>
+                <p className="text-slate-400 mb-6">
+                  Connect your Google Calendar to see your events here. Add your calendar ICS URLs in your profile settings.
+                </p>
+                <Link href="/profile">
+                  <Button className="bg-blue-600 hover:bg-blue-700 text-white">
+                    <CalendarIcon className="h-4 w-4 mr-2" />
+                    Add Calendars
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+            <CardContent className="p-2 sm:p-6">
+              <div className="calendar-container h-[500px] sm:h-[700px]">
+                <Calendar
+                  localizer={localizer}
                 events={calendarEvents}
                 startAccessor="start"
                 endAccessor="end"
@@ -293,9 +324,10 @@ export default function CalendarPage() {
                 })}
                 className="custom-calendar"
               />
-            </div>
-          </CardContent>
-        </Card>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Event Detail Dialog */}
         <Dialog open={showEventDialog} onOpenChange={setShowEventDialog}>

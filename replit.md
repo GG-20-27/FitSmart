@@ -119,13 +119,13 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
-- July 21, 2025: Fixed critical multi-user data isolation bug in WHOOP API integration
-  - Implemented user-specific authentication parameters across all WHOOP API service methods
-  - Updated getTodaysData(), getWeeklyAverages(), getWorkoutData(), getBodyMeasurements() methods to accept userId
-  - Modified WHOOP endpoints (/api/whoop/today, /api/whoop/weekly) to use user query parameters
-  - Fixed authentication header method to use user-specific tokens instead of hardcoded defaults
-  - Enhanced token validation and retrieval to properly isolate user data
-  - Users now only see their own WHOOP metrics and calendar data with proper privacy protection
+- July 21, 2025: Resolved calendar visibility issue and enhanced user experience
+  - Fixed critical multi-user data isolation bug in WHOOP API integration with user-specific authentication
+  - Added helpful empty state to calendar page with "Add Calendars" button when no calendars are configured
+  - Enhanced calendar page with clear guidance directing users to profile page for calendar setup
+  - Fixed calendar component syntax error and improved responsive design
+  - Users now properly guided through calendar setup process via Profile > Calendar Management section
+  - Calendar functionality works correctly once Google Calendar ICS URLs are added through profile settings
   - Maintained consistent dark theme design with hover animations on all navigation buttons
 - July 20, 2025: Fixed database admin user issue and restored app preview access
   - Recreated missing default admin user that was causing WHOOP status check failures
