@@ -664,8 +664,8 @@ export default function Dashboard() {
                 </Card>
               )}
 
-              {/* Recent Workout */}
-              {whoopData.raw?.workout && (
+              {/* Today's Strain */}
+              {whoopData.strain && (
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                   <CardContent className="p-6">
                     <div className="flex items-center space-x-3 mb-4">
@@ -673,21 +673,21 @@ export default function Dashboard() {
                         <Zap className="h-6 w-6 text-white" />
                       </div>
                       <div>
-                        <p className="text-slate-400 text-sm">Recent Workout</p>
+                        <p className="text-slate-400 text-sm">Today's Strain</p>
                         <p className="text-2xl font-bold text-emerald-400">
-                          <CountUp end={whoopData.raw.workout.score?.strain || 0} decimals={1} duration={1000} />
+                          <CountUp end={whoopData.strain} decimals={1} duration={1000} />
                         </p>
                       </div>
                     </div>
                     <div className="text-xs text-slate-500">
-                      {whoopData.raw.workout.sport_name || 'Workout'} strain
+                      Overall activity strain today
                     </div>
                   </CardContent>
                 </Card>
               )}
 
-              {/* Max Heart Rate */}
-              {whoopData.raw?.workout?.score?.max_heart_rate && (
+              {/* Resting Heart Rate */}
+              {whoopData.resting_heart_rate && (
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                   <CardContent className="p-6">
                     <div className="flex items-center space-x-3 mb-4">
@@ -695,36 +695,14 @@ export default function Dashboard() {
                         <Heart className="h-6 w-6 text-white" />
                       </div>
                       <div>
-                        <p className="text-slate-400 text-sm">Max Heart Rate</p>
+                        <p className="text-slate-400 text-sm">Resting HR</p>
                         <p className="text-2xl font-bold text-rose-400">
-                          <CountUp end={whoopData.raw.workout.score.max_heart_rate} duration={1000} /> bpm
+                          <CountUp end={whoopData.resting_heart_rate} duration={1000} /> bpm
                         </p>
                       </div>
                     </div>
                     <div className="text-xs text-slate-500">
-                      Peak heart rate during workout
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Body Weight */}
-              {whoopData.raw?.body_measurements?.weight_kilogram && (
-                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                  <CardContent className="p-6">
-                    <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-slate-500 rounded-full flex items-center justify-center">
-                        <Activity className="h-6 w-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-slate-400 text-sm">Body Weight</p>
-                        <p className="text-2xl font-bold text-slate-400">
-                          <CountUp end={whoopData.raw.body_measurements.weight_kilogram} decimals={1} duration={1000} /> kg
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      Current recorded weight
+                      Current resting heart rate
                     </div>
                   </CardContent>
                 </Card>
