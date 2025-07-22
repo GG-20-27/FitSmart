@@ -74,6 +74,48 @@
     opacity: 0;
   }
   
+  /* Mobile-specific optimizations */
+  @media (max-width: 640px) {
+    .container {
+      padding-left: 0.75rem;
+      padding-right: 0.75rem;
+    }
+    
+    /* Ensure cards don't overflow on small screens */
+    .card {
+      min-width: 0;
+    }
+    
+    /* Better button spacing on mobile */
+    .mobile-button-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      width: 100%;
+    }
+    
+    /* Mobile-friendly text sizes */
+    .mobile-text-xs { font-size: 0.6875rem; }
+    .mobile-text-sm { font-size: 0.8125rem; }
+    
+    /* Mobile grid optimizations */
+    .mobile-grid-1 {
+      grid-template-columns: repeat(1, minmax(0, 1fr));
+    }
+  }
+  
+  @media (max-width: 480px) {
+    /* Extra small devices */
+    .container {
+      padding-left: 0.5rem;
+      padding-right: 0.5rem;
+    }
+    
+    /* Even smaller text for tiny screens */
+    h1 { font-size: 1.25rem !important; }
+    h2 { font-size: 1.125rem !important; }
+  }
+  
   .animate-slide-up {
     animation: slideUp 0.8s ease-out forwards;
     opacity: 0;

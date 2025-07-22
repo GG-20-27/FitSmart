@@ -261,20 +261,21 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 lg:py-8">
         {/* Header */}
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between mb-12 space-y-6 lg:space-y-0">
-          <div className="flex items-center space-x-4">
-            <div className="flex-shrink-0 p-1">
-              <FitScoreLogo size={48} />
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 sm:mb-8 lg:mb-12 space-y-4 sm:space-y-0">
+          <div className="flex items-center space-x-3 sm:space-x-4">
+            <div className="flex-shrink-0">
+              <FitScoreLogo size={40} className="sm:w-12 sm:h-12" />
             </div>
             <div className="min-w-0">
-              <h1 className="text-2xl lg:text-3xl font-bold text-white">FitScore Health Dashboard</h1>
-              <p className="text-slate-400 text-sm lg:text-base">Real-time WHOOP health analytics</p>
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white">FitScore Health Dashboard</h1>
+              <p className="text-slate-400 text-xs sm:text-sm lg:text-base hidden sm:block">Real-time WHOOP health analytics</p>
+              <p className="text-slate-400 text-xs sm:hidden">WHOOP Analytics</p>
             </div>
           </div>
           
-          <div className="flex items-center justify-center lg:justify-end space-x-3">
+          <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-end space-y-2 sm:space-y-0 sm:space-x-3">
             {/* Navigation Buttons */}
             <Link href="/calendar">
               <Button
@@ -326,12 +327,12 @@ export default function Dashboard() {
         </div>
 
         {/* Today's Health Metrics */}
-        <div className="text-center mb-12">
-          <h2 className="text-4xl font-bold text-white mb-2">Today's Health Metrics</h2>
-          <p className="text-slate-400 text-lg">Live data from your WHOOP device</p>
+        <div className="text-center mb-6 sm:mb-8 lg:mb-12">
+          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">Today's Health Metrics</h2>
+          <p className="text-slate-400 text-sm sm:text-base lg:text-lg">Live data from your WHOOP device</p>
           {lastSync && (
-            <div className="flex items-center justify-center mt-4 text-sm text-slate-500">
-              <Clock className="h-4 w-4 mr-2" />
+            <div className="flex items-center justify-center mt-3 sm:mt-4 text-xs sm:text-sm text-slate-500">
+              <Clock className="h-3 w-3 sm:h-4 sm:w-4 mr-2" />
               <span>Last sync: {formatTime(lastSync)}</span>
             </div>
           )}
@@ -339,9 +340,9 @@ export default function Dashboard() {
 
         {/* Authentication Status */}
         {!isWhoopConnected && !authLoading && (
-          <div className="max-w-2xl mx-auto mb-8">
+          <div className="max-w-2xl mx-auto mb-6 sm:mb-8">
             <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-              <CardContent className="p-6 text-center">
+              <CardContent className="p-4 sm:p-6 text-center">
                 <div className="flex justify-center mb-4">
                   <FitScoreLogo size={64} />
                 </div>
@@ -373,15 +374,15 @@ export default function Dashboard() {
 
         {/* Connection Controls - Show when connected */}
         {isWhoopConnected && (
-          <div className="max-w-2xl mx-auto mb-8">
+          <div className="max-w-2xl mx-auto mb-6 sm:mb-8">
             <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
+              <CardContent className="p-3 sm:p-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between space-y-3 sm:space-y-0">
                   <div className="flex items-center space-x-3">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="text-slate-300 font-medium">WHOOP Connected</span>
+                    <span className="text-slate-300 font-medium text-sm sm:text-base">WHOOP Connected</span>
                   </div>
-                  <div className="flex space-x-2">
+                  <div className="flex space-x-2 w-full sm:w-auto">
                     <Button
                       onClick={() => resetAuthMutation.mutate()}
                       disabled={resetAuthMutation.isPending}
@@ -423,15 +424,15 @@ export default function Dashboard() {
 
         {/* Main Metrics Cards */}
         {isWhoopConnected && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-12 lg:mb-16">
           {/* Recovery Card */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-            <CardContent className="p-6 text-center">
-              <div className="mb-4">
-                <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Heart className="h-8 w-8 text-white" />
+            <CardContent className="p-4 sm:p-6 text-center">
+              <div className="mb-3 sm:mb-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
+                  <Heart className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
-                <div className="text-2xl font-bold text-blue-400">
+                <div className="text-xl sm:text-2xl font-bold text-blue-400">
                   {whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
                     <><CountUp end={whoopData.recovery_score} duration={1200} />%</>
                   ) : (
@@ -440,8 +441,8 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="flex items-center justify-center space-x-2">
-                <Heart className="h-5 w-5 text-blue-400" />
-                <span className="text-slate-300 font-medium">Recovery</span>
+                <Heart className="h-4 w-4 sm:h-5 sm:w-5 text-blue-400" />
+                <span className="text-slate-300 font-medium text-sm sm:text-base">Recovery</span>
               </div>
             </CardContent>
           </Card>
@@ -525,7 +526,7 @@ export default function Dashboard() {
               <p className="text-slate-400">Detailed physiological metrics and sleep analytics</p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
               {/* Sleep Hours */}
               {whoopData.sleep_hours && (
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
@@ -551,14 +552,14 @@ export default function Dashboard() {
               {/* Resting Heart Rate */}
               {whoopData.resting_heart_rate && (
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                  <CardContent className="p-6">
-                    <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
-                        <Heart className="h-6 w-6 text-white" />
+                  <CardContent className="p-4 sm:p-6">
+                    <div className="flex items-center space-x-3 mb-3 sm:mb-4">
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-500 rounded-full flex items-center justify-center">
+                        <Heart className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
                       </div>
                       <div>
-                        <p className="text-slate-400 text-sm">Resting Heart Rate</p>
-                        <p className="text-2xl font-bold text-red-400">
+                        <p className="text-slate-400 text-xs sm:text-sm">Resting Heart Rate</p>
+                        <p className="text-xl sm:text-2xl font-bold text-red-400">
                           <CountUp end={whoopData.resting_heart_rate} duration={1000} /> bpm
                         </p>
                       </div>
