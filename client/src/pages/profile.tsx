@@ -214,7 +214,7 @@ export default function Profile() {
                     onClick={() => createUserMutation.mutate(newUserEmail)}
                     disabled={!newUserEmail || createUserMutation.isPending}
                     size="sm"
-                    className="w-full sm:w-auto"
+                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white border-0 transition-all duration-200"
                   >
                     {createUserMutation.isPending ? (
                       <RefreshCw className="h-4 w-4 animate-spin" />
@@ -234,6 +234,7 @@ export default function Profile() {
                     variant="outline"
                     size="sm"
                     disabled={usersLoading}
+                    className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
                   >
                     <RefreshCw className={`h-4 w-4 ${usersLoading ? 'animate-spin' : ''}`} />
                   </Button>
@@ -265,7 +266,7 @@ export default function Profile() {
                         variant="destructive"
                         size="sm"
                         disabled={deleteUserMutation.isPending}
-                        className="w-full sm:w-auto"
+                        className="w-full sm:w-auto bg-red-600/20 border-red-600/50 text-red-400 hover:bg-red-600/30 hover:text-red-300 transition-all duration-200"
                       >
                         Delete
                       </Button>
