@@ -368,6 +368,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // Always return JSON regardless of content negotiation
+      res.setHeader('Content-Type', 'application/json');
+      
       const result = {
         message: `Bulk token refresh completed. Checked ${totalChecked} tokens, refreshed ${totalRefreshed}`,
         updated_users: updatedUsers,
