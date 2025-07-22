@@ -114,19 +114,20 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
       <svg 
         width={size} 
         height={size} 
-        viewBox="0 0 48 48" 
+        viewBox="0 0 100 100" 
         fill="none" 
         xmlns="http://www.w3.org/2000/svg"
         className="drop-shadow-lg"
       >
         <defs>
-          <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+          <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#06B6D4" />
-            <stop offset="50%" stopColor="#3B82F6" />
-            <stop offset="100%" stopColor="#8B5CF6" />
+            <stop offset="30%" stopColor="#3B82F6" />
+            <stop offset="70%" stopColor="#8B5CF6" />
+            <stop offset="100%" stopColor="#D946EF" />
           </linearGradient>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+          <filter id="logoGlow">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
             <feMerge> 
               <feMergeNode in="coloredBlur"/>
               <feMergeNode in="SourceGraphic"/>
@@ -134,22 +135,62 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
           </filter>
         </defs>
         
+        {/* Background circle with gradient fill matching the page background */}
         <circle 
-          cx="24" 
-          cy="24" 
-          r="22" 
-          fill="url(#bgGradient)" 
-          filter="url(#glow)"
-          className="animate-pulse"
-          style={{ animationDuration: '4s' }}
+          cx="50" 
+          cy="50" 
+          r="48" 
+          fill="rgba(30, 41, 59, 0.8)"
+          stroke="url(#logoGradient)"
+          strokeWidth="1"
+          filter="url(#logoGlow)"
         />
         
-        <path 
-          d="M24 32c-6-4-10-8-10-13 0-4 4-7 8-7 2 0 4 1 5 3 1-2 3-3 5-3 4 0 8 3 8 7 0 5-4 9-10 13z" 
-          fill="white" 
-          stroke="white"
-          strokeWidth="0.5"
+        {/* Outer ring - dashed circle */}
+        <circle
+          cx="50"
+          cy="50"
+          r="40"
+          fill="none"
+          stroke="url(#logoGradient)"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray="120 15"
+          opacity="0.9"
         />
+        
+        {/* Heartbeat line */}
+        <path
+          d="M15 50 L20 50 L25 35 L30 65 L35 20 L40 80 L45 50 L50 40 L55 60 L60 50 L65 45 L70 55 L75 50 L85 50"
+          fill="none"
+          stroke="url(#logoGradient)"
+          strokeWidth="2.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.95"
+        />
+        
+        {/* Center pulse dot */}
+        <circle
+          cx="50"
+          cy="50"
+          r="2.5"
+          fill="url(#logoGradient)"
+          opacity="1"
+        >
+          <animate
+            attributeName="r"
+            values="2.5;4;2.5"
+            dur="2s"
+            repeatCount="indefinite"
+          />
+          <animate
+            attributeName="opacity"
+            values="1;0.6;1"
+            dur="2s"
+            repeatCount="indefinite"
+          />
+        </circle>
       </svg>
     </div>
   );
@@ -387,8 +428,8 @@ export default function Dashboard() {
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-6 text-center">
               <div className="mb-4">
-                <div className="w-16 h-16 bg-slate-800/80 rounded-full flex items-center justify-center mx-auto mb-3 border border-slate-600/50">
-                  <HealthIcon size={32} />
+                <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Heart className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-blue-400">
                   {whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
@@ -399,7 +440,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="flex items-center justify-center space-x-2">
-                <HealthIcon size={20} />
+                <Heart className="h-5 w-5 text-blue-400" />
                 <span className="text-slate-300 font-medium">Recovery</span>
               </div>
             </CardContent>
@@ -512,8 +553,8 @@ export default function Dashboard() {
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                   <CardContent className="p-6">
                     <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-slate-800/80 rounded-full flex items-center justify-center border border-slate-600/50">
-                        <HealthIcon size={24} />
+                      <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
+                        <Heart className="h-6 w-6 text-white" />
                       </div>
                       <div>
                         <p className="text-slate-400 text-sm">Resting Heart Rate</p>
@@ -646,8 +687,8 @@ export default function Dashboard() {
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                   <CardContent className="p-6">
                     <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-slate-800/80 rounded-full flex items-center justify-center border border-slate-600/50">
-                        <HealthIcon size={24} />
+                      <div className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center">
+                        <Heart className="h-6 w-6 text-white" />
                       </div>
                       <div>
                         <p className="text-slate-400 text-sm">Max Heart Rate</p>
