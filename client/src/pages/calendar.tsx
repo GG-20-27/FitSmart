@@ -258,7 +258,7 @@ export default function CalendarPage() {
               onClick={() => refetch()}
               variant="outline"
               size="sm"
-              className="border-slate-600 text-slate-300 hover:text-white text-xs sm:text-sm"
+              className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200 text-xs sm:text-sm"
             >
               <CalendarIcon className="h-4 w-4 mr-2" />
               Refresh

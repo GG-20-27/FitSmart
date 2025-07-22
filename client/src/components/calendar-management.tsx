@@ -173,7 +173,7 @@ export function CalendarManagement() {
             variant="outline"
             size="sm"
             onClick={() => setIsAdding(!isAdding)}
-            className="ml-auto border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+            className="ml-auto bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
           >
             <Plus className="h-4 w-4 mr-1" />
             Add Calendar
