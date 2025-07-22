@@ -273,8 +273,7 @@ export function CalendarManagement() {
               className="bg-blue-600 hover:bg-blue-700 text-white border-0"
             >
               <Plus className="h-4 w-4 mr-1" />
-              <span className="hidden sm:inline">Add Calendar</span>
-              <span className="sm:hidden">Add</span>
+              Add
             </Button>
             {calendars.length > 0 && (
               <Button
@@ -287,8 +286,7 @@ export function CalendarManagement() {
                 className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
               >
                 <Edit3 className="h-4 w-4 mr-1" />
-                <span className="hidden sm:inline">Edit Calendars</span>
-                <span className="sm:hidden">Edit</span>
+                Edit
               </Button>
             )}
           </div>
@@ -379,18 +377,21 @@ export function CalendarManagement() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <p className="text-sm text-slate-400 truncate flex-1">
                       {calendar.calendarUrl.length > 45 
-                        ? `${calendar.calendarUrl.substring(0, 45)}...`
+                        ? calendar.calendarUrl.substring(0, 45)
                         : calendar.calendarUrl
                       }
                     </p>
+                    {calendar.calendarUrl.length > 45 && (
+                      <span className="text-sm text-slate-400">...</span>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => copyToClipboard(calendar.calendarUrl, calendar.id)}
-                      className="bg-transparent border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-white transition-all duration-200 p-1 h-6 w-6 shrink-0"
+                      className="bg-transparent border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-white transition-all duration-200 p-1 h-6 w-6 shrink-0 ml-1"
                       title="Copy URL"
                     >
                       {copiedId === calendar.id ? (
