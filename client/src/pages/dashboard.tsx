@@ -434,8 +434,8 @@ export default function Dashboard() {
                   <Moon className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-purple-400">
-                  {whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
-                    <><CountUp end={whoopData.sleep_hours} duration={1200} decimals={1} /> hrs</>
+                  {whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
+                    <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
                   ) : (
                     <span className="text-sm text-slate-500">Sleep data still syncing from WHOOP</span>
                   )}
@@ -443,7 +443,7 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center justify-center space-x-2">
                 <Moon className="h-5 w-5 text-purple-400" />
-                <span className="text-slate-300 font-medium">Sleep (hrs)</span>
+                <span className="text-slate-300 font-medium">Sleep Score</span>
               </div>
             </CardContent>
           </Card>
@@ -484,6 +484,28 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
+              {/* Sleep Hours */}
+              {whoopData.sleep_hours && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                        <Moon className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Sleep Duration</p>
+                        <p className="text-2xl font-bold text-purple-400">
+                          <CountUp end={whoopData.sleep_hours} decimals={1} duration={1000} /> hrs
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Total time spent sleeping
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Resting Heart Rate */}
               {whoopData.resting_heart_rate && (
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
@@ -798,16 +820,16 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            {/* Avg Sleep */}
+            {/* Avg Sleep Score */}
             <Card className="bg-gradient-to-br from-purple-400 to-purple-500 border-0 text-white hover:from-purple-300 hover:to-purple-400 transition-all duration-300">
               <CardContent className="p-6">
                 <div className="flex items-center space-x-2 mb-3">
                   <Moon className="h-4 w-4 text-white" />
-                  <span className="text-sm font-medium text-white">Avg Sleep</span>
+                  <span className="text-sm font-medium text-white">Avg Sleep Score</span>
                 </div>
                 <div className="text-3xl font-bold">
                   {whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
-                    <CountUp end={whoopSummary.avgSleep} suffix=" hrs" decimals={1} duration={1500} />
+                    <CountUp end={whoopSummary.avgSleep} suffix="%" duration={1500} />
                   ) : (
                     "N/A"
                   )}

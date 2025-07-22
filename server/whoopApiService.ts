@@ -588,10 +588,9 @@ export class WhoopApiService {
               if (response.status === 200) {
                 const sleepData = response.data;
                 
-                // Calculate sleep hours from stage_summary
-                if (sleepData.score?.stage_summary?.total_in_bed_time_milli) {
-                  const sleepHours = Math.round(sleepData.score.stage_summary.total_in_bed_time_milli / (1000 * 60 * 60) * 10) / 10;
-                  sleepScores.push(sleepHours);
+                // Get sleep score percentage 
+                if (sleepData.score?.sleep_performance_percentage !== null && sleepData.score?.sleep_performance_percentage !== undefined) {
+                  sleepScores.push(sleepData.score.sleep_performance_percentage);
                 }
               }
             } catch (error) {
@@ -626,7 +625,7 @@ export class WhoopApiService {
         ? Math.round((hrvScores.reduce((a, b) => a + b, 0) / hrvScores.length) * 10) / 10
         : null;
       
-      console.log(`Weekly averages calculated: Recovery: ${avgRecovery}%, Strain: ${avgStrain}, Sleep: ${avgSleep}hrs, HRV: ${avgHRV}ms`);
+      console.log(`Weekly averages calculated: Recovery: ${avgRecovery}%, Strain: ${avgStrain}, Sleep: ${avgSleep}%, HRV: ${avgHRV}ms`);
       
       return { avgRecovery, avgStrain, avgSleep, avgHRV };
       
