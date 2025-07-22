@@ -553,15 +553,18 @@ export default function Dashboard() {
               {whoopData.resting_heart_rate && (
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                   <CardContent className="p-4 sm:p-6">
-                    <div className="flex items-center space-x-3 mb-3 sm:mb-4">
-                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-red-500 rounded-full flex items-center justify-center">
-                        <Heart className="h-5 w-5 sm:h-6 sm:w-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-slate-400 text-xs sm:text-sm">Resting Heart Rate</p>
-                        <p className="text-xl sm:text-2xl font-bold text-red-400">
+                    <div className="text-center">
+                      <div className="mb-3 sm:mb-4">
+                        <div className="w-12 h-12 sm:w-16 sm:h-16 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
+                          <Heart className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                        </div>
+                        <div className="text-2xl font-bold text-red-400">
                           <CountUp end={whoopData.resting_heart_rate} duration={1000} /> bpm
-                        </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-center space-x-2">
+                        <Heart className="h-4 w-4 sm:h-5 sm:w-5 text-red-400" />
+                        <span className="text-slate-300 font-medium text-sm sm:text-base">Resting Heart Rate</span>
                       </div>
                     </div>
                     <div className="text-xs text-slate-500">

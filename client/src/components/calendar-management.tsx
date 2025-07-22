@@ -4,7 +4,7 @@ import { apiRequest, queryClient } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Plus, ExternalLink, ToggleLeft, ToggleRight, CalendarDays, Copy, Check } from 'lucide-react';
+import { Trash2, Plus, ExternalLink, ToggleLeft, ToggleRight, CalendarDays, Copy, Check, Edit3 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface UserCalendar {
@@ -23,6 +23,7 @@ export function CalendarManagement() {
   const [calendarName, setCalendarName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [copiedId, setCopiedId] = useState<number | null>(null);
+  const [editingCalendar, setEditingCalendar] = useState<UserCalendar | null>(null);
 
   const copyToClipboard = async (text: string, id: number) => {
     try {
@@ -115,6 +116,43 @@ export function CalendarManagement() {
     },
   });
 
+  // Update calendar mutation
+  const updateCalendarMutation = useMutation({
+    mutationFn: async ({ id, calendarUrl, calendarName }: { id: number; calendarUrl: string; calendarName: string }) => {
+      const response = await fetch(`/api/calendars/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ calendarUrl, calendarName }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update calendar');
+      }
+      
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/calendars'] });
+      setEditingCalendar(null);
+      setCalendarUrl('');
+      setCalendarName('');
+      toast({
+        title: "Calendar Updated",
+        description: "Calendar has been updated successfully.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: `Failed to update calendar: ${error.message}`,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Toggle calendar active status
   const toggleCalendarMutation = useMutation({
     mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
@@ -171,6 +209,39 @@ export function CalendarManagement() {
     addCalendarMutation.mutate({ calendarUrl, calendarName });
   };
 
+  const handleUpdateCalendar = async () => {
+    if (!editingCalendar || !calendarUrl.trim() || !calendarName.trim()) {
+      toast({
+        title: "Error",
+        description: "Please provide both calendar URL and name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!calendarUrl.includes('calendar.google.com/calendar/ical/') && !calendarUrl.includes('.ics')) {
+      toast({
+        title: "Invalid URL",
+        description: "Please provide a valid Google Calendar ICS URL (.ics file).",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    updateCalendarMutation.mutate({ 
+      id: editingCalendar.id, 
+      calendarUrl, 
+      calendarName 
+    });
+  };
+
+  const startEditing = (calendar: UserCalendar) => {
+    setEditingCalendar(calendar);
+    setCalendarUrl(calendar.calendarUrl);
+    setCalendarName(calendar.calendarName);
+    setIsAdding(false);
+  };
+
   if (isLoading) {
     return (
       <Card>
@@ -203,9 +274,11 @@ export function CalendarManagement() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {isAdding && (
+        {(isAdding || editingCalendar) && (
           <div className="p-4 border border-slate-600 rounded-lg bg-slate-900/50 space-y-3">
-            <h4 className="font-medium text-white">Add New Calendar</h4>
+            <h4 className="font-medium text-white">
+              {editingCalendar ? 'Edit Calendar' : 'Add New Calendar'}
+            </h4>
             <p className="text-sm text-slate-400">
               To add your Google Calendar:
               <br />
@@ -232,17 +305,21 @@ export function CalendarManagement() {
               />
               <div className="flex gap-2">
                 <Button 
-                  onClick={handleAddCalendar}
-                  disabled={addCalendarMutation.isPending}
+                  onClick={editingCalendar ? handleUpdateCalendar : handleAddCalendar}
+                  disabled={editingCalendar ? updateCalendarMutation.isPending : addCalendarMutation.isPending}
                   size="sm"
                   className="bg-blue-600 hover:bg-blue-700 text-white border-0"
                 >
-                  {addCalendarMutation.isPending ? 'Adding...' : 'Add Calendar'}
+                  {editingCalendar 
+                    ? (updateCalendarMutation.isPending ? 'Updating...' : 'Update Calendar')
+                    : (addCalendarMutation.isPending ? 'Adding...' : 'Add Calendar')
+                  }
                 </Button>
                 <Button 
                   variant="outline" 
                   onClick={() => {
                     setIsAdding(false);
+                    setEditingCalendar(null);
                     setCalendarUrl('');
                     setCalendarName('');
                   }}
@@ -269,22 +346,24 @@ export function CalendarManagement() {
                 className="flex items-center justify-between p-3 border border-slate-600 rounded-lg bg-slate-900/30"
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-start justify-between mb-2">
                     <h4 className="font-medium text-white">{calendar.calendarName}</h4>
-                    {calendar.isActive ? (
-                      <span className="text-xs bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/30">
-                        Active
-                      </span>
-                    ) : (
-                      <span className="text-xs bg-slate-600/20 text-slate-400 px-2 py-1 rounded border border-slate-600/30">
-                        Inactive
-                      </span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {calendar.isActive ? (
+                        <span className="text-xs bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/30 whitespace-nowrap">
+                          Active
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-slate-600/20 text-slate-400 px-2 py-1 rounded border border-slate-600/30 whitespace-nowrap">
+                          Inactive
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <p className="text-sm text-slate-400 truncate flex-1">
-                      {calendar.calendarUrl.length > 50 
-                        ? `${calendar.calendarUrl.substring(0, 50)}...`
+                      {calendar.calendarUrl.length > 45 
+                        ? `${calendar.calendarUrl.substring(0, 45)}...`
                         : calendar.calendarUrl
                       }
                     </p>
@@ -292,7 +371,7 @@ export function CalendarManagement() {
                       variant="outline"
                       size="sm"
                       onClick={() => copyToClipboard(calendar.calendarUrl, calendar.id)}
-                      className="bg-transparent border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-white transition-all duration-200 p-1 h-6 w-6"
+                      className="bg-transparent border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-white transition-all duration-200 p-1 h-6 w-6 shrink-0"
                       title="Copy URL"
                     >
                       {copiedId === calendar.id ? (
@@ -303,7 +382,7 @@ export function CalendarManagement() {
                     </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <Button
                     variant="outline"
                     size="sm"
@@ -319,6 +398,14 @@ export function CalendarManagement() {
                     ) : (
                       <ToggleLeft className="h-4 w-4" />
                     )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => startEditing(calendar)}
+                    className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
+                  >
+                    <Edit3 className="h-4 w-4" />
                   </Button>
                   <Button
                     variant="outline"
