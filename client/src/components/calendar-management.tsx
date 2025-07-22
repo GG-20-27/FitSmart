@@ -377,21 +377,18 @@ export function CalendarManagement() {
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-2">
                     <p className="text-sm text-slate-400 truncate flex-1">
                       {calendar.calendarUrl.length > 45 
-                        ? calendar.calendarUrl.substring(0, 45)
+                        ? `${calendar.calendarUrl.substring(0, 42)}...`
                         : calendar.calendarUrl
                       }
                     </p>
-                    {calendar.calendarUrl.length > 45 && (
-                      <span className="text-sm text-slate-400">...</span>
-                    )}
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => copyToClipboard(calendar.calendarUrl, calendar.id)}
-                      className="bg-transparent border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-white transition-all duration-200 p-1 h-6 w-6 shrink-0 ml-1"
+                      className="bg-transparent border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-white transition-all duration-200 p-1 h-6 w-6 shrink-0"
                       title="Copy URL"
                     >
                       {copiedId === calendar.id ? (

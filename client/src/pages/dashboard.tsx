@@ -661,27 +661,7 @@ export default function Dashboard() {
                 </Card>
               )}
 
-              {/* Today's Strain */}
-              {whoopData.strain && (
-                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                  <CardContent className="p-6">
-                    <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center">
-                        <Zap className="h-6 w-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-slate-400 text-sm">Today's Strain</p>
-                        <p className="text-2xl font-bold text-emerald-400">
-                          <CountUp end={whoopData.strain} decimals={1} duration={1000} />
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      Overall activity strain today
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+
 
 
             </div>
