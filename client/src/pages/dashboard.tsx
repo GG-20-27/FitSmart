@@ -275,7 +275,7 @@ export default function Dashboard() {
             </div>
           </div>
           
-          <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-end space-y-2 sm:space-y-0 sm:space-x-3">
+          <div className="flex flex-row items-center justify-center lg:justify-end space-x-2 sm:space-x-3">
             {/* Navigation Buttons */}
             <Link href="/calendar">
               <Button
@@ -286,7 +286,7 @@ export default function Dashboard() {
                 <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-teal-500 opacity-30 animate-pulse"></div>
                 <div className="relative flex items-center space-x-2">
                   <Calendar className="h-4 w-4" />
-                  <span className="text-sm font-medium hidden sm:inline">Calendar</span>
+                  <span className="text-xs sm:text-sm font-medium hidden sm:inline">Calendar</span>
                 </div>
               </Button>
             </Link>
@@ -300,7 +300,7 @@ export default function Dashboard() {
                 <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-indigo-500 opacity-30 animate-pulse"></div>
                 <div className="relative flex items-center space-x-2">
                   <User className="h-4 w-4" />
-                  <span className="text-sm font-medium hidden sm:inline">Profile</span>
+                  <span className="text-xs sm:text-sm font-medium hidden sm:inline">Profile</span>
                 </div>
               </Button>
             </Link>
@@ -318,8 +318,8 @@ export default function Dashboard() {
                     <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
                   </svg>
                   <RefreshCw className="h-4 w-4" />
-                  <span className="text-sm font-medium hidden sm:inline">Reconnect WHOOP</span>
-                  <span className="text-sm font-medium sm:hidden">Reconnect</span>
+                  <span className="text-xs sm:text-sm font-medium hidden lg:inline">Reconnect WHOOP</span>
+                  <span className="text-xs sm:text-sm font-medium lg:hidden">Reconnect</span>
                 </div>
               </Button>
             )}
@@ -377,12 +377,12 @@ export default function Dashboard() {
           <div className="max-w-2xl mx-auto mb-6 sm:mb-8">
             <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
               <CardContent className="p-3 sm:p-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between space-y-3 sm:space-y-0">
+                <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-3">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="text-slate-300 font-medium text-sm sm:text-base">WHOOP Connected</span>
+                    <span className="text-slate-300 font-medium text-sm">WHOOP Connected</span>
                   </div>
-                  <div className="flex space-x-2 w-full sm:w-auto">
+                  <div className="flex space-x-2">
                     <Button
                       onClick={() => resetAuthMutation.mutate()}
                       disabled={resetAuthMutation.isPending}
@@ -432,7 +432,7 @@ export default function Dashboard() {
                 <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
                   <Heart className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
-                <div className="text-xl sm:text-2xl font-bold text-blue-400">
+                <div className="text-2xl font-bold text-blue-400">
                   {whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
                     <><CountUp end={whoopData.recovery_score} duration={1200} />%</>
                   ) : (

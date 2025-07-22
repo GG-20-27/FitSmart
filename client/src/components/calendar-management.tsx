@@ -4,7 +4,7 @@ import { apiRequest, queryClient } from '@/lib/queryClient';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Trash2, Plus, ExternalLink, ToggleLeft, ToggleRight, CalendarDays } from 'lucide-react';
+import { Trash2, Plus, ExternalLink, ToggleLeft, ToggleRight, CalendarDays, Copy, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface UserCalendar {
@@ -22,6 +22,25 @@ export function CalendarManagement() {
   const [calendarUrl, setCalendarUrl] = useState('');
   const [calendarName, setCalendarName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [copiedId, setCopiedId] = useState<number | null>(null);
+
+  const copyToClipboard = async (text: string, id: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+      toast({
+        title: "Copied!",
+        description: "Calendar URL copied to clipboard",
+      });
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to copy to clipboard",
+        variant: "destructive",
+      });
+    }
+  };
 
   // Fetch user's calendars
   const { data: calendars = [], isLoading } = useQuery<UserCalendar[]>({
@@ -249,8 +268,8 @@ export function CalendarManagement() {
                 key={calendar.id}
                 className="flex items-center justify-between p-3 border border-slate-600 rounded-lg bg-slate-900/30"
               >
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
                     <h4 className="font-medium text-white">{calendar.calendarName}</h4>
                     {calendar.isActive ? (
                       <span className="text-xs bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/30">
@@ -262,9 +281,27 @@ export function CalendarManagement() {
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-slate-400 truncate max-w-md">
-                    {calendar.calendarUrl}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm text-slate-400 truncate flex-1">
+                      {calendar.calendarUrl.length > 50 
+                        ? `${calendar.calendarUrl.substring(0, 50)}...`
+                        : calendar.calendarUrl
+                      }
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => copyToClipboard(calendar.calendarUrl, calendar.id)}
+                      className="bg-transparent border-slate-600 text-slate-400 hover:bg-slate-700 hover:text-white transition-all duration-200 p-1 h-6 w-6"
+                      title="Copy URL"
+                    >
+                      {copiedId === calendar.id ? (
+                        <Check className="h-3 w-3 text-green-400" />
+                      ) : (
+                        <Copy className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
