@@ -256,22 +256,43 @@ export function CalendarManagement() {
   return (
     <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-white">
-          <CalendarDays className="h-5 w-5" />
-          Calendar Management
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setIsAdding(!isAdding)}
-            className="ml-auto bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Add Calendar
-          </Button>
-        </CardTitle>
-        <CardDescription className="text-slate-400">
-          Manage your personal calendars. Add Google Calendar ICS links to see your events in the dashboard.
-        </CardDescription>
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <CalendarDays className="h-5 w-5" />
+              Calendar Management
+            </CardTitle>
+            <CardDescription className="text-slate-400">
+              Manage your personal calendars. Add Google Calendar ICS links to see your events in the dashboard.
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => setIsAdding(!isAdding)}
+              size="sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white border-0"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              <span className="hidden sm:inline">Add Calendar</span>
+              <span className="sm:hidden">Add</span>
+            </Button>
+            {calendars.length > 0 && (
+              <Button
+                onClick={() => {
+                  const firstCalendar = calendars[0];
+                  startEditing(firstCalendar);
+                }}
+                size="sm"
+                variant="outline"
+                className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
+              >
+                <Edit3 className="h-4 w-4 mr-1" />
+                <span className="hidden sm:inline">Edit Calendars</span>
+                <span className="sm:hidden">Edit</span>
+              </Button>
+            )}
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {(isAdding || editingCalendar) && (
@@ -346,19 +367,17 @@ export function CalendarManagement() {
                 className="flex items-center justify-between p-3 border border-slate-600 rounded-lg bg-slate-900/30"
               >
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-center gap-3 mb-2">
                     <h4 className="font-medium text-white">{calendar.calendarName}</h4>
-                    <div className="flex items-center gap-2">
-                      {calendar.isActive ? (
-                        <span className="text-xs bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/30 whitespace-nowrap">
-                          Active
-                        </span>
-                      ) : (
-                        <span className="text-xs bg-slate-600/20 text-slate-400 px-2 py-1 rounded border border-slate-600/30 whitespace-nowrap">
-                          Inactive
-                        </span>
-                      )}
-                    </div>
+                    {calendar.isActive ? (
+                      <span className="text-xs bg-green-600/20 text-green-400 px-2 py-1 rounded border border-green-600/30 whitespace-nowrap">
+                        Active
+                      </span>
+                    ) : (
+                      <span className="text-xs bg-slate-600/20 text-slate-400 px-2 py-1 rounded border border-slate-600/30 whitespace-nowrap">
+                        Inactive
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <p className="text-sm text-slate-400 truncate flex-1">
@@ -399,14 +418,7 @@ export function CalendarManagement() {
                       <ToggleLeft className="h-4 w-4" />
                     )}
                   </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => startEditing(calendar)}
-                    className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
-                  >
-                    <Edit3 className="h-4 w-4" />
-                  </Button>
+
                   <Button
                     variant="outline"
                     size="sm"
