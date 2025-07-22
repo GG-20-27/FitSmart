@@ -119,6 +119,15 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 22, 2025: Implemented automated WHOOP token refresh system for n8n integration
+  - Added bulk token refresh endpoint at `/api/whoop/refresh-tokens` with authentication protection
+  - Created comprehensive token management system that checks all stored tokens for expiration
+  - Implemented automatic refresh for tokens expiring within 1 hour using stored refresh tokens
+  - Added proper OAuth credential handling using environment variables (WHOOP_CLIENT_ID, WHOOP_CLIENT_SECRET)
+  - Enhanced whoopTokenStorage class with getAllTokens() and refreshWhoopToken() methods
+  - Protected endpoint requires N8N_SECRET_TOKEN query parameter for authentication (default: 'fitgpt-secret-2025')
+  - Returns detailed response with updated user count, total checked, and timestamp information
+  - Enables n8n automation to maintain persistent WHOOP connections without user intervention
 - July 21, 2025: Resolved calendar visibility issue and improved white button designs
   - Fixed critical multi-user data isolation bug in WHOOP API integration with user-specific authentication
   - Added helpful empty state to calendar page with "Add Calendars" button when no calendars are configured

@@ -293,6 +293,101 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Bulk WHOOP token refresh endpoint for n8n automation
+  app.post('/api/whoop/refresh-tokens', async (req, res) => {
+    try {
+      // Check authentication via query parameter
+      const authSecret = req.query.auth as string;
+      const expectedSecret = process.env.N8N_SECRET_TOKEN || 'fitgpt-secret-2025';
+      
+      if (!authSecret || authSecret !== expectedSecret) {
+        return res.status(401).json({ error: 'Unauthorized: Invalid auth token' });
+      }
+      
+      console.log('[TOKEN REFRESH] Starting bulk token refresh process...');
+      
+      // Get all WHOOP tokens from database
+      const allTokens = await whoopTokenStorage.getAllTokens();
+      console.log(`[TOKEN REFRESH] Found ${allTokens.length} tokens to check`);
+      
+      if (allTokens.length === 0) {
+        return res.json({
+          message: 'No WHOOP tokens found in database',
+          updated_users: [],
+          total_checked: 0,
+          total_refreshed: 0
+        });
+      }
+      
+      const updatedUsers: string[] = [];
+      let totalChecked = 0;
+      let totalRefreshed = 0;
+      
+      for (const token of allTokens) {
+        totalChecked++;
+        
+        try {
+          // Check if token is expired or expires soon (within 1 hour)
+          const currentTime = Math.floor(Date.now() / 1000);
+          const expiresAt = token.expiresAt ? Math.floor(token.expiresAt.getTime() / 1000) : null;
+          
+          if (!expiresAt) {
+            console.log(`[TOKEN REFRESH] Token for user ${token.userId} has no expiry time, skipping`);
+            continue;
+          }
+          
+          // Refresh if expired or expires within 1 hour (3600 seconds)
+          const needsRefresh = (expiresAt - currentTime) <= 3600;
+          
+          if (!needsRefresh) {
+            const hoursUntilExpiry = Math.round((expiresAt - currentTime) / 3600);
+            console.log(`[TOKEN REFRESH] Token for user ${token.userId} expires in ${hoursUntilExpiry} hours, not refreshing`);
+            continue;
+          }
+          
+          if (!token.refreshToken) {
+            console.log(`[TOKEN REFRESH] Token for user ${token.userId} is expired but has no refresh token`);
+            continue;
+          }
+          
+          console.log(`[TOKEN REFRESH] Refreshing token for user ${token.userId}...`);
+          
+          // Attempt to refresh the token
+          const newToken = await whoopTokenStorage.refreshWhoopToken(token.userId, token.refreshToken);
+          
+          if (newToken) {
+            updatedUsers.push(token.userId);
+            totalRefreshed++;
+            console.log(`[TOKEN REFRESH] Successfully refreshed token for user ${token.userId}`);
+          } else {
+            console.log(`[TOKEN REFRESH] Failed to refresh token for user ${token.userId}`);
+          }
+          
+        } catch (error) {
+          console.error(`[TOKEN REFRESH] Error processing token for user ${token.userId}:`, error);
+        }
+      }
+      
+      const result = {
+        message: `Bulk token refresh completed. Checked ${totalChecked} tokens, refreshed ${totalRefreshed}`,
+        updated_users: updatedUsers,
+        total_checked: totalChecked,
+        total_refreshed: totalRefreshed,
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log('[TOKEN REFRESH] Bulk refresh completed:', result);
+      res.json(result);
+      
+    } catch (error) {
+      console.error('[TOKEN REFRESH] Bulk refresh failed:', error);
+      res.status(500).json({ 
+        error: 'Failed to refresh tokens',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
   // WHOOP OAuth login endpoint
   app.get('/api/whoop/login', (req, res) => {
     try {

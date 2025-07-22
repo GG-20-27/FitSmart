@@ -79,6 +79,56 @@ export class WhoopTokenStorage {
       console.error('Failed to delete WHOOP token:', error);
     }
   }
+
+  async getAllTokens(): Promise<WhoopToken[]> {
+    try {
+      const tokens = await db.select().from(whoopTokens);
+      return tokens;
+    } catch (error) {
+      console.error('Failed to get all WHOOP tokens:', error);
+      return [];
+    }
+  }
+
+  async refreshWhoopToken(userId: string, refreshToken: string): Promise<WhoopTokenData | null> {
+    try {
+      const response = await fetch('https://api.prod.whoop.com/oauth/oauth2/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+          client_id: process.env.WHOOP_CLIENT_ID || '',
+          client_secret: process.env.WHOOP_CLIENT_SECRET || '',
+        }),
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to refresh token for user ${userId}:`, response.status, response.statusText);
+        return null;
+      }
+
+      const tokenData = await response.json();
+      
+      const newTokenData: WhoopTokenData = {
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token || refreshToken, // Use new if provided, fallback to old
+        expires_at: Math.floor(Date.now() / 1000) + tokenData.expires_in,
+        user_id: userId,
+      };
+
+      // Save the new token
+      await this.setToken(userId, newTokenData);
+      
+      console.log(`Token refreshed successfully for user: ${userId}`);
+      return newTokenData;
+    } catch (error) {
+      console.error(`Failed to refresh token for user ${userId}:`, error);
+      return null;
+    }
+  }
 }
 
 export const whoopTokenStorage = new WhoopTokenStorage();
