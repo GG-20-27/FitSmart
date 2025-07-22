@@ -296,12 +296,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Bulk WHOOP token refresh endpoint for n8n automation
   app.post('/api/whoop/refresh-tokens', async (req, res) => {
     try {
+      // Force JSON content type header
+      res.setHeader('Content-Type', 'application/json');
+      
       // Check authentication via query parameter
       const authSecret = req.query.auth as string;
       const expectedSecret = process.env.N8N_SECRET_TOKEN || 'fitgpt-secret-2025';
       
       if (!authSecret || authSecret !== expectedSecret) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid auth token' });
+        return res.status(401).json({ error: 'Unauthorized' });
       }
       
       console.log('[TOKEN REFRESH] Starting bulk token refresh process...');

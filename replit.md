@@ -119,6 +119,12 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 22, 2025: Fixed WHOOP token refresh endpoint routing issue and confirmed JSON responses
+  - Resolved routing conflict where POST /api/whoop/refresh-tokens was returning HTML instead of JSON
+  - Added explicit Content-Type headers and authentication parameter validation 
+  - Endpoint now correctly returns JSON responses for both success and error cases
+  - Server restart resolved route registration order issue with Vite development middleware
+  - Confirmed working endpoint: POST /api/whoop/refresh-tokens?auth=fitgpt-secret-2025
 - July 22, 2025: Implemented automated WHOOP token refresh system for n8n integration
   - Added bulk token refresh endpoint at `/api/whoop/refresh-tokens` with authentication protection
   - Created comprehensive token management system that checks all stored tokens for expiration
