@@ -5,12 +5,36 @@ if (!process.env.N8N_SECRET_TOKEN) {
 }
 
 import express, { type Request, Response, NextFunction } from "express";
+import session from "express-session";
+import ConnectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { whoopApiService } from "./whoopApiService";
 import { userService } from "./userService";
 
 const app = express();
+
+// Session configuration with PostgreSQL store
+const PgSession = ConnectPgSimple(session);
+
+// Configure session middleware
+app.use(session({
+  store: new PgSession({
+    conString: process.env.DATABASE_URL,
+    tableName: 'session', // optional - defaults to 'session'
+    createTableIfMissing: true
+  }),
+  secret: process.env.SESSION_SECRET || 'fallback-secret-for-development-only',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
+    httpOnly: true, // XSS protection
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    sameSite: 'lax' // CSRF protection
+  },
+  name: 'fitscore.sid' // Custom session name
+}));
 
 // Background token refresh service
 function startTokenRefreshService() {

@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind, User } from 'lucide-react';
+import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind, User, LogOut } from 'lucide-react';
 import { HealthIcon } from '@/components/HealthIcon';
 import { formatTime } from '@/lib/utils';
 import { WhoopTodayResponse } from '@shared/schema';
 import { apiRequest, queryClient } from '@/lib/queryClient';
+import { useAuth } from '@/hooks/useAuth';
 import { Link } from 'wouter';
 
 interface WhoopAuthStatus {
@@ -197,6 +198,7 @@ function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?
 }
 
 export default function Dashboard() {
+  const { user, logout, isLoggingOut } = useAuth();
   const [lastSync, setLastSync] = useState<Date | null>(null);
   
   const { data: whoopAuthStatus, isLoading: authLoading, error: authError } = useQuery<WhoopAuthStatus>({
@@ -323,6 +325,27 @@ export default function Dashboard() {
                 </div>
               </Button>
             )}
+            
+            {/* Logout Button */}
+            <Button
+              onClick={() => logout()}
+              variant="outline"
+              size="sm"
+              disabled={isLoggingOut}
+              className="relative overflow-hidden border-transparent bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-600 hover:to-pink-700"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-red-400 to-pink-500 opacity-30 animate-pulse"></div>
+              <div className="relative flex items-center space-x-2">
+                {isLoggingOut ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <LogOut className="h-4 w-4" />
+                )}
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline">
+                  {isLoggingOut ? 'Logging out...' : 'Logout'}
+                </span>
+              </div>
+            </Button>
           </div>
         </div>
 

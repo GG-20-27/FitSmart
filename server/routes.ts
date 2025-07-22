@@ -14,6 +14,7 @@ import { userService } from "./userService";
 import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
+import { requireAuth, attachUser, getCurrentUserId, requireAdmin } from './authMiddleware';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -155,6 +156,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Handle pre-flight requests for all routes
   app.options('*', cors());
+  
+  // Attach user to all requests (if authenticated)
+  app.use(attachUser);
 
   // Serve static files from uploads directory
   app.use('/uploads', express.static(uploadsDir));
@@ -177,9 +181,106 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('curl -F "mealPhotos=@image.jpg" http://localhost:5000/api/meals');
   console.log('');
 
-  // Admin routes for multi-user management
+  // Authentication routes
+  console.log('[ROUTE] POST /api/auth/login');
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required' });
+      }
+      
+      // Simple email-based login for demo (in production, add proper password hashing)
+      const user = await userService.getUserByEmail(email);
+      if (!user) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+      
+      // Store user ID in session
+      req.session.userId = user.id;
+      
+      res.json({ 
+        message: 'Login successful',
+        user: {
+          id: user.id,
+          email: user.email
+        }
+      });
+    } catch (error) {
+      console.error('Login error:', error);
+      res.status(500).json({ error: 'Login failed' });
+    }
+  });
+
+  console.log('[ROUTE] POST /api/auth/logout');
+  app.post('/api/auth/logout', (req, res) => {
+    req.session.destroy((err) => {
+      if (err) {
+        return res.status(500).json({ error: 'Logout failed' });
+      }
+      res.json({ message: 'Logout successful' });
+    });
+  });
+
+  console.log('[ROUTE] GET /api/auth/me');
+  app.get('/api/auth/me', requireAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const user = await userService.getUserById(userId!);
+      
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      
+      res.json({
+        id: user.id,
+        email: user.email,
+        created_at: user.created_at
+      });
+    } catch (error) {
+      console.error('Get user error:', error);
+      res.status(500).json({ error: 'Failed to get user information' });
+    }
+  });
+
+  console.log('[ROUTE] POST /api/auth/register');
+  app.post('/api/auth/register', async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required' });
+      }
+      
+      // Check if user already exists
+      const existingUser = await userService.getUserByEmail(email);
+      if (existingUser) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+      
+      // Create new user
+      const user = await userService.createUser(email);
+      
+      // Log them in immediately
+      req.session.userId = user.id;
+      
+      res.json({
+        message: 'Registration successful',
+        user: {
+          id: user.id,
+          email: user.email
+        }
+      });
+    } catch (error) {
+      console.error('Registration error:', error);
+      res.status(500).json({ error: 'Registration failed' });
+    }
+  });
+
+  // Admin routes for multi-user management (admin only)
   console.log('[ROUTE] POST /api/admin/users');
-  app.post('/api/admin/users', async (req, res) => {
+  app.post('/api/admin/users', requireAdmin, async (req, res) => {
     try {
       const { email } = req.body;
       if (!email) {
@@ -200,7 +301,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   console.log('[ROUTE] GET /api/admin/users');
-  app.get('/api/admin/users', async (req, res) => {
+  app.get('/api/admin/users', requireAdmin, async (req, res) => {
     try {
       const users = await userService.getAllUsers();
       const usersWithTokens = await Promise.all(
@@ -221,7 +322,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   console.log('[ROUTE] POST /api/admin/users/:userId/whoop-token');
-  app.post('/api/admin/users/:userId/whoop-token', async (req, res) => {
+  app.post('/api/admin/users/:userId/whoop-token', requireAdmin, async (req, res) => {
     try {
       const { userId } = req.params;
       const { accessToken, refreshToken, expiresAt } = req.body;
@@ -246,7 +347,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   console.log('[ROUTE] DELETE /api/admin/users/:userId');
-  app.delete('/api/admin/users/:userId', async (req, res) => {
+  app.delete('/api/admin/users/:userId', requireAdmin, async (req, res) => {
     try {
       const { userId } = req.params;
       
@@ -535,15 +636,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // WHOOP authentication status endpoint
-  app.get('/api/whoop/status', async (req, res) => {
+  app.get('/api/whoop/status', requireAuth, async (req, res) => {
     // Disable caching for this endpoint
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
     
     try {
-      const defaultUserId = await getDefaultUserId();
-      const tokenData = await whoopTokenStorage.getToken(defaultUserId);
+      const userId = getCurrentUserId(req);
+      const tokenData = await whoopTokenStorage.getToken(userId!);
       
       if (!tokenData) {
         return res.json({
@@ -642,12 +743,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // WHOOP data endpoint - now uses live API data
-  app.get('/api/whoop/today', async (req, res) => {
+  app.get('/api/whoop/today', requireAuth, async (req, res) => {
     try {
       console.log('Fetching live WHOOP data for today...');
       
-      // Get user ID from query parameter or use default admin user
-      const userId = req.query.userId as string || await getDefaultUserId();
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
       console.log(`Fetching WHOOP data for user: ${userId}`);
       
       // Token validation using user-specific token
@@ -854,12 +955,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // WHOOP weekly averages endpoint
-  app.get('/api/whoop/weekly', async (req, res) => {
+  app.get('/api/whoop/weekly', requireAuth, async (req, res) => {
     try {
       console.log('Fetching weekly WHOOP averages...');
       
-      // Get user ID from query parameter or use default admin user
-      const userId = req.query.userId as string || await getDefaultUserId();
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
       
       // Token validation using user-specific token
       const tokenData = await whoopTokenStorage.getToken(userId);
@@ -994,12 +1095,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User-specific calendar today's events endpoint
-  app.get('/api/calendar/today', async (req, res) => {
+  app.get('/api/calendar/today', requireAuth, async (req, res) => {
     try {
       console.log('Fetching today\'s calendar events...');
       
-      // Get user ID from query or use default admin user
-      const userId = req.query.userId as string || await getDefaultUserId();
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
       
       // Get user's calendars from database
       const userCalendars = await storage.getUserCalendars(userId);
@@ -1088,7 +1189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User-specific calendar events endpoint with date range support
-  app.get('/api/calendar/events', async (req, res) => {
+  app.get('/api/calendar/events', requireAuth, async (req, res) => {
     try {
       const { start, end } = req.query as { start?: string; end?: string };
       
@@ -1098,8 +1199,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`Fetching calendar events from ${start} to ${end}...`);
       
-      // Get user ID from query or use default admin user
-      const userId = req.query.userId as string || await getDefaultUserId();
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
       
       // Get user's calendars from database
       const userCalendars = await storage.getUserCalendars(userId);
@@ -1192,9 +1293,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Calendar Management Endpoints
   
   // Get user's calendars
-  app.get('/api/calendars', async (req, res) => {
+  app.get('/api/calendars', requireAuth, async (req, res) => {
     try {
-      const userId = req.query.userId as string || await getDefaultUserId();
+      const userId = getCurrentUserId(req);
       const calendars = await storage.getUserCalendars(userId);
       res.json(calendars);
     } catch (error) {
@@ -1204,9 +1305,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Add new calendar
-  app.post('/api/calendars', async (req, res) => {
+  app.post('/api/calendars', requireAuth, async (req, res) => {
     try {
-      const { userId, calendarUrl, calendarName } = req.body;
+      const { calendarUrl, calendarName } = req.body;
+      const userId = getCurrentUserId(req);
       
       if (!calendarUrl || !calendarName) {
         return res.status(400).json({ error: 'Calendar URL and name are required' });
