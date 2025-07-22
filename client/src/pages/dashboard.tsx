@@ -434,8 +434,8 @@ export default function Dashboard() {
                   <Moon className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-purple-400">
-                  {whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
-                    <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
+                  {whoopData?.raw?.sleep?.score?.sleep_performance_percentage !== null && whoopData?.raw?.sleep?.score?.sleep_performance_percentage !== undefined ? (
+                    <><CountUp end={whoopData.raw.sleep.score.sleep_performance_percentage} duration={1200} />%</>
                   ) : (
                     <span className="text-sm text-slate-500">Sleep data still syncing from WHOOP</span>
                   )}
@@ -528,27 +528,7 @@ export default function Dashboard() {
                 </Card>
               )}
 
-              {/* Sleep Performance */}
-              {whoopData.raw?.sleep?.score?.sleep_performance_percentage && (
-                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                  <CardContent className="p-6">
-                    <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-indigo-500 rounded-full flex items-center justify-center">
-                        <Moon className="h-6 w-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-slate-400 text-sm">Sleep Performance</p>
-                        <p className="text-2xl font-bold text-indigo-400">
-                          <CountUp end={whoopData.raw.sleep.score.sleep_performance_percentage} duration={1000} />%
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      How well you slept vs. your need
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
+
 
               {/* Sleep Efficiency */}
               {whoopData.raw?.sleep?.score?.sleep_efficiency_percentage && (
