@@ -3,6 +3,7 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind, User } from 'lucide-react';
+import { HealthIcon } from '@/components/HealthIcon';
 import { formatTime } from '@/lib/utils';
 import { WhoopTodayResponse } from '@shared/schema';
 import { apiRequest, queryClient } from '@/lib/queryClient';
@@ -386,8 +387,8 @@ export default function Dashboard() {
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-6 text-center">
               <div className="mb-4">
-                <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Heart className="h-8 w-8 text-white" />
+                <div className="w-16 h-16 bg-slate-800/80 rounded-full flex items-center justify-center mx-auto mb-3 border border-slate-600/50">
+                  <HealthIcon size={32} />
                 </div>
                 <div className="text-2xl font-bold text-blue-400">
                   {whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
@@ -398,7 +399,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="flex items-center justify-center space-x-2">
-                <Heart className="h-5 w-5 text-blue-400" />
+                <HealthIcon size={20} />
                 <span className="text-slate-300 font-medium">Recovery</span>
               </div>
             </CardContent>
@@ -511,8 +512,8 @@ export default function Dashboard() {
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                   <CardContent className="p-6">
                     <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
-                        <Heart className="h-6 w-6 text-white" />
+                      <div className="w-12 h-12 bg-slate-800/80 rounded-full flex items-center justify-center border border-slate-600/50">
+                        <HealthIcon size={24} />
                       </div>
                       <div>
                         <p className="text-slate-400 text-sm">Resting Heart Rate</p>
@@ -645,8 +646,8 @@ export default function Dashboard() {
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                   <CardContent className="p-6">
                     <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-rose-500 rounded-full flex items-center justify-center">
-                        <Heart className="h-6 w-6 text-white" />
+                      <div className="w-12 h-12 bg-slate-800/80 rounded-full flex items-center justify-center border border-slate-600/50">
+                        <HealthIcon size={24} />
                       </div>
                       <div>
                         <p className="text-slate-400 text-sm">Max Heart Rate</p>
