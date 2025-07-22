@@ -145,11 +145,16 @@ function calculateAverages(days: number = 7): any {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Enable CORS for Custom GPT access
+  // Enable CORS for all routes with pre-flight support
   app.use(cors({
     origin: true,
-    credentials: true
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
   }));
+  
+  // Handle pre-flight requests for all routes
+  app.options('*', cors());
 
   // Serve static files from uploads directory
   app.use('/uploads', express.static(uploadsDir));
@@ -291,6 +296,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
       res.json(response);
     }
+  });
+
+  // GET handler for browser testing of refresh-tokens endpoint
+  app.get('/api/whoop/refresh-tokens', async (req, res) => {
+    const authSecret = req.query.auth as string;
+    const expectedSecret = process.env.N8N_SECRET_TOKEN || 'fitgpt-secret-2025';
+    
+    if (!authSecret || authSecret !== expectedSecret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    res.json({ 
+      status: 'GET ok', 
+      message: 'GET endpoint working - use POST for actual token refresh',
+      auth_valid: true 
+    });
   });
 
   // Bulk WHOOP token refresh endpoint for n8n automation
