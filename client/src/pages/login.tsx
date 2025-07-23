@@ -56,16 +56,16 @@ export default function LoginPage() {
       
       toast({
         title: "Login successful",
-        description: `Welcome back, ${data.user.email}!`
+        description: `Welcome back, ${data.user.email}!`,
+        className: "bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200"
       });
       
-      // Invalidate auth queries and redirect with proper handling
+      // Invalidate auth queries and redirect immediately
       queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
       queryClient.refetchQueries({ queryKey: ['/api/auth/me'] });
-      // Use a longer timeout for deployed environments
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 500);
+      
+      // Force immediate redirect for deployed environments
+      window.location.href = '/';
     },
     onError: (error: any) => {
       toast({
@@ -92,16 +92,16 @@ export default function LoginPage() {
       
       toast({
         title: "Registration successful",
-        description: `Welcome, ${data.user.email}! You're now logged in.`
+        description: `Welcome, ${data.user.email}! You're now logged in.`,
+        className: "bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200"
       });
       
-      // Invalidate auth queries and redirect with proper handling
+      // Invalidate auth queries and redirect immediately  
       queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
       queryClient.refetchQueries({ queryKey: ['/api/auth/me'] });
-      // Use a longer timeout for deployed environments
-      setTimeout(() => {
-        window.location.href = '/';
-      }, 500);
+      
+      // Force immediate redirect for deployed environments
+      window.location.href = '/';
     },
     onError: (error: any) => {
       toast({

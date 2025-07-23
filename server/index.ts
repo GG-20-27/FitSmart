@@ -17,24 +17,30 @@ const app = express();
 // Session configuration with PostgreSQL store
 const PgSession = ConnectPgSimple(session);
 
-// Configure session middleware
+// Configure session middleware with proper domain handling
+const isDeployedApp = !!process.env.REPLIT_DOMAINS || process.env.NODE_ENV === 'production';
+const isHTTPS = isDeployedApp || process.env.HTTPS === 'true';
+
 app.use(session({
   store: new PgSession({
     conString: process.env.DATABASE_URL,
-    tableName: 'session', // optional - defaults to 'session'
+    tableName: 'session',
     createTableIfMissing: true
   }),
   secret: process.env.SESSION_SECRET || 'fallback-secret-for-development-only',
   resave: false,
   saveUninitialized: false,
+  rolling: true, // Extend session on activity
   cookie: {
-    secure: process.env.NODE_ENV === 'production' || process.env.REPLIT_DOMAINS, // HTTPS for production and Replit deployments
+    secure: isHTTPS, // HTTPS for deployed environments
     httpOnly: true, // XSS protection
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: 'lax' // CSRF protection
+    sameSite: 'lax', // Lax works for same-site requests
   },
-  name: 'fitscore.sid' // Custom session name
+  name: 'fitscore.sid'
 }));
+
+console.log(`[SESSION] Configuration: HTTPS=${isHTTPS}, Deployed=${isDeployedApp}, SameSite=lax`);
 
 // Background token refresh service
 function startTokenRefreshService() {
@@ -64,10 +70,17 @@ app.use((req, res, next) => {
   // Allow credentials for session-based auth
   res.header('Access-Control-Allow-Credentials', 'true');
   
-  // Set origin based on environment
+  // Set origin based on environment - be more permissive for Replit
   const origin = req.headers.origin;
-  if (process.env.NODE_ENV === 'development' || origin?.includes('localhost') || origin?.includes('replit.app')) {
+  if (process.env.NODE_ENV === 'development' || 
+      origin?.includes('localhost') || 
+      origin?.includes('replit.app') || 
+      origin?.includes('replit.dev') ||
+      origin?.includes('health-data-hub')) {
     res.header('Access-Control-Allow-Origin', origin);
+  } else if (!origin) {
+    // For same-origin requests (no Origin header)
+    res.header('Access-Control-Allow-Origin', '*');
   }
   
   // Allow common headers including session-related ones

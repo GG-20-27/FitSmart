@@ -13,7 +13,12 @@ export async function apiRequest<T = any>(
 ): Promise<T> {
   const res = await fetch(url, {
     credentials: "include",
+    mode: "cors",
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
   });
 
   await throwIfResNotOk(res);
@@ -28,6 +33,10 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const res = await fetch(queryKey[0] as string, {
       credentials: "include",
+      mode: "cors",
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

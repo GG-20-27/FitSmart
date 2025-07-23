@@ -200,12 +200,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store user ID in session
       req.session.userId = user.id;
       
+      console.log(`[AUTH] Login attempt for ${email}, setting session userId: ${user.id}`);
+      console.log(`[AUTH] Session before save:`, req.session);
+      
       // Save session to ensure it's persisted before responding
       req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           return res.status(500).json({ error: 'Session creation failed' });
         }
+        
+        console.log(`[AUTH] Session saved successfully for user ${user.id}`);
+        console.log(`[AUTH] Session after save:`, req.session);
         
         res.json({ 
           message: 'Login successful',

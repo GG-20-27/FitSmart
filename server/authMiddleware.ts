@@ -19,6 +19,8 @@ declare global {
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const userId = req.session?.userId;
   
+  console.log(`[AUTH MIDDLEWARE] Session check: sessionId=${req.sessionID}, userId=${userId}, sessionExists=${!!req.session}, fullSession=`, req.session);
+  
   if (!userId) {
     return res.status(401).json({ 
       error: 'Authentication required',
