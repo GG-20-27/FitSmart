@@ -59,11 +59,10 @@ export default function LoginPage() {
         description: `Welcome back, ${data.user.email}!`
       });
       
-      // Clear all queries and redirect
-      queryClient.clear();
-      setTimeout(() => {
-        setLocation('/');
-      }, 500);
+      // Invalidate auth queries and redirect immediately
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+      // Force page reload to ensure proper state
+      window.location.href = '/';
     },
     onError: (error: any) => {
       toast({
@@ -93,11 +92,10 @@ export default function LoginPage() {
         description: `Welcome, ${data.user.email}! You're now logged in.`
       });
       
-      // Clear all queries and redirect
-      queryClient.clear();
-      setTimeout(() => {
-        setLocation('/');
-      }, 500);
+      // Invalidate auth queries and redirect immediately
+      queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+      // Force page reload to ensure proper state
+      window.location.href = '/';
     },
     onError: (error: any) => {
       toast({
