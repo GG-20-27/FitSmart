@@ -17,9 +17,9 @@ const app = express();
 // Session configuration with PostgreSQL store
 const PgSession = ConnectPgSimple(session);
 
-// Configure session middleware with proper domain handling
+// Configure session middleware with proper domain handling  
 const isDeployedApp = !!process.env.REPLIT_DOMAINS || process.env.NODE_ENV === 'production';
-const isHTTPS = isDeployedApp && (process.env.HTTPS !== 'false');
+const isHTTPS = false; // Force to false to ensure session cookies work in all environments
 
 app.use(session({
   store: new PgSession({
