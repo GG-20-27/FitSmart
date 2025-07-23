@@ -59,6 +59,31 @@ function startTokenRefreshService() {
   refreshTokens();
   setInterval(refreshTokens, 5 * 60 * 1000); // 5 minutes
 }
+// CORS configuration - must be before express.json()
+app.use((req, res, next) => {
+  // Allow credentials for session-based auth
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  // Set origin based on environment
+  const origin = req.headers.origin;
+  if (process.env.NODE_ENV === 'development' || origin?.includes('localhost') || origin?.includes('replit.app')) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  
+  // Allow common headers including session-related ones
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cookie, Set-Cookie');
+  
+  // Allow common methods
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 
@@ -120,7 +145,7 @@ app.use((req, res, next) => {
     port,
     host: "0.0.0.0",
     reusePort: true,
-  }, () => {
+  }, (r: any) => {
     log(`serving on port ${port}`);
   });
 
@@ -128,9 +153,9 @@ app.use((req, res, next) => {
   startTokenRefreshService();
 
   // Utility to print all registered routes (for debugging)
-  app._router.stack
-    .filter((r) => r.route)
-    .forEach((r) => {
+  (app as any)._router.stack
+    .filter((r: any) => r.route)
+    .forEach((r: any) => {
       const method = Object.keys(r.route.methods)[0].toUpperCase();
       const path = r.route.path;
       console.log(`[ROUTE] ${method} ${path}`);
