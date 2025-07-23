@@ -119,6 +119,16 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 23, 2025: Fixed browser authentication issues for deployed Replit app
+  - Fixed session cookie secure flag to work with both development and Replit deployment environments
+  - Enhanced login flow with explicit session persistence using req.session.save() before response
+  - Updated browser redirect timeout from 100ms to 500ms for deployed environments
+  - Added proper query cache invalidation and refetch for authentication state
+  - Removed API Health Check button from Quick Actions (keeping only Dashboard and Calendar)
+  - Updated Dashboard button icon to Activity icon for better visual representation
+  - Removed "Add Calendars" button from calendar header when no calendars exist (keeping only empty state button)
+  - Hidden User Management section for non-admin users (only shows for admin@fitscore.local)
+  - Authentication now works correctly in both local development and deployed browser environments
 - July 22, 2025: Enhanced CORS configuration and added browser-testable GET endpoint 
   - Enhanced CORS configuration with explicit methods and headers for better API access
   - Added OPTIONS handler for pre-flight requests to support all HTTP methods

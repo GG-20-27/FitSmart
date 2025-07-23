@@ -200,12 +200,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store user ID in session
       req.session.userId = user.id;
       
-      res.json({ 
-        message: 'Login successful',
-        user: {
-          id: user.id,
-          email: user.email
+      // Save session to ensure it's persisted before responding
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          return res.status(500).json({ error: 'Session creation failed' });
         }
+        
+        res.json({ 
+          message: 'Login successful',
+          user: {
+            id: user.id,
+            email: user.email
+          }
+        });
       });
     } catch (error) {
       console.error('Login error:', error);
@@ -265,12 +273,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Log them in immediately
       req.session.userId = user.id;
       
-      res.json({
-        message: 'Registration successful',
-        user: {
-          id: user.id,
-          email: user.email
+      // Save session to ensure it's persisted before responding
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          return res.status(500).json({ error: 'Session creation failed' });
         }
+        
+        res.json({
+          message: 'Registration successful',
+          user: {
+            id: user.id,
+            email: user.email
+          }
+        });
       });
     } catch (error) {
       console.error('Registration error:', error);
