@@ -19,7 +19,7 @@ const PgSession = ConnectPgSimple(session);
 
 // Configure session middleware with proper domain handling
 const isDeployedApp = !!process.env.REPLIT_DOMAINS || process.env.NODE_ENV === 'production';
-const isHTTPS = isDeployedApp || process.env.HTTPS === 'true';
+const isHTTPS = isDeployedApp && (process.env.HTTPS !== 'false');
 
 app.use(session({
   store: new PgSession({
@@ -32,7 +32,7 @@ app.use(session({
   saveUninitialized: false,
   rolling: true, // Extend session on activity
   cookie: {
-    secure: isHTTPS, // HTTPS for deployed environments
+    secure: isHTTPS, // HTTPS for deployed environments, HTTP for development
     httpOnly: true, // XSS protection
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     sameSite: 'lax', // Lax works for same-site requests
@@ -40,7 +40,7 @@ app.use(session({
   name: 'fitscore.sid'
 }));
 
-console.log(`[SESSION] Configuration: HTTPS=${isHTTPS}, Deployed=${isDeployedApp}, SameSite=lax`);
+console.log(`[SESSION] Configuration: HTTPS=${isHTTPS}, Deployed=${isDeployedApp}, SameSite=lax, Secure=${isHTTPS}`);
 
 // Background token refresh service
 function startTokenRefreshService() {

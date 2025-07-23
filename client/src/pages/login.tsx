@@ -173,6 +173,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400 pr-10"
+                  style={{ fontSize: showPassword ? '14px' : '12px', letterSpacing: showPassword ? 'normal' : '1px' }}
                   required
                 />
                 <Button
