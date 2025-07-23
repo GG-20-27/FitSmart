@@ -88,6 +88,7 @@ export default function Profile() {
   });
 
   const currentUser = users?.find(user => user.hasWhoopToken) || users?.[0];
+  const isAdminUser = currentUser?.email === 'admin@fitscore.local';
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -189,97 +190,99 @@ export default function Profile() {
             </CardContent>
           </Card>
 
-          {/* User Management */}
-          <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-white">
-                <Activity className="h-5 w-5" />
-                User Management
-              </CardTitle>
-              <CardDescription>Admin functions for managing user accounts</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Create New User */}
-              <div className="space-y-3">
-                <Label className="text-slate-300">Create New User</Label>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Input
-                    type="email"
-                    placeholder="user@example.com"
-                    value={newUserEmail}
-                    onChange={(e) => setNewUserEmail(e.target.value)}
-                    className="bg-slate-700 border-slate-600 text-white flex-1"
-                  />
-                  <Button
-                    onClick={() => createUserMutation.mutate(newUserEmail)}
-                    disabled={!newUserEmail || createUserMutation.isPending}
-                    size="sm"
-                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white border-0 transition-all duration-200"
-                  >
-                    {createUserMutation.isPending ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      'Create'
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Users List */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <Label className="text-slate-300">All Users</Label>
-                  <Button
-                    onClick={() => refetchUsers()}
-                    variant="outline"
-                    size="sm"
-                    disabled={usersLoading}
-                    className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${usersLoading ? 'animate-spin' : ''}`} />
-                  </Button>
-                </div>
-                
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {users?.map((user) => (
-                    <div
-                      key={user.id}
-                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-slate-700/50 rounded-lg border border-slate-600 space-y-2 sm:space-y-0"
+          {/* User Management - Only show for admin users */}
+          {isAdminUser && (
+            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-white">
+                  <Activity className="h-5 w-5" />
+                  User Management
+                </CardTitle>
+                <CardDescription>Admin functions for managing user accounts</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {/* Create New User */}
+                <div className="space-y-3">
+                  <Label className="text-slate-300">Create New User</Label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Input
+                      type="email"
+                      placeholder="user@example.com"
+                      value={newUserEmail}
+                      onChange={(e) => setNewUserEmail(e.target.value)}
+                      className="bg-slate-700 border-slate-600 text-white flex-1"
+                    />
+                    <Button
+                      onClick={() => createUserMutation.mutate(newUserEmail)}
+                      disabled={!newUserEmail || createUserMutation.isPending}
+                      size="sm"
+                      className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white border-0 transition-all duration-200"
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-white text-sm font-medium truncate">
-                            {user.email}
-                          </span>
-                          {user.hasWhoopToken && (
-                            <Badge variant="default" className="text-xs">
-                              WHOOP
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="text-slate-400 text-xs">
-                          {new Date(user.created_at).toLocaleDateString()}
-                        </div>
-                      </div>
-                      <Button
-                        onClick={() => deleteUserMutation.mutate(user.id)}
-                        variant="destructive"
-                        size="sm"
-                        disabled={deleteUserMutation.isPending}
-                        className="w-full sm:w-auto bg-red-600/20 border-red-600/50 text-red-400 hover:bg-red-600/30 hover:text-red-300 transition-all duration-200"
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  )) || (
-                    <div className="text-center py-4 text-slate-400">
-                      {usersLoading ? 'Loading users...' : 'No users found'}
-                    </div>
-                  )}
+                      {createUserMutation.isPending ? (
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                      ) : (
+                        'Create'
+                      )}
+                    </Button>
+                  </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+
+                {/* Users List */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-slate-300">All Users</Label>
+                    <Button
+                      onClick={() => refetchUsers()}
+                      variant="outline"
+                      size="sm"
+                      disabled={usersLoading}
+                      className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${usersLoading ? 'animate-spin' : ''}`} />
+                    </Button>
+                  </div>
+                  
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {users?.map((user) => (
+                      <div
+                        key={user.id}
+                        className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-slate-700/50 rounded-lg border border-slate-600 space-y-2 sm:space-y-0"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-white text-sm font-medium truncate">
+                              {user.email}
+                            </span>
+                            {user.hasWhoopToken && (
+                              <Badge variant="default" className="text-xs">
+                                WHOOP
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="text-slate-400 text-xs">
+                            {new Date(user.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                        <Button
+                          onClick={() => deleteUserMutation.mutate(user.id)}
+                          variant="destructive"
+                          size="sm"
+                          disabled={deleteUserMutation.isPending}
+                          className="w-full sm:w-auto bg-red-600/20 border-red-600/50 text-red-400 hover:bg-red-600/30 hover:text-red-300 transition-all duration-200"
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    )) || (
+                      <div className="text-center py-4 text-slate-400">
+                        {usersLoading ? 'Loading users...' : 'No users found'}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
           
           {/* Calendar Management */}
           <CalendarManagement />
@@ -295,22 +298,13 @@ export default function Profile() {
             <CardDescription>Common tasks and system information</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Button
-                onClick={() => window.open('/api/health', '_blank')}
-                variant="outline"
-                className="h-auto p-6 flex flex-col items-center space-y-3 bg-gradient-to-br from-slate-800 to-slate-700 border-slate-600 text-white hover:from-slate-700 hover:to-slate-600 transition-all duration-300"
-              >
-                <Activity className="h-8 w-8 text-green-400" />
-                <span className="font-medium">API Health Check</span>
-              </Button>
-              
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Button
                 onClick={() => window.open('/', '_blank')}
                 variant="outline"
                 className="h-auto p-6 flex flex-col items-center space-y-3 bg-gradient-to-br from-slate-800 to-slate-700 border-slate-600 text-white hover:from-slate-700 hover:to-slate-600 transition-all duration-300"
               >
-                <User className="h-8 w-8 text-blue-400" />
+                <Activity className="h-8 w-8 text-blue-400" />
                 <span className="font-medium">Dashboard</span>
               </Button>
               

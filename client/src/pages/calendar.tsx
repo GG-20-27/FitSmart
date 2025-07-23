@@ -243,18 +243,7 @@ export default function CalendarPage() {
             <Badge variant="secondary" className="bg-slate-700 text-slate-300 text-xs sm:text-sm">
               {calendarEvents.length} events
             </Badge>
-            {calendarEvents.length === 0 && (
-              <Link href="/profile">
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  className="border-blue-500/50 text-blue-400 hover:bg-blue-500/10 hover:text-blue-300 transition-colors"
-                >
-                  <CalendarIcon className="h-4 w-4 mr-2" />
-                  Add Calendars
-                </Button>
-              </Link>
-            )}
+
             <Button
               onClick={() => refetch()}
               variant="outline"
