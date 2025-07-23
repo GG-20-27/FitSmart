@@ -1,0 +1,137 @@
+/* Mobile-optimized Calendar Styles */
+.custom-calendar {
+  background: transparent !important;
+  color: white !important;
+  width: 100% !important;
+  overflow-x: auto;
+}
+
+/* Calendar header */
+.rbc-header {
+  background: rgba(30, 41, 59, 0.5) !important;
+  color: white !important;
+  border-bottom: 1px solid #475569 !important;
+  font-size: 12px !important;
+  padding: 8px 4px !important;
+}
+
+/* Calendar body */
+.rbc-month-view,
+.rbc-time-view,
+.rbc-agenda-view {
+  background: transparent !important;
+  overflow-x: auto !important;
+}
+
+/* Calendar cells */
+.rbc-day-bg {
+  background: rgba(15, 23, 42, 0.3) !important;
+  border: 1px solid #334155 !important;
+}
+
+.rbc-day-bg.rbc-today {
+  background: rgba(59, 130, 246, 0.1) !important;
+}
+
+.rbc-date-cell {
+  color: white !important;
+  font-size: 14px !important;
+}
+
+.rbc-today {
+  background: rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Calendar events */
+.rbc-event {
+  background: #3B82F6 !important;
+  border: 1px solid #1E40AF !important;
+  color: white !important;
+  border-radius: 4px !important;
+  font-size: 11px !important;
+  padding: 2px 4px !important;
+}
+
+.rbc-event:hover {
+  background: #2563EB !important;
+}
+
+/* Time slots */
+.rbc-time-slot {
+  border-top: 1px solid #334155 !important;
+  color: #94A3B8 !important;
+}
+
+.rbc-time-gutter {
+  background: rgba(30, 41, 59, 0.5) !important;
+  border-right: 1px solid #475569 !important;
+}
+
+.rbc-time-header {
+  background: rgba(30, 41, 59, 0.5) !important;
+  border-bottom: 1px solid #475569 !important;
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 768px) {
+  .custom-calendar {
+    font-size: 12px !important;
+    min-width: 100% !important;
+  }
+  
+  .rbc-header {
+    font-size: 10px !important;
+    padding: 4px 2px !important;
+  }
+  
+  .rbc-event {
+    font-size: 9px !important;
+    padding: 1px 2px !important;
+  }
+  
+  .rbc-date-cell {
+    font-size: 12px !important;
+  }
+  
+  .rbc-time-view .rbc-time-gutter {
+    width: 50px !important;
+  }
+  
+  .rbc-month-view .rbc-row {
+    min-height: 40px !important;
+  }
+}
+
+/* Fix white backgrounds on mobile */
+.rbc-calendar * {
+  background-color: transparent !important;
+}
+
+.rbc-toolbar,
+.rbc-toolbar button {
+  background: transparent !important;
+  color: white !important;
+  border-color: #475569 !important;
+}
+
+.rbc-toolbar button:hover {
+  background: rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Ensure full width on all screens */
+.calendar-container {
+  width: 100% !important;
+  overflow-x: auto;
+  background: transparent !important;
+}
+
+/* Remove any white backgrounds */
+.rbc-calendar,
+.rbc-calendar *,
+.rbc-month-view,
+.rbc-time-view,
+.rbc-agenda-view,
+.rbc-time-content,
+.rbc-time-header-content {
+  background: transparent !important;
+}

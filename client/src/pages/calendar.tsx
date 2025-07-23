@@ -9,6 +9,7 @@ import { CalendarIcon, MapPin, Clock, ChevronLeft, ChevronRight, ArrowLeft } fro
 import { Link } from 'wouter';
 import moment from 'moment-timezone';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
+import '../styles/calendar.css';
 
 // Configure moment for Europe/Zurich timezone
 moment.tz.setDefault('Europe/Zurich');
@@ -286,44 +287,51 @@ export default function CalendarPage() {
             </CardContent>
           </Card>
         ) : (
-          <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+          <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm overflow-hidden">
             <CardContent className="p-2 sm:p-6">
-              <div className="calendar-container h-[500px] sm:h-[700px]">
+              <div className="calendar-container w-full" style={{ height: window.innerWidth < 768 ? '500px' : '700px' }}>
                 <Calendar
                   localizer={localizer}
-                events={calendarEvents}
-                startAccessor="start"
-                endAccessor="end"
-                date={currentDate}
-                view={view}
-                onNavigate={handleNavigate}
-                onView={handleViewChange}
-                components={{
-                  toolbar: CustomToolbar,
-                  event: EventComponent
-                }}
-                views={[Views.MONTH, Views.WEEK, Views.DAY]}
-                step={60}
-                onSelectEvent={handleEventClick}
-                eventPropGetter={() => ({
-                  style: {
-                    backgroundColor: 'transparent',
-                    border: 'none',
-                    color: 'inherit'
-                  }
-                })}
-                dayPropGetter={() => ({
-                  style: {
-                    backgroundColor: 'transparent'
-                  }
-                })}
-                slotPropGetter={() => ({
-                  style: {
-                    backgroundColor: 'transparent'
-                  }
-                })}
-                className="custom-calendar"
-              />
+                  events={calendarEvents}
+                  startAccessor="start"
+                  endAccessor="end"
+                  date={currentDate}
+                  view={view}
+                  onNavigate={handleNavigate}
+                  onView={handleViewChange}
+                  components={{
+                    toolbar: CustomToolbar,
+                    event: EventComponent
+                  }}
+                  views={[Views.MONTH, Views.WEEK, Views.DAY]}
+                  step={60}
+                  onSelectEvent={handleEventClick}
+                  style={{ 
+                    height: '100%',
+                    width: '100%',
+                    fontFamily: 'Inter, system-ui, sans-serif'
+                  }}
+                  eventPropGetter={() => ({
+                    style: {
+                      backgroundColor: '#3B82F6',
+                      borderColor: '#1E40AF',
+                      color: 'white',
+                      border: '1px solid #1E40AF',
+                      borderRadius: '4px'
+                    }
+                  })}
+                  dayPropGetter={() => ({
+                    style: {
+                      backgroundColor: 'transparent'
+                    }
+                  })}
+                  slotPropGetter={() => ({
+                    style: {
+                      backgroundColor: 'transparent'
+                    }
+                  })}
+                  className="custom-calendar"
+                />
               </div>
             </CardContent>
           </Card>

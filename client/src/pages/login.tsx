@@ -1,14 +1,15 @@
-import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useState, useEffect } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
 import { HealthIcon } from '@/components/HealthIcon';
-import { LogIn, UserPlus } from 'lucide-react';
+import { LogIn, UserPlus, Eye, EyeOff } from 'lucide-react';
 
 interface AuthResponse {
   message: string;
@@ -23,7 +24,19 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  // Load saved email on component mount
+  useEffect(() => {
+    const savedEmail = localStorage.getItem('rememberedEmail');
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   const loginMutation = useMutation({
     mutationFn: async ({ email, password }: { email: string; password: string }) => {
@@ -34,11 +47,23 @@ export default function LoginPage() {
       });
     },
     onSuccess: (data) => {
+      // Save email if remember me is checked
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', email);
+      } else {
+        localStorage.removeItem('rememberedEmail');
+      }
+      
       toast({
         title: "Login successful",
         description: `Welcome back, ${data.user.email}!`
       });
-      setLocation('/dashboard');
+      
+      // Clear all queries and redirect
+      queryClient.clear();
+      setTimeout(() => {
+        setLocation('/');
+      }, 500);
     },
     onError: (error: any) => {
       toast({
@@ -58,11 +83,21 @@ export default function LoginPage() {
       });
     },
     onSuccess: (data) => {
+      // Save email if remember me is checked
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', email);
+      }
+      
       toast({
         title: "Registration successful",
         description: `Welcome, ${data.user.email}! You're now logged in.`
       });
-      setLocation('/dashboard');
+      
+      // Clear all queries and redirect
+      queryClient.clear();
+      setTimeout(() => {
+        setLocation('/');
+      }, 500);
     },
     onError: (error: any) => {
       toast({
@@ -126,15 +161,42 @@ export default function LoginPage() {
             
             <div className="space-y-2">
               <Label htmlFor="password" className="text-slate-300">Password</Label>
-              <Input
-                id="password"
-                type="password"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400"
-                required
+              <div className="relative">
+                <Input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="bg-slate-700 border-slate-600 text-white placeholder:text-slate-400 pr-10"
+                  required
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowPassword(!showPassword)}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 text-slate-400" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-slate-400" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="remember"
+                checked={rememberMe}
+                onCheckedChange={(checked) => setRememberMe(checked as boolean)}
+                className="border-slate-600 data-[state=checked]:bg-blue-600 data-[state=checked]:border-blue-600"
               />
+              <Label htmlFor="remember" className="text-sm text-slate-300">
+                Remember my email
+              </Label>
             </div>
 
             <Button
@@ -169,34 +231,7 @@ export default function LoginPage() {
             </Button>
           </div>
 
-          {/* Demo Accounts */}
-          <div className="mt-6 p-4 bg-slate-700/50 rounded-lg border border-slate-600">
-            <p className="text-xs text-slate-400 mb-2">Demo Accounts:</p>
-            <div className="space-y-1">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEmail('admin@fitscore.local');
-                  setPassword('admin');
-                }}
-                className="w-full text-xs bg-slate-600 border-slate-500 text-slate-200 hover:bg-slate-500"
-              >
-                Admin User
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setEmail('user@example.com');
-                  setPassword('demo');
-                }}
-                className="w-full text-xs bg-slate-600 border-slate-500 text-slate-200 hover:bg-slate-500"
-              >
-                Demo User
-              </Button>
-            </div>
-          </div>
+
         </CardContent>
       </Card>
     </div>
