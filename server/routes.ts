@@ -15,6 +15,8 @@ import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
 import { requireAuth, attachUser, getCurrentUserId, requireAdmin } from './authMiddleware';
+import { db } from './db';
+import { users } from '@shared/schema';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -520,9 +522,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get user profile to obtain WHOOP user ID
       console.log('[WHOOP AUTH] Fetching user profile to get WHOOP ID...');
       const userProfile = await whoopApiService.getUserProfile(tokenResponse.access_token);
-      const whoopUserId = userProfile.user_id.toString();
+      const whoopUserId = `whoop_${userProfile.user_id}`;
       
-      console.log(`[WHOOP AUTH] WHOOP User ID obtained: ${whoopUserId}`);
+      console.log(`[WHOOP AUTH] WHOOP User ID obtained: ${whoopUserId} (original: ${userProfile.user_id})`);
+      
+      // Create or get user in database
+      const userEmail = `${whoopUserId}@fitscore.local`;
+      const userData = {
+        id: whoopUserId,
+        email: userEmail,
+        whoopUserId: userProfile.user_id.toString()
+      };
+      
+      // Insert or update user in database
+      await db.insert(users).values(userData).onConflictDoUpdate({
+        target: users.id,
+        set: {
+          email: userData.email,
+          whoopUserId: userData.whoopUserId,
+          updatedAt: new Date()
+        }
+      });
+      
+      console.log(`[WHOOP AUTH] User upserted in database: ${whoopUserId}`);
       
       // Store the token with proper expiration using WHOOP user ID
       const tokenData = {

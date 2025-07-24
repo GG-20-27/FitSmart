@@ -1,47 +1,29 @@
 import { db } from './db';
 import { users, whoopTokens, type InsertUser, type User, type InsertWhoopToken } from '@shared/schema';
 import { eq } from 'drizzle-orm';
-import bcrypt from 'bcrypt';
 
 export class UserService {
-  async createUser(email: string, password: string = 'admin'): Promise<User> {
+  // Create WHOOP OAuth user (no password needed)
+  async createWhoopUser(id: string, email: string, whoopUserId: string): Promise<User> {
     try {
-      const saltRounds = 12;
-      const passwordHash = await bcrypt.hash(password, saltRounds);
-      
       const insertData: InsertUser = { 
+        id,
         email,
-        passwordHash 
+        whoopUserId 
       };
       const [user] = await db.insert(users).values(insertData).returning();
-      console.log(`Created new user: ${email} with ID: ${user.id}`);
+      console.log(`Created new WHOOP user: ${email} with ID: ${user.id}`);
       return user;
     } catch (error) {
-      console.error('Failed to create user:', error);
-      throw new Error(`Failed to create user: ${error}`);
+      console.error('Failed to create WHOOP user:', error);
+      throw new Error(`Failed to create WHOOP user: ${error}`);
     }
   }
 
+  // WHOOP OAuth doesn't use passwords - users authenticate via WHOOP only
   async validatePassword(email: string, password: string): Promise<User | null> {
-    try {
-      const user = await this.getUserByEmail(email);
-      if (!user) {
-        console.log(`[AUTH] User not found: ${email}`);
-        return null;
-      }
-
-      const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-      if (!isValidPassword) {
-        console.log(`[AUTH] Invalid password for user: ${email}`);
-        return null;
-      }
-
-      console.log(`[AUTH] Password validation successful for user: ${email}`);
-      return user;
-    } catch (error) {
-      console.error('Password validation error:', error);
-      return null;
-    }
+    console.log(`[AUTH] Password validation not supported for WHOOP OAuth - redirecting to WHOOP login`);
+    return null;
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
