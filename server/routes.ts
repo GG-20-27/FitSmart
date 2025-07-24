@@ -52,9 +52,9 @@ const upload = multer({
 async function getDefaultUserId(): Promise<string> {
   let adminUser = await userService.getUserByEmail('admin@fitscore.local');
   if (!adminUser) {
-    // Create default admin user if it doesn't exist
-    console.log('[USER SERVICE] Creating default admin user...');
-    adminUser = await userService.createUser('admin@fitscore.local');
+    // Create default admin user if it doesn't exist with secure password
+    console.log('[USER SERVICE] Creating default admin user with hashed password...');
+    adminUser = await userService.createUser('admin@fitscore.local', 'admin');
     console.log('[USER SERVICE] Default admin user created:', adminUser.id);
   }
   return adminUser.id;
@@ -191,13 +191,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Email and password are required' });
       }
       
-      // Simple email-based login for demo (in production, add proper password hashing)
-      const user = await userService.getUserByEmail(email);
+      // CRITICAL: Validate both email AND password using bcrypt
+      const user = await userService.validatePassword(email, password);
       if (!user) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
       
-      // Store user ID in session
+      // Only set session AFTER successful password validation
       req.session.userId = user.id;
       
       console.log(`[AUTH] Login attempt for ${email}, setting session userId: ${user.id}`);

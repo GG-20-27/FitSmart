@@ -119,6 +119,16 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- July 24, 2025: **CRITICAL SECURITY FIX**: Implemented proper password validation with bcrypt hashing
+  - ✅ **VULNERABILITY FIXED**: Login no longer bypasses password validation
+  - ✅ Added `passwordHash` field to users table with proper bcrypt hashing (salt rounds: 12)
+  - ✅ Implemented `validatePassword()` method with secure bcrypt.compare() verification
+  - ✅ Login handler now requires BOTH email AND password validation before setting session
+  - ✅ Wrong passwords return `401 Unauthorized` and prevent session creation
+  - ✅ Only valid email/password combinations allow authentication and session persistence
+  - ✅ Registration now requires minimum 4-character passwords and uses bcrypt hashing
+  - ✅ All authentication works in both development and production environments
+  - **SECURITY CONFIRMED**: System no longer allows authentication with incorrect passwords
 - July 23, 2025: **FINAL FIX**: Completely resolved authentication system for both development and production
   - ✅ Added `app.set('trust proxy', 1)` for proper Replit deployment proxy handling
   - ✅ Fixed session configuration with environment-aware settings:

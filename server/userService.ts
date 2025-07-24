@@ -1,17 +1,46 @@
 import { db } from './db';
 import { users, whoopTokens, type InsertUser, type User, type InsertWhoopToken } from '@shared/schema';
 import { eq } from 'drizzle-orm';
+import bcrypt from 'bcrypt';
 
 export class UserService {
-  async createUser(email: string): Promise<User> {
+  async createUser(email: string, password: string = 'admin'): Promise<User> {
     try {
-      const insertData: InsertUser = { email };
+      const saltRounds = 12;
+      const passwordHash = await bcrypt.hash(password, saltRounds);
+      
+      const insertData: InsertUser = { 
+        email,
+        passwordHash 
+      };
       const [user] = await db.insert(users).values(insertData).returning();
       console.log(`Created new user: ${email} with ID: ${user.id}`);
       return user;
     } catch (error) {
       console.error('Failed to create user:', error);
       throw new Error(`Failed to create user: ${error}`);
+    }
+  }
+
+  async validatePassword(email: string, password: string): Promise<User | null> {
+    try {
+      const user = await this.getUserByEmail(email);
+      if (!user) {
+        console.log(`[AUTH] User not found: ${email}`);
+        return null;
+      }
+
+      const isValidPassword = await bcrypt.compare(password, user.passwordHash);
+      if (!isValidPassword) {
+        console.log(`[AUTH] Invalid password for user: ${email}`);
+        return null;
+      }
+
+      console.log(`[AUTH] Password validation successful for user: ${email}`);
+      return user;
+    } catch (error) {
+      console.error('Password validation error:', error);
+      return null;
     }
   }
 
