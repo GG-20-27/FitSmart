@@ -14,12 +14,15 @@ import { userService } from "./userService";
 
 const app = express();
 
+// CRITICAL: Trust proxy for Replit deployment
+app.set('trust proxy', 1);
+
 // Session configuration with PostgreSQL store
 const PgSession = ConnectPgSimple(session);
 
 // Configure session middleware with proper domain handling  
-const isDeployedApp = !!process.env.REPLIT_DOMAINS || process.env.NODE_ENV === 'production';
-const isHTTPS = false; // Force to false to ensure session cookies work in all environments
+const isDeployedApp = !!process.env.REPLIT_DOMAINS && process.env.NODE_ENV === 'production';
+const isHTTPS = isDeployedApp; // True for Replit deployment, false for local development
 
 app.use(session({
   store: new PgSession({
@@ -35,12 +38,13 @@ app.use(session({
     secure: isHTTPS, // HTTPS for deployed environments, HTTP for development
     httpOnly: true, // XSS protection
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: 'lax', // Lax works for same-site requests
+    sameSite: isHTTPS ? 'none' : 'lax', // 'none' for cross-origin deployed apps, 'lax' for local
+    domain: isDeployedApp ? '.replit.app' : undefined, // Replit domain for deployed apps
   },
   name: 'fitscore.sid'
 }));
 
-console.log(`[SESSION] Configuration: HTTPS=${isHTTPS}, Deployed=${isDeployedApp}, SameSite=lax, Secure=${isHTTPS}`);
+console.log(`[SESSION] Configuration: HTTPS=${isHTTPS}, Deployed=${isDeployedApp}, SameSite=${isHTTPS ? 'none' : 'lax'}, Secure=${isHTTPS}, Domain=${isDeployedApp ? '.replit.app' : 'localhost'}`);
 
 // Background token refresh service
 function startTokenRefreshService() {

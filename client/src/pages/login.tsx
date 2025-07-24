@@ -60,12 +60,13 @@ export default function LoginPage() {
         className: "bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200"
       });
       
-      // Invalidate auth queries and redirect immediately
+      // Invalidate auth queries and wait to confirm session before redirect
       queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
-      queryClient.refetchQueries({ queryKey: ['/api/auth/me'] });
       
-      // Force immediate redirect for deployed environments
-      window.location.href = '/';
+      // Verify session is active before redirecting  
+      queryClient.refetchQueries({ queryKey: ['/api/auth/me'] }).then(() => {
+        window.location.href = '/';
+      });
     },
     onError: (error: any) => {
       toast({
@@ -96,12 +97,13 @@ export default function LoginPage() {
         className: "bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950 dark:to-emerald-950 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200"
       });
       
-      // Invalidate auth queries and redirect immediately  
+      // Invalidate auth queries and wait to confirm session before redirect
       queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
-      queryClient.refetchQueries({ queryKey: ['/api/auth/me'] });
       
-      // Force immediate redirect for deployed environments
-      window.location.href = '/';
+      // Verify session is active before redirecting
+      queryClient.refetchQueries({ queryKey: ['/api/auth/me'] }).then(() => {
+        window.location.href = '/';
+      });
     },
     onError: (error: any) => {
       toast({
