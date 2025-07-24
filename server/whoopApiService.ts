@@ -204,6 +204,33 @@ export class WhoopApiService {
     }
   }
 
+  async getUserProfile(accessToken: string): Promise<any> {
+    try {
+      console.log('[WHOOP API] Fetching user profile...');
+      
+      const response = await fetch(`${BASE}/user/profile/basic`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+          'User-Agent': 'FitScore-GPT-API/1.0'
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+
+      const profileData = await response.json();
+      console.log('[WHOOP API] User profile retrieved successfully:', profileData);
+      return profileData;
+    } catch (error: any) {
+      console.error('[WHOOP API] Failed to fetch user profile:', error.message);
+      throw new Error(`Failed to fetch user profile: ${error.message}`);
+    }
+  }
+
   async getLatestCycle(userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
     try {
       const headers = await this.authHeader(userId);

@@ -2,9 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { apiRequest } from '@/lib/queryClient';
 
-interface User {
+interface WhoopUser {
   id: string;
   email: string;
+  whoopUserId: string;
   created_at: string;
 }
 
@@ -19,7 +20,7 @@ export function useAuth() {
   // Query to check if user is authenticated
   const { data: user, isLoading, error } = useQuery({
     queryKey: ['/api/auth/me'],
-    queryFn: () => apiRequest<User>('/api/auth/me'),
+    queryFn: () => apiRequest<WhoopUser>('/api/auth/me'),
     retry: false,
     staleTime: 5 * 60 * 1000, // 5 minutes
   });

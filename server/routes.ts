@@ -181,51 +181,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('curl -F "mealPhotos=@image.jpg" http://localhost:5000/api/meals');
   console.log('');
 
-  // Authentication routes
-  console.log('[ROUTE] POST /api/auth/login');
-  app.post('/api/auth/login', async (req, res) => {
-    try {
-      const { email, password } = req.body;
-      
-      if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required' });
-      }
-      
-      // CRITICAL: Validate both email AND password using bcrypt
-      const user = await userService.validatePassword(email, password);
-      if (!user) {
-        return res.status(401).json({ error: 'Invalid credentials' });
-      }
-      
-      // Only set session AFTER successful password validation
-      req.session.userId = user.id;
-      
-      console.log(`[AUTH] Login attempt for ${email}, setting session userId: ${user.id}`);
-      console.log(`[AUTH] Session before save:`, req.session);
-      
-      // Save session to ensure it's persisted before responding
-      req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          return res.status(500).json({ error: 'Session creation failed' });
-        }
-        
-        console.log(`[AUTH] Session saved successfully for user ${user.id}`);
-        console.log(`[AUTH] Session after save:`, req.session);
-        
-        res.json({ 
-          message: 'Login successful',
-          user: {
-            id: user.id,
-            email: user.email
-          }
-        });
-      });
-    } catch (error) {
-      console.error('Login error:', error);
-      res.status(500).json({ error: 'Login failed' });
-    }
+  // Remove email/password authentication - redirect to WHOOP OAuth
+  console.log('[ROUTE] GET /api/auth/login');
+  app.get('/api/auth/login', (req, res) => {
+    res.redirect('/api/whoop/login');
   });
+  
+  // Legacy POST login redirects to WHOOP OAuth
+  console.log('[ROUTE] POST /api/auth/login');
+  app.post('/api/auth/login', (req, res) => {
+    res.redirect('/api/whoop/login');
+  });
+
 
   console.log('[ROUTE] POST /api/auth/logout');
   app.post('/api/auth/logout', (req, res) => {
@@ -240,17 +207,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('[ROUTE] GET /api/auth/me');
   app.get('/api/auth/me', requireAuth, async (req, res) => {
     try {
-      const userId = getCurrentUserId(req);
-      const user = await userService.getUserById(userId!);
+      const whoopUserId = getCurrentUserId(req);
       
-      if (!user) {
+      if (!whoopUserId) {
         return res.status(404).json({ error: 'User not found' });
       }
       
       res.json({
-        id: user.id,
-        email: user.email,
-        created_at: user.created_at
+        id: whoopUserId,
+        email: `whoop_user_${whoopUserId}@fitscore.local`,
+        whoopUserId: whoopUserId,
+        created_at: new Date()
       });
     } catch (error) {
       console.error('Get user error:', error);
@@ -258,46 +225,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Remove registration - users are created via WHOOP OAuth only
   console.log('[ROUTE] POST /api/auth/register');
-  app.post('/api/auth/register', async (req, res) => {
-    try {
-      const { email, password } = req.body;
-      
-      if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required' });
-      }
-      
-      // Check if user already exists
-      const existingUser = await userService.getUserByEmail(email);
-      if (existingUser) {
-        return res.status(400).json({ error: 'User already exists' });
-      }
-      
-      // Create new user
-      const user = await userService.createUser(email);
-      
-      // Log them in immediately
-      req.session.userId = user.id;
-      
-      // Save session to ensure it's persisted before responding
-      req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          return res.status(500).json({ error: 'Session creation failed' });
-        }
-        
-        res.json({
-          message: 'Registration successful',
-          user: {
-            id: user.id,
-            email: user.email
-          }
-        });
-      });
-    } catch (error) {
-      console.error('Registration error:', error);
-      res.status(500).json({ error: 'Registration failed' });
-    }
+  app.post('/api/auth/register', (req, res) => {
+    res.redirect('/api/whoop/login');
   });
 
   // Admin routes for multi-user management (admin only)
@@ -586,47 +517,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log('Valid authorization code received, proceeding with token exchange...');
       const tokenResponse = await whoopApiService.exchangeCodeForToken(code as string);
       
-      // Store the token with proper expiration
+      // Get user profile to obtain WHOOP user ID
+      console.log('[WHOOP AUTH] Fetching user profile to get WHOOP ID...');
+      const userProfile = await whoopApiService.getUserProfile(tokenResponse.access_token);
+      const whoopUserId = userProfile.user_id.toString();
+      
+      console.log(`[WHOOP AUTH] WHOOP User ID obtained: ${whoopUserId}`);
+      
+      // Store the token with proper expiration using WHOOP user ID
       const tokenData = {
         access_token: tokenResponse.access_token,
         refresh_token: tokenResponse.refresh_token,
         expires_at: tokenResponse.expires_in ? Math.floor(Date.now() / 1000) + tokenResponse.expires_in : undefined,
-        user_id: tokenResponse.user?.id
+        user_id: whoopUserId
       };
       
-      const defaultUserId = await getDefaultUserId();
-      await whoopTokenStorage.setToken(defaultUserId, tokenData);
-      console.log('WHOOP authentication successful! Token stored with expiration:', tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
-
-      // Return HTML that closes the popup and notifies parent
-      const html = `
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>WHOOP Authentication Success</title>
-            <style>
-              body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
-              .success { color: #22c55e; font-size: 18px; margin-bottom: 20px; }
-              .message { color: #6b7280; }
-            </style>
-          </head>
-          <body>
-            <div class="success">✅ WHOOP Authentication Successful!</div>
-            <div class="message">This window will close automatically...</div>
-            <script>
-              // Notify parent window and close popup
-              if (window.opener) {
-                window.opener.postMessage({ type: 'WHOOP_AUTH_SUCCESS' }, '*');
-              }
-              setTimeout(() => window.close(), 2000);
-            </script>
-          </body>
-        </html>
-      `;
+      await whoopTokenStorage.setToken(whoopUserId, tokenData);
+      console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
-      res.setHeader('Content-Type', 'text/html');
-      res.send(html);
-    } catch (error: any) {
+      // Set session using WHOOP user ID
+      req.session.userId = whoopUserId;
+      
+      // Save session before redirect
+      req.session.save((err) => {
+        if (err) {
+          console.error('[WHOOP AUTH] Session save error:', err);
+          return res.status(500).json({ error: 'Session creation failed' });
+        }
+        
+        console.log(`[WHOOP AUTH] Session created for WHOOP user ${whoopUserId}`);
+        console.log(`[WHOOP AUTH] Session details:`, req.session);
+
+        // Redirect to dashboard after successful authentication
+        res.redirect('/dashboard');
+      });
+      
+    } catch (error) {
+      console.error('[WHOOP AUTH] Callback error:', error);
+      res.status(500).json({ 
+        error: 'Authentication failed',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+
       console.error('WHOOP callback error:', error);
       
       // Return HTML error page for popup
