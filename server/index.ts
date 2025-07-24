@@ -27,7 +27,7 @@ const isHTTPS = isDeployedApp; // True for Replit deployment, false for local de
 app.use(session({
   store: new PgSession({
     conString: process.env.DATABASE_URL,
-    tableName: 'session',
+    tableName: 'sessions',
     createTableIfMissing: true
   }),
   secret: process.env.SESSION_SECRET || 'fallback-secret-for-development-only',

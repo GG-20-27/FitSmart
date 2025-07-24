@@ -203,19 +203,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   console.log('[ROUTE] GET /api/auth/me');
-  app.get('/api/auth/me', requireAuth, async (req, res) => {
+  app.get('/api/auth/me', async (req, res) => {
     try {
       const whoopUserId = getCurrentUserId(req);
+      console.log(`[AUTH ME] Checking authentication for session: ${req.sessionID}, userId: ${whoopUserId}`);
       
       if (!whoopUserId) {
+        console.log(`[AUTH ME] No userId found in session`);
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
+        });
+      }
+      
+      // Verify user exists in database
+      const user = await userService.getUserById(whoopUserId);
+      if (!user) {
+        console.log(`[AUTH ME] User ${whoopUserId} not found in database`);
         return res.status(404).json({ error: 'User not found' });
       }
       
+      console.log(`[AUTH ME] Authentication successful for user: ${whoopUserId}`);
       res.json({
         id: whoopUserId,
-        email: `whoop_user_${whoopUserId}@fitscore.local`,
-        whoopUserId: whoopUserId,
-        created_at: new Date()
+        email: user.email || `${whoopUserId}@fitscore.local`,
+        whoopUserId: user.whoopUserId || whoopUserId,
+        created_at: user.createdAt || new Date()
       });
     } catch (error) {
       console.error('Get user error:', error);
@@ -572,8 +585,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
-      // Set session using WHOOP user ID
-      (req.session as any).userId = whoopUserId;
+      // Set session using WHOOP user ID with explicit session casting
+      const session = req.session as any;
+      session.userId = whoopUserId;
+      
+      console.log(`[WHOOP AUTH] Setting session userId to: ${whoopUserId}`);
+      console.log(`[WHOOP AUTH] Session before save:`, session);
       
       // Save session before redirect
       req.session.save((err) => {
@@ -582,15 +599,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(500).json({ error: 'Session creation failed' });
         }
         
-        console.log(`[WHOOP AUTH] Session created for WHOOP user ${whoopUserId}`);
-        console.log(`[WHOOP AUTH] Session details:`, req.session);
+        console.log(`[WHOOP AUTH] Session saved successfully for WHOOP user ${whoopUserId}`);
+        console.log(`[WHOOP AUTH] Session after save:`, req.session);
+        console.log(`[WHOOP AUTH] Session userId verification:`, (req.session as any).userId);
 
-        // Redirect to dashboard after successful authentication
-        res.redirect('/dashboard');
+        // Redirect to root path after successful authentication (dashboard will be shown for authenticated users)
+        res.redirect('/');
       });
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
+      
+      // Check if it's a token exchange error (common with expired/used auth codes)
+      if (error.message?.includes('invalid_grant') || error.message?.includes('HTTP 400')) {
+        console.log('[WHOOP AUTH] Authorization code expired or already used - redirecting to retry');
+        
+        // Redirect back to OAuth login for a fresh authorization code
+        return res.redirect('/api/whoop/login');
+      }
       
       // Return HTML error page for popup
       const html = `
@@ -602,11 +628,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
               body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
               .error { color: #ef4444; font-size: 18px; margin-bottom: 20px; }
               .message { color: #6b7280; }
+              .retry { margin-top: 20px; }
+              .retry a { color: #3b82f6; text-decoration: none; font-weight: bold; }
+              .retry { margin-top: 20px; }
+              .retry a { color: #3b82f6; text-decoration: none; font-weight: bold; }
             </style>
           </head>
           <body>
             <div class="error">❌ Authentication Failed</div>
-            <div class="message">${error instanceof Error ? error.message : 'An error occurred during authentication'}</div>
+            <div class="message">WHOOP authentication encountered an error: ${error instanceof Error ? error.message : 'An error occurred during authentication'}</div>
+            <div class="retry">
+              <a href="/api/whoop/login">🔄 Try Again</a>
+            </div>
             <div class="message">This window will close automatically...</div>
             <script>
               setTimeout(() => window.close(), 3000);
@@ -698,6 +731,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error) {
       res.status(500).json({ error: 'Failed to generate OAuth URL' });
+    }
+  });
+
+  // Test endpoint to manually create session (for debugging authentication)
+  app.post('/api/whoop/test-session', async (req, res) => {
+    try {
+      const { user_id } = req.body;
+      
+      if (!user_id) {
+        return res.status(400).json({ error: 'user_id required' });
+      }
+      
+      const whoopUserId = `whoop_${user_id}`;
+      
+      // Set session manually for testing
+      const session = req.session as any;
+      session.userId = whoopUserId;
+      
+      console.log(`[TEST SESSION] Setting session userId to: ${whoopUserId}`);
+      console.log(`[TEST SESSION] Session before save:`, session);
+      
+      // Save session and return success
+      req.session.save((err) => {
+        if (err) {
+          console.error('[TEST SESSION] Session save error:', err);
+          return res.status(500).json({ error: 'Session creation failed' });
+        }
+        
+        console.log(`[TEST SESSION] Session saved successfully for WHOOP user ${whoopUserId}`);
+        console.log(`[TEST SESSION] Session after save:`, req.session);
+        
+        res.json({ 
+          message: 'Test session created successfully',
+          userId: whoopUserId,
+          sessionId: req.sessionID
+        });
+      });
+      
+    } catch (error) {
+      console.error('Error creating test session:', error);
+      res.status(500).json({ error: 'Failed to create test session' });
     }
   });
 
