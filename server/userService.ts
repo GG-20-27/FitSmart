@@ -26,6 +26,20 @@ export class UserService {
     return null;
   }
 
+  // Legacy method for backward compatibility - creates WHOOP user
+  async createUser(email: string, password: string = 'admin'): Promise<User> {
+    // Extract WHOOP user ID from email format: whoop_12345@fitscore.local
+    const whoopIdMatch = email.match(/whoop_(\d+)@/);
+    if (!whoopIdMatch) {
+      throw new Error('Invalid WHOOP user email format');
+    }
+    
+    const whoopUserId = whoopIdMatch[1];
+    const id = `whoop_${whoopUserId}`;
+    
+    return this.createWhoopUser(id, email, whoopUserId);
+  }
+
   async getUserByEmail(email: string): Promise<User | undefined> {
     try {
       const [user] = await db.select().from(users).where(eq(users.email, email));

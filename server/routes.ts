@@ -50,16 +50,11 @@ const upload = multer({
   }
 });
 
-// Helper function to get default admin user ID
+// Helper function to get default user ID for WHOOP OAuth testing
 async function getDefaultUserId(): Promise<string> {
-  let adminUser = await userService.getUserByEmail('admin@fitscore.local');
-  if (!adminUser) {
-    // Create default admin user if it doesn't exist with secure password
-    console.log('[USER SERVICE] Creating default admin user with hashed password...');
-    adminUser = await userService.createUser('admin@fitscore.local', 'admin');
-    console.log('[USER SERVICE] Default admin user created:', adminUser.id);
-  }
-  return adminUser.id;
+  // For WHOOP OAuth, we don't have a default admin user anymore
+  // Return a test WHOOP user ID format for development
+  return 'whoop_25283528';
 }
 
 // Fetch live WHOOP data using OAuth access token
@@ -558,7 +553,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
       // Set session using WHOOP user ID
-      req.session.userId = whoopUserId;
+      (req.session as any).userId = whoopUserId;
       
       // Save session before redirect
       req.session.save((err) => {
@@ -576,12 +571,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
-      res.status(500).json({ 
-        error: 'Authentication failed',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      });
-
-      console.error('WHOOP callback error:', error);
       
       // Return HTML error page for popup
       const html = `
@@ -597,7 +586,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           </head>
           <body>
             <div class="error">❌ Authentication Failed</div>
-            <div class="message">${error.message || 'An error occurred during authentication'}</div>
+            <div class="message">${error instanceof Error ? error.message : 'An error occurred during authentication'}</div>
             <div class="message">This window will close automatically...</div>
             <script>
               setTimeout(() => window.close(), 3000);

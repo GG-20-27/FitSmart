@@ -75,6 +75,12 @@ export const insertWhoopTokenSchema = createInsertSchema(whoopTokens).omit({
   updatedAt: true,
 });
 
+// Type definitions
+export type User = typeof users.$inferSelect;
+export type InsertUser = typeof users.$inferInsert;
+export type WhoopToken = typeof whoopTokens.$inferSelect;
+export type InsertWhoopToken = typeof whoopTokens.$inferInsert;
+
 export const insertUserCalendarSchema = createInsertSchema(userCalendars).omit({
   id: true,
   createdAt: true,
