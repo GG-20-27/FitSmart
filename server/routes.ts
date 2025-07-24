@@ -17,6 +17,7 @@ import axios from "axios";
 import { requireAuth, attachUser, getCurrentUserId, requireAdmin } from './authMiddleware';
 import { db } from './db';
 import { users } from '@shared/schema';
+import { eq } from 'drizzle-orm';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -529,17 +530,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         whoopUserId: userProfile.user_id.toString()
       };
       
-      // Insert or update user in database
-      await db.insert(users).values(userData).onConflictDoUpdate({
-        target: users.id,
-        set: {
-          email: userData.email,
-          whoopUserId: userData.whoopUserId,
-          updatedAt: new Date()
-        }
-      });
+      // Insert or update user in database with detailed logging
+      console.log(`[WHOOP AUTH] Attempting to upsert user:`, userData);
+      try {
+        await db.insert(users).values(userData).onConflictDoUpdate({
+          target: users.id,
+          set: {
+            email: userData.email,
+            whoopUserId: userData.whoopUserId,
+            updatedAt: new Date()
+          }
+        });
+        console.log(`[WHOOP AUTH] User upserted successfully in database: ${whoopUserId}`);
+      } catch (userError) {
+        console.error(`[WHOOP AUTH] User upsert failed:`, userError);
+        throw new Error(`Failed to create user: ${userError.message}`);
+      }
       
-      console.log(`[WHOOP AUTH] User upserted in database: ${whoopUserId}`);
+      // Verify user exists before creating token
+      const existingUser = await db.select().from(users).where(eq(users.id, whoopUserId)).limit(1);
+      if (existingUser.length === 0) {
+        throw new Error(`User verification failed - user ${whoopUserId} not found after upsert`);
+      }
+      console.log(`[WHOOP AUTH] User verified in database: ${whoopUserId}`);
       
       // Store the token with proper expiration using WHOOP user ID
       const tokenData = {
@@ -549,7 +562,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         user_id: whoopUserId
       };
       
-      await whoopTokenStorage.setToken(whoopUserId, tokenData);
+      console.log(`[WHOOP AUTH] Attempting to store token for user: ${whoopUserId}`);
+      try {
+        await whoopTokenStorage.setToken(whoopUserId, tokenData);
+        console.log(`[WHOOP AUTH] Token stored successfully for WHOOP user ${whoopUserId}`);
+      } catch (tokenError) {
+        console.error(`[WHOOP AUTH] Token storage failed:`, tokenError);
+        throw new Error(`Failed to store token: ${tokenError.message}`);
+      }
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
       // Set session using WHOOP user ID
@@ -684,17 +704,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Test endpoint to manually set a WHOOP token for debugging
   app.post('/api/whoop/test-token', async (req, res) => {
     try {
-      const { access_token } = req.body;
-      if (!access_token) {
-        return res.status(400).json({ error: 'access_token required' });
+      const { access_token, refresh_token, expires_in, user_id } = req.body;
+      
+      if (!access_token || !user_id) {
+        return res.status(400).json({ 
+          error: 'Missing required fields: access_token and user_id are required' 
+        });
       }
-
-      // Store the test token
-      const defaultUserId = await getDefaultUserId();
-      await whoopTokenStorage.setToken(defaultUserId, {
+      
+      // Use the user_id from request to format as WHOOP user ID
+      const whoopUserId = `whoop_${user_id}`;
+      
+      // First ensure the user exists in the database
+      try {
+        const userData = {
+          id: whoopUserId,
+          email: `${whoopUserId}@fitscore.local`,
+          whoopUserId: user_id.toString()
+        };
+        
+        await db.insert(users).values(userData).onConflictDoUpdate({
+          target: users.id,
+          set: {
+            email: userData.email,
+            whoopUserId: userData.whoopUserId,
+            updatedAt: new Date()
+          }
+        });
+        
+        console.log(`Test user created/updated: ${whoopUserId}`);
+      } catch (userError) {
+        console.error('Failed to create test user:', userError);
+        return res.status(500).json({ error: 'Failed to create test user' });
+      }
+      
+      await whoopTokenStorage.setToken(whoopUserId, {
         access_token: access_token,
-        expires_at: Date.now() / 1000 + (24 * 60 * 60), // 24 hours from now in seconds
-        user_id: defaultUserId
+        refresh_token: refresh_token,
+        expires_at: expires_in ? Math.floor(Date.now() / 1000) + expires_in : Math.floor(Date.now() / 1000) + (24 * 60 * 60),
+        user_id: whoopUserId
       });
 
       res.json({ 
