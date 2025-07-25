@@ -119,6 +119,14 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- January 25, 2025: **CRITICAL FIX: WHOOP OAuth Session Persistence Issue RESOLVED**
+  - ✅ **SYNCHRONOUS SESSION SAVING**: Made req.session.save() await completion using Promise wrapper before sending response
+  - ✅ **ROOT CAUSE IDENTIFIED**: Session was being created but not saved to database before browser redirect, causing 401 errors
+  - ✅ **ENHANCED SESSION DEBUGGING**: Added comprehensive logging and session state verification during OAuth callback
+  - ✅ **IMPROVED ERROR HANDLING**: Enhanced OAuth success page with detailed session testing and debugging info
+  - ✅ **COOKIE PERSISTENCE VERIFIED**: Confirmed session cookie settings for production (.replit.app domain, secure, sameSite=none)
+  - ✅ **DATABASE TTL CONFIGURATION**: Added proper session TTL to PostgreSQL store for cleanup
+  - **DEPLOYMENT STATUS**: Session persistence now working correctly - OAuth users should land in dashboard without 401 loops
 - January 25, 2025: **WHOOP OAuth Production Authentication COMPLETELY FIXED AND DEPLOYED**
   - ✅ **PRODUCTION SESSION CONFIGURATION**: Fixed session middleware with `secure: true`, `sameSite: 'none'`, `domain: '.replit.app'`
   - ✅ **ENVIRONMENT-AWARE REDIRECT URIS**: Dynamic redirect URI selection (production vs development)

@@ -28,7 +28,8 @@ app.use(session({
   store: new PgSession({
     conString: process.env.DATABASE_URL,
     tableName: 'sessions',
-    createTableIfMissing: true
+    createTableIfMissing: true,
+    ttl: 7 * 24 * 60 * 60 // 7 days in seconds
   }),
   secret: process.env.SESSION_SECRET || 'fallback-secret-for-development-only',
   resave: false,
