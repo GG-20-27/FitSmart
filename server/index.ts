@@ -5,51 +5,21 @@ if (!process.env.N8N_SECRET_TOKEN) {
 }
 
 import express, { type Request, Response, NextFunction } from "express";
-import session from "express-session";
-import ConnectPgSimple from "connect-pg-simple";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { whoopApiService } from "./whoopApiService";
 import { userService } from "./userService";
+import { jwtAuthMiddleware } from "./jwtAuth";
 
 const app = express();
 
 // CRITICAL: Trust proxy for Replit deployment
 app.set('trust proxy', 1);
 
-// Session configuration with PostgreSQL store
-const PgSession = ConnectPgSimple(session);
+// JWT authentication middleware
+app.use(jwtAuthMiddleware);
 
-// Production environment detection for WHOOP OAuth
-const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
-const isReplotDeployment = !!process.env.REPLIT_DOMAINS;
-
-// Session middleware with forced cookie transmission
-const sessionMiddleware = session({
-  store: new PgSession({
-    conString: process.env.DATABASE_URL,
-    tableName: 'sessions',
-    createTableIfMissing: true,
-    ttl: 7 * 24 * 60 * 60 // 7 days in seconds
-  }),
-  secret: process.env.SESSION_SECRET || 'fallback-secret-for-development-only',
-  resave: false, // Don't save session if unmodified 
-  saveUninitialized: false, // Don't create session until something stored
-  proxy: true, // Trust the reverse proxy
-  rolling: true, // Enable rolling to update session on each request
-  cookie: {
-    secure: true, // ALWAYS secure for production
-    httpOnly: true,
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: 'none', // ALWAYS none for cross-origin
-    domain: '.replit.app', // ALWAYS set domain for replit
-  },
-  name: 'fitscore.sid'
-});
-
-app.use(sessionMiddleware);
-
-console.log(`[SESSION] Configuration: Production=${isProduction}, Replit=${isReplotDeployment}, SameSite=${isProduction ? 'none' : 'lax'}, Secure=${isProduction}, Domain=${isReplotDeployment ? '.replit.app' : 'localhost'}`);
+console.log(`[JWT] JWT-based authentication configured`);
 
 // Background token refresh service
 function startTokenRefreshService() {
@@ -76,7 +46,7 @@ function startTokenRefreshService() {
 }
 // CORS configuration - must be before express.json()
 app.use((req, res, next) => {
-  // Allow credentials for session-based auth
+  // Allow credentials for JWT-based auth
   res.header('Access-Control-Allow-Credentials', 'true');
   
   // Set origin based on environment - be more permissive for Replit

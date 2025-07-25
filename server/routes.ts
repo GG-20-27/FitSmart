@@ -194,48 +194,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   console.log('[ROUTE] POST /api/auth/logout');
   app.post('/api/auth/logout', (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ error: 'Logout failed' });
-      }
-      res.json({ message: 'Logout successful' });
-    });
+    // For JWT, logout is handled client-side by removing the token
+    res.json({ message: 'Logout successful' });
   });
 
   console.log('[ROUTE] GET /api/auth/me');
   app.get('/api/auth/me', async (req, res) => {
     try {
       const whoopUserId = getCurrentUserId(req);
-      console.log(`[AUTH ME] Checking authentication for session: ${req.sessionID}, userId: ${whoopUserId}`);
+      console.log(`[AUTH ME] Checking JWT authentication, userId: ${whoopUserId}`);
       console.log(`[AUTH ME] Headers:`, req.headers.authorization ? 'Bearer token present' : 'No bearer token');
-      console.log(`[AUTH ME] URL query token:`, (req as any).query?.token ? 'URL token present' : 'No URL token');
-      console.log(`[AUTH ME] Full session object:`, JSON.stringify(req.session, null, 2));
-      console.log(`[AUTH ME] Session userId property:`, (req.session as any)?.userId);
-      console.log(`[AUTH ME] Session exists:`, !!req.session);
-      console.log(`[AUTH ME] Session keys:`, req.session ? Object.keys(req.session) : 'no session');
       
       if (!whoopUserId) {
-        console.log(`[AUTH ME] No userId found in session or token - authentication required`);
+        console.log(`[AUTH ME] No userId found in JWT token - authentication required`);
         return res.status(401).json({ 
           error: 'Authentication required',
           message: 'Please authenticate with WHOOP to access this resource'
         });
       }
       
-      // Verify user exists in database
-      const user = await userService.getUserById(whoopUserId);
-      if (!user) {
-        console.log(`[AUTH ME] User ${whoopUserId} not found in database`);
-        return res.status(404).json({ error: 'User not found' });
-      }
-      
       console.log(`[AUTH ME] Authentication successful for user: ${whoopUserId}`);
-      res.json({
-        id: whoopUserId,
-        email: user.email || `${whoopUserId}@fitscore.local`,
-        whoopUserId: user.whoopUserId || whoopUserId,
-        created_at: user.createdAt || new Date()
-      });
+      res.json({ userId: whoopUserId });
     } catch (error) {
       console.error('Get user error:', error);
       res.status(500).json({ error: 'Failed to get user information' });
@@ -765,29 +744,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store user
       await userService.createUser(`${whoopUserId}@fitscore.local`, whoopUserId);
       
-      // 3. OAuth callback with session regeneration as specified
-      req.session.regenerate((err) => {
-        if (err) {
-          console.error('[WHOOP AUTH] Session regeneration error:', err);
-          return next(err);
-        }
-        
-        // Set userId in regenerated session
-        (req.session as any).userId = whoopUserId;
-        
-        // Save session and redirect
-        req.session.save((saveErr) => {
-          if (saveErr) {
-            console.error('[WHOOP AUTH] Session save error:', saveErr);
-            return res.status(500).send('Authentication failed - session save error');
-          }
-          
-          console.log(`[WHOOP AUTH] Session regenerated and saved: ${req.sessionID}, User: ${whoopUserId}`);
-          
-          // Redirect to dashboard 
-          res.redirect('/');
-        });
-      });
+      // Generate JWT token
+      const { generateJWT } = await import('./jwtAuth');
+      const jwtToken = generateJWT(whoopUserId);
+      
+      console.log(`[WHOOP AUTH] JWT token generated for user: ${whoopUserId}`);
+      
+      // Redirect to dashboard with token 
+      res.redirect(`/#token=${jwtToken}`);
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
