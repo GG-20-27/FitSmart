@@ -207,13 +207,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const whoopUserId = getCurrentUserId(req);
       console.log(`[AUTH ME] Checking authentication for session: ${req.sessionID}, userId: ${whoopUserId}`);
+      console.log(`[AUTH ME] Headers:`, req.headers.authorization ? 'Bearer token present' : 'No bearer token');
+      console.log(`[AUTH ME] URL query token:`, (req as any).query?.token ? 'URL token present' : 'No URL token');
       console.log(`[AUTH ME] Full session object:`, JSON.stringify(req.session, null, 2));
       console.log(`[AUTH ME] Session userId property:`, (req.session as any)?.userId);
       console.log(`[AUTH ME] Session exists:`, !!req.session);
       console.log(`[AUTH ME] Session keys:`, req.session ? Object.keys(req.session) : 'no session');
       
       if (!whoopUserId) {
-        console.log(`[AUTH ME] No userId found in session - authentication required`);
+        console.log(`[AUTH ME] No userId found in session or token - authentication required`);
         return res.status(401).json({ 
           error: 'Authentication required',
           message: 'Please authenticate with WHOOP to access this resource'
@@ -651,51 +653,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       });
       
-      // Set userId directly and force session modification
+      // RADICAL NEW APPROACH: Skip sessions entirely, use URL-based auth token
+      // Instead of manual tokens, let's try the fundamental fix: set session and redirect immediately
+      console.log(`[WHOOP AUTH] Setting session userId directly and redirecting...`);
+      
+      // Set session with user ID
       (req.session as any).userId = whoopUserId;
-      
-      // Force session to be marked as modified and saved 
-      req.session.touch();
-      (req.session as any).modified = true;
-      
-      // Save session synchronously and manually set cookie header
-      await new Promise<void>((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) {
-            console.error('[WHOOP AUTH] Session save failed:', err);
-            reject(err);
-          } else {
-            console.log(`[WHOOP AUTH] Session saved successfully - ID: ${req.sessionID}, UserID: ${whoopUserId}`);
-            
-            // Manually set the Set-Cookie header to ensure transmission
-            const cookieName = 'fitscore.sid';
-            const cookieValue = req.sessionID;
-            const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
-            const isReplotDeployment = !!process.env.REPLIT_DOMAINS;
-            
-            let cookieHeader = `${cookieName}=${cookieValue}; Path=/; HttpOnly; Max-Age=${7 * 24 * 60 * 60}`;
-            
-            if (isProduction) {
-              cookieHeader += '; Secure; SameSite=None';
-            } else {
-              cookieHeader += '; SameSite=Lax';
-            }
-            
-            if (isReplotDeployment) {
-              cookieHeader += '; Domain=.replit.app';
-            }
-            
-            res.setHeader('Set-Cookie', cookieHeader);
-            console.log(`[WHOOP AUTH] Manually set Set-Cookie header: ${cookieHeader}`);
-            
-            resolve();
-          }
-        });
+      req.session.save((err) => {
+        if (err) {
+          console.error(`[WHOOP AUTH] Session save error:`, err);
+          return res.status(500).send('Authentication failed - session save error');
+        }
+        
+        console.log(`[WHOOP AUTH] Session saved successfully. Redirecting to dashboard.`);
+        console.log(`[WHOOP AUTH] Session ID: ${req.sessionID}, User ID: ${whoopUserId}`);
+        
+        // Redirect to dashboard immediately after session save
+        res.redirect('/');
       });
+      return;
       
-      // Now send the success page
-
-        const successHtml = `
+      // OLD SUCCESS PAGE CODE (keeping as backup)
+      const successHtml = `
           <!DOCTYPE html>
           <html>
             <head>
@@ -728,10 +707,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
                     console.log('[WHOOP AUTH] Testing session with fetch request...');
                     console.log('[WHOOP AUTH] Current document cookies:', document.cookie);
                     
+                    // Use token-based auth instead of cookies
+                    const urlParams = new URLSearchParams(window.location.search);
+                    const authToken = urlParams.get('token') || '${authToken}';
+                    console.log('[WHOOP AUTH] Using auth token:', authToken);
+                    
                     const response = await fetch('/api/auth/me', {
                       credentials: 'include',
                       headers: { 
                         'Accept': 'application/json',
+                        'Authorization': 'Bearer ' + authToken,
                         'Cache-Control': 'no-cache'
                       }
                     });
@@ -742,7 +727,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       console.log('[WHOOP AUTH] Session test successful:', userData);
                       testDiv.innerHTML = '<p style="color: #10b981;">✅ Session verified - redirecting...</p>';
                       // Redirect after successful session verification - use location.href for proper navigation
-                      setTimeout(() => window.location.href = '/', 1500);
+                      setTimeout(() => window.location.href = '/?token=' + authToken, 1500);
                     } else {
                       const errorText = await response.text();
                       console.error('[WHOOP AUTH] Session test failed:', response.status, errorText);
@@ -777,8 +762,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           </html>
         `;
       
-      // Send success page with session verification
-      res.send(successHtml);
+      // This code is now unreachable due to direct redirect above
+      // res.send(successHtml);
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);

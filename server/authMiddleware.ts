@@ -15,9 +15,9 @@ declare global {
   }
 }
 
-// WHOOP OAuth session-based authentication middleware
+// WHOOP OAuth authentication middleware (supports both session and token auth)
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const userId = req.session?.userId;
+  const userId = getCurrentUserId(req);
   
   console.log(`[AUTH MIDDLEWARE] Session check: sessionId=${req.sessionID}, userId=${userId}, sessionExists=${!!req.session}, path=${req.path}`);
   console.log(`[AUTH MIDDLEWARE] Full session:`, JSON.stringify(req.session, null, 2));
@@ -46,7 +46,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 // Middleware to attach WHOOP user info to request if authenticated
 export async function attachUser(req: Request, res: Response, next: NextFunction) {
   try {
-    const whoopUserId = req.session?.userId;
+    const whoopUserId = getCurrentUserId(req);
     
     if (whoopUserId) {
       // For WHOOP OAuth, we use the WHOOP user ID directly
@@ -67,7 +67,41 @@ export async function attachUser(req: Request, res: Response, next: NextFunction
 
 // Get current WHOOP user ID from request or return null
 export function getCurrentUserId(req: Request): string | null {
-  return req.session?.userId || null;
+  // First try session-based auth (fallback)
+  const sessionUserId = req.session?.userId;
+  if (sessionUserId) {
+    return sessionUserId;
+  }
+  
+  // Then try token-based auth (primary for OAuth)
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    
+    if (global.authTokens && global.authTokens.has(token)) {
+      const tokenData = global.authTokens.get(token);
+      if (tokenData.expiresAt > Date.now()) {
+        console.log(`[AUTH] Valid token found: ${token} -> ${tokenData.userId}`);
+        return tokenData.userId;
+      } else {
+        console.log(`[AUTH] Token expired: ${token}`);
+        global.authTokens.delete(token);
+      }
+    }
+  }
+  
+  // Try URL query parameter as fallback
+  const req_any = req as any;
+  const token = req_any.query?.token;
+  if (token && global.authTokens && global.authTokens.has(token)) {
+    const tokenData = global.authTokens.get(token);
+    if (tokenData.expiresAt > Date.now()) {
+      console.log(`[AUTH] Valid URL token found: ${token} -> ${tokenData.userId}`);
+      return tokenData.userId;
+    }
+  }
+  
+  return null;
 }
 
 // Admin middleware - checks if user is admin
