@@ -24,7 +24,8 @@ const PgSession = ConnectPgSimple(session);
 const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
 const isReplotDeployment = !!process.env.REPLIT_DOMAINS;
 
-app.use(session({
+// Session middleware with forced cookie transmission
+const sessionMiddleware = session({
   store: new PgSession({
     conString: process.env.DATABASE_URL,
     tableName: 'sessions',
@@ -32,18 +33,20 @@ app.use(session({
     ttl: 7 * 24 * 60 * 60 // 7 days in seconds
   }),
   secret: process.env.SESSION_SECRET || 'fallback-secret-for-development-only',
-  resave: false,
-  saveUninitialized: false,
-  rolling: true, // Extend session on activity
+  resave: true, // Force session save to ensure cookie is set
+  saveUninitialized: true, // Create session even when not modified
+  rolling: true, // Enable rolling to update session on each request
   cookie: {
     secure: isProduction, // HTTPS for production (Replit deployments)
     httpOnly: true, // XSS protection
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-origin in production
-    domain: isReplotDeployment ? '.replit.app' : undefined, // Replit domain only for deployed apps
+    domain: undefined, // Remove domain restriction for testing
   },
   name: 'fitscore.sid'
-}));
+});
+
+app.use(sessionMiddleware);
 
 console.log(`[SESSION] Configuration: Production=${isProduction}, Replit=${isReplotDeployment}, SameSite=${isProduction ? 'none' : 'lax'}, Secure=${isProduction}, Domain=${isReplotDeployment ? '.replit.app' : 'localhost'}`);
 

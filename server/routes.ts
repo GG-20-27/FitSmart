@@ -593,17 +593,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
-      // Set session using WHOOP user ID with explicit session casting
-      const session = req.session as any;
-      session.userId = whoopUserId;
-      
-      console.log(`[WHOOP AUTH] Setting session userId to: ${whoopUserId}`);
-      console.log(`[WHOOP AUTH] Session ID: ${req.sessionID}`);
-      console.log(`[WHOOP AUTH] Session before save:`, JSON.stringify(session, null, 2));
-      
-      // Save session synchronously using Promise to ensure it completes before response
+      // Regenerate session for security and force cookie refresh
       await new Promise<void>((resolve, reject) => {
-        req.session.save((err) => {
+        req.session.regenerate((err) => {
+          if (err) {
+            console.error('[WHOOP AUTH] Session regeneration error:', err);
+            reject(new Error(`Session regeneration failed: ${err.message}`));
+            return;
+          }
+          
+          // Set session using WHOOP user ID after regeneration
+          const session = req.session as any;
+          session.userId = whoopUserId;
+          
+          console.log(`[WHOOP AUTH] Session regenerated and userId set to: ${whoopUserId}`);
+          console.log(`[WHOOP AUTH] New Session ID: ${req.sessionID}`);
+          console.log(`[WHOOP AUTH] Session before save:`, JSON.stringify(session, null, 2));
+          
+          resolve();
+        });
+      });
+      
+      // Save session synchronously and verify database persistence
+      await new Promise<void>((resolve, reject) => {
+        req.session.save(async (err) => {
           if (err) {
             console.error('[WHOOP AUTH] Session save error:', err);
             reject(new Error(`Session save failed: ${err.message}`));
@@ -615,22 +628,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[WHOOP AUTH] Session userId verification:`, (req.session as any).userId);
           console.log(`[WHOOP AUTH] Session ID: ${req.sessionID}`);
           
+          // Verify session was saved to database
+          try {
+            const { Client } = require('pg');
+            const client = new Client({ connectionString: process.env.DATABASE_URL });
+            await client.connect();
+            const result = await client.query('SELECT sess FROM sessions WHERE sid = $1', [req.sessionID]);
+            await client.end();
+            
+            if (result.rows.length > 0) {
+              const savedSession = result.rows[0].sess;
+              console.log(`[WHOOP AUTH] ✅ Session verified in database:`, JSON.stringify(savedSession, null, 2));
+              console.log(`[WHOOP AUTH] ✅ Database userId:`, savedSession.userId);
+            } else {
+              console.error(`[WHOOP AUTH] ❌ Session NOT found in database with ID: ${req.sessionID}`);
+            }
+          } catch (dbError) {
+            console.error(`[WHOOP AUTH] Database verification error:`, dbError);
+          }
+          
           resolve();
         });
       });
       
-      // Set explicit cookie to ensure it persists across domain - match session middleware settings
-      res.cookie('fitscore.sid', req.sessionID, {
-        domain: '.replit.app',
-        secure: true,
-        httpOnly: true,
-        sameSite: 'none',
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-        path: '/'
-      });
+      // Manually set cookie with proper express-session format for OAuth callback
+      const cookieSignature = require('cookie-signature');
+      const secret = process.env.SESSION_SECRET || 'fallback-secret-for-development-only';
+      const signedSessionId = cookieSignature.sign(req.sessionID, secret);
       
-      console.log(`[WHOOP AUTH] Explicit cookie set: fitscore.sid=${req.sessionID} with domain=.replit.app`);
-      console.log(`[WHOOP AUTH] Response headers will include Set-Cookie directive`);
+      const cookieValue = `s:${signedSessionId}`;
+      res.setHeader('Set-Cookie', [
+        `fitscore.sid=${cookieValue}; Domain=.replit.app; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${7 * 24 * 60 * 60}`
+      ]);
+      
+      console.log(`[WHOOP AUTH] Manually set OAuth cookie: fitscore.sid=s:${signedSessionId}`);
+      
+      console.log(`[WHOOP AUTH] Session middleware will handle cookie: fitscore.sid=${req.sessionID}`);
+      console.log(`[WHOOP AUTH] Session cookie domain: .replit.app, secure: true, sameSite: none`);
 
         // Return success page instead of redirect to avoid losing session
         const successHtml = `
@@ -679,8 +713,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       const userData = await response.json();
                       console.log('[WHOOP AUTH] Session test successful:', userData);
                       testDiv.innerHTML = '<p style="color: #10b981;">✅ Session verified - redirecting...</p>';
-                      // Redirect after successful session verification
-                      setTimeout(() => window.location.replace('/dashboard'), 1000);
+                      // Redirect after successful session verification - use location.href for proper navigation
+                      setTimeout(() => window.location.href = '/dashboard', 1500);
                     } else {
                       const errorText = await response.text();
                       console.error('[WHOOP AUTH] Session test failed:', response.status, errorText);
@@ -708,8 +742,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   }
                 }
                 
-                // Wait 2 seconds then test session before redirect
-                setTimeout(testSession, 2000);
+                // Wait 3 seconds to ensure cookie is set, then test session before redirect
+                setTimeout(testSession, 3000);
               </script>
             </body>
           </html>
@@ -907,10 +941,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[TEST SESSION] Session saved successfully for WHOOP user ${whoopUserId}`);
         console.log(`[TEST SESSION] Session after save:`, req.session);
         
+        // Manually set cookie with proper express-session format
+        const cookieSignature = require('cookie-signature');
+        const secret = process.env.SESSION_SECRET || 'fallback-secret-for-development-only';
+        const signedSessionId = cookieSignature.sign(req.sessionID, secret);
+        
+        const cookieValue = `s:${signedSessionId}`;
+        res.setHeader('Set-Cookie', [
+          `fitscore.sid=${cookieValue}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${7 * 24 * 60 * 60}`
+        ]);
+        
+        console.log(`[TEST SESSION] Manually set cookie: fitscore.sid=s:${signedSessionId}`);
+        
         res.json({ 
           message: 'Test session created successfully',
           userId: whoopUserId,
-          sessionId: req.sessionID
+          sessionId: req.sessionID,
+          cookieSet: true
         });
       });
       
