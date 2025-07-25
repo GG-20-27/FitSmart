@@ -519,15 +519,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Insert or update user in database with detailed logging
       console.log(`[WHOOP AUTH] Attempting to upsert user:`, userData);
       try {
-        await db.insert(users).values(userData).onConflictDoUpdate({
-          target: users.id,
-          set: {
+        // Check if user exists first
+        const existingUser = await db.select().from(users).where(eq(users.id, whoopUserId)).limit(1);
+        if (existingUser.length === 0) {
+          // User doesn't exist, create new one
+          await db.insert(users).values(userData);
+          console.log(`[WHOOP AUTH] New user created in database: ${whoopUserId}`);
+        } else {
+          // User exists, update their information
+          await db.update(users).set({
             email: userData.email,
             whoopUserId: userData.whoopUserId,
             updatedAt: new Date()
-          }
-        });
-        console.log(`[WHOOP AUTH] User upserted successfully in database: ${whoopUserId}`);
+          }).where(eq(users.id, whoopUserId));
+          console.log(`[WHOOP AUTH] Existing user updated in database: ${whoopUserId}`);
+        }
       } catch (userError) {
         console.error(`[WHOOP AUTH] User upsert failed:`, userError);
         throw new Error(`Failed to create user: ${userError.message}`);
@@ -557,9 +563,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         throw new Error(`Failed to store token: ${tokenError.message}`);
       }
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
-      
-      // Create user in database  
-      await userService.createUser(`${whoopUserId}@fitscore.local`, whoopUserId);
       
       // Generate JWT token for authentication
       const { generateJWT } = await import('./jwtAuth');
@@ -1113,16 +1116,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const testUserId = 'whoop_88888888';
       
-      // Simulate token storage
+      // Create user in database FIRST (before token) with conflict handling
+      const userEmail = `${testUserId}@fitscore.local`;
+      const userData = {
+        id: testUserId,
+        email: userEmail,
+        whoopUserId: testUserId.replace('whoop_', '')
+      };
+      
+      console.log(`[TEST] Attempting to upsert user:`, userData);
+      try {
+        // Check if user exists first
+        const existingUser = await db.select().from(users).where(eq(users.id, testUserId)).limit(1);
+        if (existingUser.length === 0) {
+          // User doesn't exist, create new one
+          await db.insert(users).values(userData);
+          console.log(`[TEST] New user created in database: ${testUserId}`);
+        } else {
+          console.log(`[TEST] User already exists in database: ${testUserId}`);
+        }
+      } catch (userError) {
+        console.error(`[TEST] User upsert failed:`, userError);
+        // Continue execution even if user creation fails (user might already exist)
+      }
+      
+      // Then simulate token storage (after user exists)
       await whoopTokenStorage.setToken(testUserId, {
         access_token: 'test_access_token',
         refresh_token: 'test_refresh_token', 
         expires_at: Math.floor(Date.now() / 1000) + 3600,
         user_id: testUserId
       });
-      
-      // Create user in database
-      await userService.createUser(`${testUserId}@fitscore.local`, testUserId);
       
       // Generate JWT token for authentication
       const { generateJWT } = await import('./jwtAuth');

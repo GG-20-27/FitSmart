@@ -119,6 +119,15 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes
+- January 25, 2025: **CRITICAL FIX: WHOOP OAuth Duplicate Key Violation COMPLETELY RESOLVED**
+  - ✅ **ROOT CAUSE IDENTIFIED**: WHOOP OAuth callback created duplicate key violations when same user logged in multiple times
+  - ✅ **DATABASE CONSTRAINT FIX**: Replaced failing `onConflictDoUpdate()` with reliable SELECT-then-INSERT pattern
+  - ✅ **FOREIGN KEY COMPLIANCE**: User creation now happens BEFORE token storage to satisfy database relationships
+  - ✅ **REPEAT LOGIN SUPPORT**: Same WHOOP account can authenticate multiple times without database errors
+  - ✅ **COMPREHENSIVE TESTING**: Both test callback and real OAuth callback handle duplicate users correctly
+  - ✅ **JWT AUTHENTICATION PRESERVED**: Token generation and verification continue working seamlessly
+  - ✅ **PRODUCTION READY**: WHOOP OAuth handles multiple logins gracefully with proper user management
+  - **DEPLOYMENT STATUS**: Duplicate key violations eliminated, OAuth authentication fully operational
 - January 25, 2025: **CRITICAL FIX: JWT Authentication System Fully Operational**
   - ✅ **ROOT CAUSE IDENTIFIED**: Undefined `authToken` variable in WHOOP OAuth callback template string
   - ✅ **CALLBACK ROUTE RESTRUCTURED**: Removed complex success page template and simplified JWT generation flow
