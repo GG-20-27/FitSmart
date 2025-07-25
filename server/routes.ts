@@ -558,118 +558,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
-      // REMOVED SESSION REGENERATION - Now using JWT authentication
-      
-      // OAuth callback completed successfully - JWT token already generated and redirected above
-      
-      // OLD SUCCESS PAGE CODE (keeping as backup)
-      const successHtml = `
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>WHOOP Authentication Successful</title>
-              <style>
-                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; padding: 40px; background: #0f172a; color: white; text-align: center; }
-                .success { background: #059669; padding: 20px; border-radius: 8px; margin: 20px 0; }
-                .redirect-info { background: #1e293b; padding: 15px; border-radius: 8px; margin: 20px 0; }
-              </style>
-            </head>
-            <body>
-              <div class="success">
-                <h1>✅ WHOOP Authentication Successful!</h1>
-                <p>User ID: ${whoopUserId}</p>
-                <p>Session ID: ${req.sessionID}</p>
-              </div>
-              <div class="redirect-info">
-                <p>Redirecting to dashboard in 3 seconds...</p>
-                <p>Testing session persistence...</p>
-                <div id="session-test"></div>
-              </div>
-              <script>
-                console.log('[WHOOP AUTH] Authentication successful, redirecting to dashboard');
-                console.log('[WHOOP AUTH] Session details:', { userId: '${whoopUserId}', sessionId: '${req.sessionID}' });
-                console.log('[WHOOP AUTH] Document cookies:', document.cookie);
-                
-                // Test session persistence before redirect
-                async function testSession() {
-                  try {
-                    console.log('[WHOOP AUTH] Testing session with fetch request...');
-                    console.log('[WHOOP AUTH] Current document cookies:', document.cookie);
-                    
-                    // Use token-based auth instead of cookies
-                    const urlParams = new URLSearchParams(window.location.search);
-                    const authToken = urlParams.get('token') || '${authToken}';
-                    console.log('[WHOOP AUTH] Using auth token:', authToken);
-                    
-                    const response = await fetch('/api/auth/me', {
-                      credentials: 'include',
-                      headers: { 
-                        'Accept': 'application/json',
-                        'Authorization': 'Bearer ' + authToken,
-                        'Cache-Control': 'no-cache'
-                      }
-                    });
-                    
-                    const testDiv = document.getElementById('session-test');
-                    if (response.ok) {
-                      const userData = await response.json();
-                      console.log('[WHOOP AUTH] Session test successful:', userData);
-                      testDiv.innerHTML = '<p style="color: #10b981;">✅ Session verified - redirecting...</p>';
-                      // Redirect after successful session verification - use location.href for proper navigation
-                      setTimeout(() => window.location.href = '/?token=' + authToken, 1500);
-                    } else {
-                      const errorText = await response.text();
-                      console.error('[WHOOP AUTH] Session test failed:', response.status, errorText);
-                      testDiv.innerHTML = \`<p style="color: #ef4444;">❌ Session test failed (\${response.status}) - retrying OAuth...</p>\`;
-                      
-                      // Try debugging the session state
-                      console.log('[WHOOP AUTH] Debugging session state...');
-                      try {
-                        const debugResponse = await fetch('/api/session/debug', {
-                          credentials: 'include',
-                          headers: { 'Accept': 'application/json' }
-                        });
-                        const debugData = await debugResponse.json();
-                        console.log('[WHOOP AUTH] Session debug data:', debugData);
-                        testDiv.innerHTML += \`<br><small>Debug: Session ID \${debugData.sessionId || 'none'}, User ID: \${debugData.userId || 'none'}</small>\`;
-                      } catch (debugError) {
-                        console.error('[WHOOP AUTH] Debug request failed:', debugError);
-                      }
-                      
-                      setTimeout(() => window.location.href = '/api/whoop/login', 3000);
-                    }
-                  } catch (error) {
-                    console.error('[WHOOP AUTH] Session test error:', error);
-                    document.getElementById('session-test').innerHTML = '<p style="color: #ef4444;">❌ Connection error</p>';
-                  }
-                }
-                
-                // Wait 3 seconds to ensure cookie is set, then test session before redirect
-                setTimeout(testSession, 3000);
-              </script>
-            </body>
-          </html>
-        `;
-      
-      // Store token
-      await whoopTokenStorage.setToken(whoopUserId, {
-        access_token: tokenResponse.access_token,
-        refresh_token: tokenResponse.refresh_token,
-        expires_at: Math.floor(Date.now() / 1000) + tokenResponse.expires_in,
-        user_id: whoopUserId
-      });
-      
-      // Store user
+      // Create user in database  
       await userService.createUser(`${whoopUserId}@fitscore.local`, whoopUserId);
       
-      // Generate JWT token
+      // Generate JWT token for authentication
       const { generateJWT } = await import('./jwtAuth');
-      const jwtToken = generateJWT(whoopUserId);
+      const authToken = generateJWT(whoopUserId);
       
       console.log(`[WHOOP AUTH] JWT token generated for user: ${whoopUserId}`);
       
       // Redirect to dashboard with token 
-      res.redirect(`/#token=${jwtToken}`);
+      res.redirect(`/#token=${authToken}`);
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
@@ -1205,6 +1104,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('[TEST] JWT generation error:', error);
       res.status(500).json({ error: 'Failed to generate test JWT token' });
+    }
+  });
+
+  // Test endpoint to simulate WHOOP OAuth callback success
+  console.log('[ROUTE] GET /api/test/whoop-callback');
+  app.get('/api/test/whoop-callback', async (req, res) => {
+    try {
+      const testUserId = 'whoop_88888888';
+      
+      // Simulate token storage
+      await whoopTokenStorage.setToken(testUserId, {
+        access_token: 'test_access_token',
+        refresh_token: 'test_refresh_token', 
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+        user_id: testUserId
+      });
+      
+      // Create user in database
+      await userService.createUser(`${testUserId}@fitscore.local`, testUserId);
+      
+      // Generate JWT token for authentication
+      const { generateJWT } = await import('./jwtAuth');
+      const authToken = generateJWT(testUserId);
+      
+      console.log(`[TEST] JWT token generated for simulated user: ${testUserId}`);
+      
+      // Redirect to dashboard with token like real callback
+      res.redirect(`/#token=${authToken}`);
+      
+    } catch (error) {
+      console.error('[TEST] Simulated callback error:', error);
+      res.status(500).json({ error: 'Test callback failed', details: error.message });
     }
   });
 
