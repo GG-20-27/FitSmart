@@ -11,24 +11,14 @@ export async function apiRequest<T = any>(
   url: string,
   options: RequestInit = {}
 ): Promise<T> {
-  // Try to get auth token from URL params
-  const urlParams = new URLSearchParams(window.location.search);
-  const token = urlParams.get('token');
-  
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...options.headers as Record<string, string>,
-  };
-  
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  
   const res = await fetch(url, {
-    credentials: "include",
+    credentials: "include", // 5. ALWAYS include credentials
     mode: "cors",
     ...options,
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
   });
 
   await throwIfResNotOk(res);
@@ -41,22 +31,12 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    // Try to get auth token from URL params
-    const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
-    
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-    
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    
     const res = await fetch(queryKey[0] as string, {
-      credentials: "include",
+      credentials: "include", // 5. ALWAYS include credentials
       mode: "cors",
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {

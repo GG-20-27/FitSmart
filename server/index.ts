@@ -38,11 +38,11 @@ const sessionMiddleware = session({
   proxy: true, // Trust the reverse proxy
   rolling: true, // Enable rolling to update session on each request
   cookie: {
-    secure: isProduction, // HTTPS for production (Replit deployments)
-    httpOnly: true, // XSS protection
+    secure: true, // ALWAYS secure for production
+    httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-origin in production
-    domain: isReplotDeployment ? '.replit.app' : undefined, // Replit domain for production only
+    sameSite: 'none', // ALWAYS none for cross-origin
+    domain: '.replit.app', // ALWAYS set domain for replit
   },
   name: 'fitscore.sid'
 });

@@ -498,51 +498,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // WHOOP OAuth callback endpoint
-  app.get('/api/whoop/callback', async (req, res) => {
+  // WHOOP OAuth callback endpoint - CLEAN IMPLEMENTATION FOLLOWING CHECKLIST
+  app.get('/api/whoop/callback', async (req, res, next) => {
     try {
-      console.log('WHOOP OAuth callback received');
-      console.log('Query params:', req.query);
-      
+      console.log('[WHOOP AUTH] OAuth callback received');
       const { code, error, state } = req.query;
       
       if (error) {
-        console.error('WHOOP OAuth error received:', error);
-        return res.status(400).json({ 
-          error: 'OAuth authentication failed',
-          details: error 
-        });
+        console.error('[WHOOP AUTH] OAuth error:', error);
+        return res.status(400).json({ error: 'OAuth authentication failed', details: error });
       }
 
       if (!code) {
-        console.error('No authorization code received in callback');
-        return res.status(400).json({ 
-          error: 'No authorization code received',
-          received_params: Object.keys(req.query)
-        });
+        console.error('[WHOOP AUTH] No authorization code received');
+        return res.status(400).json({ error: 'No authorization code received' });
       }
 
-      // Validate state parameter (basic validation - starts with our prefix)
       if (!state || !state.toString().startsWith('whoop_auth_')) {
-        console.error('Invalid or missing state parameter:', state);
-        return res.status(400).json({ 
-          error: 'Invalid state parameter',
-          details: 'OAuth state validation failed'
-        });
+        console.error('[WHOOP AUTH] Invalid state parameter:', state);
+        return res.status(400).json({ error: 'Invalid state parameter' });
       }
 
-      console.log('[WHOOP AUTH] Valid authorization code received, proceeding with token exchange...');
-      console.log('[WHOOP AUTH] Authorization code:', code.toString().substring(0, 20) + '...');
-      
+      console.log('[WHOOP AUTH] Exchanging code for token...');
       const tokenResponse = await whoopApiService.exchangeCodeForToken(code as string);
-      console.log('[WHOOP AUTH] Token exchange successful, access_token length:', tokenResponse.access_token?.length || 'missing');
       
-      // Get user profile to obtain WHOOP user ID
-      console.log('[WHOOP AUTH] Fetching user profile to get WHOOP ID...');
+      console.log('[WHOOP AUTH] Getting user profile...');
       const userProfile = await whoopApiService.getUserProfile(tokenResponse.access_token);
       const whoopUserId = `whoop_${userProfile.user_id}`;
       
-      console.log(`[WHOOP AUTH] WHOOP User ID obtained: ${whoopUserId} (original: ${userProfile.user_id})`);
+      console.log(`[WHOOP AUTH] User authenticated: ${whoopUserId}`);
       console.log(`[WHOOP AUTH] Full user profile:`, JSON.stringify(userProfile, null, 2));
       
       // Create or get user in database
@@ -653,23 +637,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       });
       
-      // RADICAL NEW APPROACH: Skip sessions entirely, use URL-based auth token
-      // Instead of manual tokens, let's try the fundamental fix: set session and redirect immediately
-      console.log(`[WHOOP AUTH] Setting session userId directly and redirecting...`);
+      // 3. OAuth callback with session regeneration as specified
+      console.log(`[WHOOP AUTH] Starting session regeneration for user: ${whoopUserId}`);
       
-      // Set session with user ID
-      (req.session as any).userId = whoopUserId;
-      req.session.save((err) => {
+      req.session.regenerate((err) => {
         if (err) {
-          console.error(`[WHOOP AUTH] Session save error:`, err);
-          return res.status(500).send('Authentication failed - session save error');
+          console.error(`[WHOOP AUTH] Session regeneration error:`, err);
+          return next(err);
         }
         
-        console.log(`[WHOOP AUTH] Session saved successfully. Redirecting to dashboard.`);
-        console.log(`[WHOOP AUTH] Session ID: ${req.sessionID}, User ID: ${whoopUserId}`);
+        // Set userId in regenerated session
+        (req.session as any).userId = whoopUserId;
         
-        // Redirect to dashboard immediately after session save
-        res.redirect('/');
+        // Save session and redirect
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error(`[WHOOP AUTH] Session save error:`, saveErr);
+            return res.status(500).send('Authentication failed - session save error');
+          }
+          
+          console.log(`[WHOOP AUTH] Session regenerated and saved successfully`);
+          console.log(`[WHOOP AUTH] Session ID: ${req.sessionID}, User ID: ${whoopUserId}`);
+          
+          // Redirect to dashboard 
+          res.redirect('/');
+        });
       });
       return;
       
@@ -762,8 +754,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
           </html>
         `;
       
-      // This code is now unreachable due to direct redirect above
-      // res.send(successHtml);
+      // Store token
+      await whoopTokenStorage.setToken(whoopUserId, {
+        access_token: tokenResponse.access_token,
+        refresh_token: tokenResponse.refresh_token,
+        expires_at: Math.floor(Date.now() / 1000) + tokenResponse.expires_in,
+        user_id: whoopUserId
+      });
+      
+      // Store user
+      await userService.createUser(`${whoopUserId}@fitscore.local`, whoopUserId);
+      
+      // 3. OAuth callback with session regeneration as specified
+      req.session.regenerate((err) => {
+        if (err) {
+          console.error('[WHOOP AUTH] Session regeneration error:', err);
+          return next(err);
+        }
+        
+        // Set userId in regenerated session
+        (req.session as any).userId = whoopUserId;
+        
+        // Save session and redirect
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('[WHOOP AUTH] Session save error:', saveErr);
+            return res.status(500).send('Authentication failed - session save error');
+          }
+          
+          console.log(`[WHOOP AUTH] Session regenerated and saved: ${req.sessionID}, User: ${whoopUserId}`);
+          
+          // Redirect to dashboard 
+          res.redirect('/');
+        });
+      });
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
