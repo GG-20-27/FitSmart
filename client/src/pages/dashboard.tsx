@@ -201,23 +201,19 @@ export default function Dashboard() {
   const { user, logout, isLoggingOut } = useAuth();
   const [lastSync, setLastSync] = useState<Date | null>(null);
   
-  const { data: whoopAuthStatus, isLoading: authLoading, error: authError } = useQuery<WhoopAuthStatus>({
-    queryKey: ['/api/whoop/status'],
-    refetchInterval: 30000, // Check auth status every 30 seconds
-  });
-
+  // Since we're using JWT authentication, if user is authenticated, they can access WHOOP data
   const { data: whoopData, isLoading: whoopLoading, refetch: refetchWhoop, error: whoopError } = useQuery<WhoopTodayResponse>({
     queryKey: ['/api/whoop/today'],
-    enabled: whoopAuthStatus?.authenticated === true,
+    enabled: !!user, // Enable if user is JWT authenticated
     retry: (failureCount, error: any) => {
       if (error?.response?.status === 401) {
         // Force refresh auth status when 401 error occurs
-        queryClient.invalidateQueries({ queryKey: ['/api/whoop/status'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
         return false;
       }
       return failureCount < 3;
     },
-    refetchInterval: whoopAuthStatus?.authenticated ? 5 * 60 * 1000 : false, // Auto-refresh every 5 minutes if authenticated
+    refetchInterval: user ? 5 * 60 * 1000 : false, // Auto-refresh every 5 minutes if authenticated
   });
 
   // Set last sync when data changes
@@ -229,37 +225,32 @@ export default function Dashboard() {
 
   const { data: whoopSummary, isLoading: summaryLoading } = useQuery<WhoopSummary>({
     queryKey: ['/api/whoop/weekly'],
-    enabled: whoopAuthStatus?.authenticated === true,
+    enabled: !!user, // Enable if user is JWT authenticated
     retry: 3,
     refetchInterval: 10 * 60 * 1000, // Refresh every 10 minutes
   });
 
-  // Reset OAuth connection mutation
-  const resetAuthMutation = useMutation({
+  // Connect to WHOOP OAuth mutation
+  const connectWhoopMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest('POST', '/api/whoop/reset');
-      return response.json();
+      // Open WHOOP OAuth in new window
+      window.open('/api/whoop/login', '_blank', 'width=600,height=700');
+      return Promise.resolve();
     },
-    onSuccess: (data: any) => {
-      console.log('WHOOP OAuth reset successful');
-      if (data.auth_url) {
-        // Open new OAuth window with fresh scopes
-        window.open(data.auth_url, '_blank', 'width=600,height=700');
-        
-        // Refresh auth status after a delay
-        setTimeout(() => {
-          queryClient.invalidateQueries({ queryKey: ['/api/whoop/status'] });
-        }, 2000);
-      }
+    onSuccess: () => {
+      console.log('WHOOP OAuth window opened');
+      // Refresh user data after a delay to check for new token
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/whoop/today'] });
+      }, 2000);
     },
-    onError: (error) => {
-      console.error('Failed to reset WHOOP OAuth:', error);
-    }
   });
 
-  const isWhoopConnected = whoopAuthStatus?.authenticated;
-  const isLoading = whoopLoading || authLoading;
-  const hasError = whoopError || authError;
+  // For JWT auth, user is connected if they have a valid token and can fetch WHOOP data
+  const isWhoopConnected = !!user && !!whoopData && !whoopError;
+  const isLoading = whoopLoading;
+  const hasError = whoopError;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -362,7 +353,7 @@ export default function Dashboard() {
         </div>
 
         {/* Authentication Status */}
-        {!isWhoopConnected && !authLoading && (
+        {!isWhoopConnected && !isLoading && (
           <div className="max-w-2xl mx-auto mb-6 sm:mb-8">
             <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
               <CardContent className="p-4 sm:p-6 text-center">
@@ -374,11 +365,11 @@ export default function Dashboard() {
                   Connect your WHOOP account to view real-time health metrics and analytics.
                 </p>
                 <Button 
-                  onClick={() => window.open(whoopAuthStatus?.auth_url || '/api/whoop/login', '_blank')}
+                  onClick={() => connectWhoopMutation.mutate()}
                   className="bg-blue-600 hover:bg-blue-700 text-white"
-                  disabled={authLoading}
+                  disabled={connectWhoopMutation.isPending}
                 >
-                  {authLoading ? (
+                  {connectWhoopMutation.isPending ? (
                     <div className="flex items-center space-x-2">
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
                       <span>Connecting...</span>
@@ -407,21 +398,21 @@ export default function Dashboard() {
                   </div>
                   <div className="flex space-x-2">
                     <Button
-                      onClick={() => resetAuthMutation.mutate()}
-                      disabled={resetAuthMutation.isPending}
+                      onClick={() => connectWhoopMutation.mutate()}
+                      disabled={connectWhoopMutation.isPending}
                       variant="outline"
                       size="sm"
                       className="bg-transparent border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white transition-all duration-200"
                     >
-                      {resetAuthMutation.isPending ? (
+                      {connectWhoopMutation.isPending ? (
                         <>
                           <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                          Resetting...
+                          Reconnecting...
                         </>
                       ) : (
                         <>
                           <RotateCcw className="w-4 h-4 mr-2" />
-                          Reset Auth
+                          Reconnect
                         </>
                       )}
                     </Button>
