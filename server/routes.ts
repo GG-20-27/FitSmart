@@ -525,8 +525,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log('Valid authorization code received, proceeding with token exchange...');
+      console.log('[WHOOP AUTH] Valid authorization code received, proceeding with token exchange...');
+      console.log('[WHOOP AUTH] Authorization code:', code.toString().substring(0, 20) + '...');
+      
       const tokenResponse = await whoopApiService.exchangeCodeForToken(code as string);
+      console.log('[WHOOP AUTH] Token exchange successful, access_token length:', tokenResponse.access_token?.length || 'missing');
       
       // Get user profile to obtain WHOOP user ID
       console.log('[WHOOP AUTH] Fetching user profile to get WHOOP ID...');
@@ -534,6 +537,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const whoopUserId = `whoop_${userProfile.user_id}`;
       
       console.log(`[WHOOP AUTH] WHOOP User ID obtained: ${whoopUserId} (original: ${userProfile.user_id})`);
+      console.log(`[WHOOP AUTH] Full user profile:`, JSON.stringify(userProfile, null, 2));
       
       // Create or get user in database
       const userEmail = `${whoopUserId}@fitscore.local`;
@@ -590,7 +594,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       session.userId = whoopUserId;
       
       console.log(`[WHOOP AUTH] Setting session userId to: ${whoopUserId}`);
-      console.log(`[WHOOP AUTH] Session before save:`, session);
+      console.log(`[WHOOP AUTH] Session ID: ${req.sessionID}`);
+      console.log(`[WHOOP AUTH] Session before save:`, JSON.stringify(session, null, 2));
       
       // Save session before redirect
       req.session.save((err) => {
@@ -600,22 +605,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         
         console.log(`[WHOOP AUTH] Session saved successfully for WHOOP user ${whoopUserId}`);
-        console.log(`[WHOOP AUTH] Session after save:`, req.session);
+        console.log(`[WHOOP AUTH] Session after save:`, JSON.stringify(req.session, null, 2));
         console.log(`[WHOOP AUTH] Session userId verification:`, (req.session as any).userId);
+        console.log(`[WHOOP AUTH] Set-Cookie header should include: fitscore.sid=${req.sessionID}; Secure; SameSite=None`);
 
-        // Redirect to root path after successful authentication (dashboard will be shown for authenticated users)
-        res.redirect('/');
+        // Return success page instead of redirect to avoid losing session
+        const successHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>WHOOP Authentication Successful</title>
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; padding: 40px; background: #0f172a; color: white; text-align: center; }
+                .success { background: #059669; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                .redirect-info { background: #1e293b; padding: 15px; border-radius: 8px; margin: 20px 0; }
+              </style>
+            </head>
+            <body>
+              <div class="success">
+                <h1>✅ WHOOP Authentication Successful!</h1>
+                <p>User ID: ${whoopUserId}</p>
+                <p>Session ID: ${req.sessionID}</p>
+              </div>
+              <div class="redirect-info">
+                <p>Redirecting to dashboard in 2 seconds...</p>
+              </div>
+              <script>
+                console.log('[WHOOP AUTH] Authentication successful, redirecting to dashboard');
+                console.log('[WHOOP AUTH] Session details:', { userId: '${whoopUserId}', sessionId: '${req.sessionID}' });
+                
+                // Wait 2 seconds then redirect to allow session to fully persist
+                setTimeout(() => {
+                  window.location.href = '/';
+                }, 2000);
+              </script>
+            </body>
+          </html>
+        `;
+        
+        res.send(successHtml);
       });
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
       
       // Check if it's a token exchange error (common with expired/used auth codes)
-      if (error.message?.includes('invalid_grant') || error.message?.includes('HTTP 400')) {
-        console.log('[WHOOP AUTH] Authorization code expired or already used - redirecting to retry');
+      if (error.message?.includes('invalid_grant') || error.message?.includes('HTTP 400') || error.message?.includes('request_forbidden')) {
+        console.log('[WHOOP AUTH] OAuth error detected:', error.message);
+        console.log('[WHOOP AUTH] This usually means the authorization code was expired, used, or invalid');
+        console.log('[WHOOP AUTH] Redirecting user to retry OAuth flow with fresh authorization code');
         
-        // Redirect back to OAuth login for a fresh authorization code
-        return res.redirect('/api/whoop/login');
+        // Return error page with retry option instead of automatic redirect
+        const retryHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>WHOOP Authentication Error</title>
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; padding: 40px; background: #0f172a; color: white; text-align: center; }
+                .error { background: #dc2626; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                .retry-info { background: #1e293b; padding: 15px; border-radius: 8px; margin: 20px 0; }
+                .retry-btn { background: #3b82f6; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
+                .retry-btn:hover { background: #2563eb; }
+              </style>
+            </head>
+            <body>
+              <div class="error">
+                <h1>⚠️ WHOOP Authentication Error</h1>
+                <p>Error: ${error.message}</p>
+                <p>This usually happens when the authorization code expires or is used more than once.</p>
+              </div>
+              <div class="retry-info">
+                <p>Please try authenticating again with a fresh authorization code.</p>
+                <button class="retry-btn" onclick="window.location.href='/api/whoop/login'">
+                  🔄 Retry WHOOP Authentication
+                </button>
+              </div>
+              <script>
+                console.error('[WHOOP AUTH] OAuth error:', '${error.message}');
+              </script>
+            </body>
+          </html>
+        `;
+        
+        return res.status(400).send(retryHtml);
       }
       
       // Return HTML error page for popup

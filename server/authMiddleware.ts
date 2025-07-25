@@ -19,21 +19,27 @@ declare global {
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const userId = req.session?.userId;
   
-  console.log(`[AUTH MIDDLEWARE] Session check: sessionId=${req.sessionID}, userId=${userId}, sessionExists=${!!req.session}, fullSession=`, req.session);
+  console.log(`[AUTH MIDDLEWARE] Session check: sessionId=${req.sessionID}, userId=${userId}, sessionExists=${!!req.session}, path=${req.path}`);
+  console.log(`[AUTH MIDDLEWARE] Full session:`, JSON.stringify(req.session, null, 2));
   
   if (!userId) {
+    console.log(`[AUTH MIDDLEWARE] No userId in session, authentication required`);
+    
     // For API requests, return JSON error
     if (req.path.startsWith('/api/')) {
       return res.status(401).json({ 
         error: 'Authentication required',
-        message: 'Please authenticate with WHOOP to access this resource'
+        message: 'Please authenticate with WHOOP to access this resource',
+        redirect_url: '/api/whoop/login'
       });
     }
     
     // For page requests, redirect to WHOOP OAuth
+    console.log(`[AUTH MIDDLEWARE] Redirecting page request to WHOOP OAuth login`);
     return res.redirect('/api/whoop/login');
   }
   
+  console.log(`[AUTH MIDDLEWARE] Authentication successful for user: ${userId}`);
   next();
 }
 

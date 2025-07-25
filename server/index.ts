@@ -20,9 +20,9 @@ app.set('trust proxy', 1);
 // Session configuration with PostgreSQL store
 const PgSession = ConnectPgSimple(session);
 
-// Configure session middleware with proper domain handling  
-const isDeployedApp = !!process.env.REPLIT_DOMAINS && process.env.NODE_ENV === 'production';
-const isHTTPS = isDeployedApp; // True for Replit deployment, false for local development
+// Production environment detection for WHOOP OAuth
+const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
+const isReplotDeployment = !!process.env.REPLIT_DOMAINS;
 
 app.use(session({
   store: new PgSession({
@@ -35,16 +35,16 @@ app.use(session({
   saveUninitialized: false,
   rolling: true, // Extend session on activity
   cookie: {
-    secure: isHTTPS, // HTTPS for deployed environments, HTTP for development
+    secure: isProduction, // HTTPS for production (Replit deployments)
     httpOnly: true, // XSS protection
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: isHTTPS ? 'none' : 'lax', // 'none' for cross-origin deployed apps, 'lax' for local
-    domain: isDeployedApp ? '.replit.app' : undefined, // Replit domain for deployed apps
+    sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-origin in production
+    domain: isReplotDeployment ? '.replit.app' : undefined, // Replit domain only for deployed apps
   },
   name: 'fitscore.sid'
 }));
 
-console.log(`[SESSION] Configuration: HTTPS=${isHTTPS}, Deployed=${isDeployedApp}, SameSite=${isHTTPS ? 'none' : 'lax'}, Secure=${isHTTPS}, Domain=${isDeployedApp ? '.replit.app' : 'localhost'}`);
+console.log(`[SESSION] Configuration: Production=${isProduction}, Replit=${isReplotDeployment}, SameSite=${isProduction ? 'none' : 'lax'}, Secure=${isProduction}, Domain=${isReplotDeployment ? '.replit.app' : 'localhost'}`);
 
 // Background token refresh service
 function startTokenRefreshService() {

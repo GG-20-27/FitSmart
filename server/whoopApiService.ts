@@ -157,7 +157,12 @@ export class WhoopApiService {
   async exchangeCodeForToken(code: string): Promise<any> {
     const clientId = process.env.WHOOP_CLIENT_ID;
     const clientSecret = process.env.WHOOP_CLIENT_SECRET;
-    const redirectUri = 'https://health-data-hub.replit.app/api/whoop/callback';
+    
+    // Use production URL for deployed app, localhost for development  
+    const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
+    const redirectUri = isProduction 
+      ? 'https://health-data-hub.replit.app/api/whoop/callback'
+      : 'http://localhost:5000/api/whoop/callback';
 
     if (!clientId || !clientSecret) {
       throw new Error('Missing WHOOP client credentials');
@@ -189,10 +194,22 @@ export class WhoopApiService {
       });
 
       const responseText = await response.text();
-      console.log('WHOOP response status:', response.status);
+      console.log('[WHOOP OAUTH] Response status:', response.status);
+      console.log('[WHOOP OAUTH] Raw response body:', responseText);
+      console.log('[WHOOP OAUTH] Request data sent:', JSON.stringify(requestData, null, 2));
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${responseText}`);
+        // Parse error response for detailed debugging
+        let errorDetails = responseText;
+        try {
+          const errorData = JSON.parse(responseText);
+          errorDetails = JSON.stringify(errorData, null, 2);
+          console.error('[WHOOP OAUTH] Detailed error response:', errorData);
+        } catch (parseError) {
+          console.error('[WHOOP OAUTH] Could not parse error response as JSON');
+        }
+        
+        throw new Error(`HTTP ${response.status}: ${errorDetails}`);
       }
 
       const data = JSON.parse(responseText);
@@ -754,19 +771,34 @@ export class WhoopApiService {
 
   getOAuthUrl(): string {
     const clientId = process.env.WHOOP_CLIENT_ID;
-    const redirectUri = 'https://health-data-hub.replit.app/api/whoop/callback';
+    if (!clientId) {
+      throw new Error('WHOOP_CLIENT_ID not configured');
+    }
+
+    // Use production URL for deployed app, localhost for development
+    const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
+    const redirectUri = isProduction 
+      ? 'https://health-data-hub.replit.app/api/whoop/callback'
+      : 'http://localhost:5000/api/whoop/callback';
+
     const scope = 'read:cycles read:recovery read:sleep read:profile read:workout read:body_measurement offline';
     const state = 'whoop_auth_' + Date.now();
     
+    console.log('[OAUTH] Environment: Production=' + isProduction);
+    console.log('[OAUTH] Redirect URI:', redirectUri);
+    console.log('[OAUTH] Client ID:', clientId);
     console.log('[OAUTH] Requesting scopes:', scope);
     console.log('[OAUTH] Including offline scope for refresh token capability');
     
-    return `${WHOOP_OAUTH_BASE}/oauth2/auth?` +
+    const oauthUrl = `${WHOOP_OAUTH_BASE}/oauth2/auth?` +
       `client_id=${clientId}&` +
       `redirect_uri=${encodeURIComponent(redirectUri)}&` +
       `scope=${encodeURIComponent(scope)}&` +
       `state=${state}&` +
       `response_type=code`;
+      
+    console.log('[OAUTH] Generated OAuth URL:', oauthUrl);
+    return oauthUrl;
   }
 }
 
