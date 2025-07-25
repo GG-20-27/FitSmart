@@ -207,9 +207,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const whoopUserId = getCurrentUserId(req);
       console.log(`[AUTH ME] Checking authentication for session: ${req.sessionID}, userId: ${whoopUserId}`);
+      console.log(`[AUTH ME] Full session object:`, JSON.stringify(req.session, null, 2));
+      console.log(`[AUTH ME] Session userId property:`, (req.session as any)?.userId);
+      console.log(`[AUTH ME] Session exists:`, !!req.session);
+      console.log(`[AUTH ME] Session keys:`, req.session ? Object.keys(req.session) : 'no session');
       
       if (!whoopUserId) {
-        console.log(`[AUTH ME] No userId found in session`);
+        console.log(`[AUTH ME] No userId found in session - authentication required`);
         return res.status(401).json({ 
           error: 'Authentication required',
           message: 'Please authenticate with WHOOP to access this resource'
@@ -608,6 +612,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[WHOOP AUTH] Session after save:`, JSON.stringify(req.session, null, 2));
         console.log(`[WHOOP AUTH] Session userId verification:`, (req.session as any).userId);
         console.log(`[WHOOP AUTH] Set-Cookie header should include: fitscore.sid=${req.sessionID}; Secure; SameSite=None`);
+        
+        // Set explicit cookie to ensure it persists across domain - match session middleware settings
+        res.cookie('fitscore.sid', req.sessionID, {
+          domain: '.replit.app',
+          secure: true,
+          httpOnly: true,
+          sameSite: 'none',
+          maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+          path: '/'
+        });
+        
+        console.log(`[WHOOP AUTH] Explicit cookie set: fitscore.sid=${req.sessionID} with domain=.replit.app`);
+        console.log(`[WHOOP AUTH] Response headers will include Set-Cookie directive`);
 
         // Return success page instead of redirect to avoid losing session
         const successHtml = `
@@ -628,16 +645,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 <p>Session ID: ${req.sessionID}</p>
               </div>
               <div class="redirect-info">
-                <p>Redirecting to dashboard in 2 seconds...</p>
+                <p>Redirecting to dashboard in 3 seconds...</p>
+                <p>Testing session persistence...</p>
+                <div id="session-test"></div>
               </div>
               <script>
                 console.log('[WHOOP AUTH] Authentication successful, redirecting to dashboard');
                 console.log('[WHOOP AUTH] Session details:', { userId: '${whoopUserId}', sessionId: '${req.sessionID}' });
+                console.log('[WHOOP AUTH] Document cookies:', document.cookie);
                 
-                // Wait 2 seconds then redirect to allow session to fully persist
-                setTimeout(() => {
-                  window.location.href = '/';
-                }, 2000);
+                // Test session persistence before redirect
+                async function testSession() {
+                  try {
+                    console.log('[WHOOP AUTH] Testing session with fetch request...');
+                    console.log('[WHOOP AUTH] Current document cookies:', document.cookie);
+                    
+                    const response = await fetch('/api/auth/me', {
+                      credentials: 'include',
+                      headers: { 
+                        'Accept': 'application/json',
+                        'Cache-Control': 'no-cache'
+                      }
+                    });
+                    
+                    const testDiv = document.getElementById('session-test');
+                    if (response.ok) {
+                      const userData = await response.json();
+                      console.log('[WHOOP AUTH] Session test successful:', userData);
+                      testDiv.innerHTML = '<p style="color: #10b981;">✅ Session verified - redirecting...</p>';
+                      // Redirect after successful session verification
+                      setTimeout(() => window.location.replace('/dashboard'), 1000);
+                    } else {
+                      const errorText = await response.text();
+                      console.error('[WHOOP AUTH] Session test failed:', response.status, errorText);
+                      testDiv.innerHTML = \`<p style="color: #ef4444;">❌ Session test failed (\${response.status}) - retrying OAuth...</p>\`;
+                      
+                      // Try debugging the session state
+                      console.log('[WHOOP AUTH] Debugging session state...');
+                      try {
+                        const debugResponse = await fetch('/api/session/debug', {
+                          credentials: 'include',
+                          headers: { 'Accept': 'application/json' }
+                        });
+                        const debugData = await debugResponse.json();
+                        console.log('[WHOOP AUTH] Session debug data:', debugData);
+                      } catch (debugError) {
+                        console.error('[WHOOP AUTH] Debug request failed:', debugError);
+                      }
+                      
+                      setTimeout(() => window.location.href = '/api/whoop/login', 3000);
+                    }
+                  } catch (error) {
+                    console.error('[WHOOP AUTH] Session test error:', error);
+                    document.getElementById('session-test').innerHTML = '<p style="color: #ef4444;">❌ Connection error</p>';
+                  }
+                }
+                
+                // Wait 2 seconds then test session before redirect
+                setTimeout(testSession, 2000);
               </script>
             </body>
           </html>
@@ -846,6 +911,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error('Error creating test session:', error);
       res.status(500).json({ error: 'Failed to create test session' });
     }
+  });
+
+  // Session debugging endpoint
+  console.log('[ROUTE] GET /api/session/debug');
+  app.get('/api/session/debug', (req, res) => {
+    res.json({
+      sessionId: req.sessionID,
+      session: req.session,
+      userId: getCurrentUserId(req),
+      cookies: req.headers.cookie,
+      headers: {
+        'user-agent': req.headers['user-agent'],
+        'referer': req.headers.referer,
+        'host': req.headers.host
+      }
+    });
   });
 
   // Test endpoint to manually set a WHOOP token for debugging
