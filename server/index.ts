@@ -33,8 +33,9 @@ const sessionMiddleware = session({
     ttl: 7 * 24 * 60 * 60 // 7 days in seconds
   }),
   secret: process.env.SESSION_SECRET || 'fallback-secret-for-development-only',
-  resave: true, // Force session save to ensure cookie is set
-  saveUninitialized: true, // Create session even when not modified
+  resave: false, // Don't save session if unmodified 
+  saveUninitialized: false, // Don't create session until something stored
+  proxy: true, // Trust the reverse proxy
   rolling: true, // Enable rolling to update session on each request
   cookie: {
     secure: isProduction, // HTTPS for production (Replit deployments)

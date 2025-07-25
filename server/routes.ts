@@ -651,33 +651,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       });
       
-      // Force session regeneration to ensure cookie is sent for OAuth callback
-      req.session.regenerate((err) => {
-        if (err) {
-          console.error('[WHOOP AUTH] Session regeneration failed:', err);
-          return res.status(500).send('Session creation failed');
-        }
-        
-        // Set userId again after regeneration
-        (req.session as any).userId = whoopUserId;
-        
-        // Save session to ensure cookie is sent
-        req.session.save((saveErr) => {
-          if (saveErr) {
-            console.error('[WHOOP AUTH] Session save after regeneration failed:', saveErr);
-            return res.status(500).send('Session save failed');
+      // Set userId directly and force session modification
+      (req.session as any).userId = whoopUserId;
+      
+      // Force session to be marked as modified and saved 
+      req.session.touch();
+      (req.session as any).modified = true;
+      
+      // Save session synchronously and manually set cookie header
+      await new Promise<void>((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) {
+            console.error('[WHOOP AUTH] Session save failed:', err);
+            reject(err);
+          } else {
+            console.log(`[WHOOP AUTH] Session saved successfully - ID: ${req.sessionID}, UserID: ${whoopUserId}`);
+            
+            // Manually set the Set-Cookie header to ensure transmission
+            const cookieName = 'fitscore.sid';
+            const cookieValue = req.sessionID;
+            const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
+            const isReplotDeployment = !!process.env.REPLIT_DOMAINS;
+            
+            let cookieHeader = `${cookieName}=${cookieValue}; Path=/; HttpOnly; Max-Age=${7 * 24 * 60 * 60}`;
+            
+            if (isProduction) {
+              cookieHeader += '; Secure; SameSite=None';
+            } else {
+              cookieHeader += '; SameSite=Lax';
+            }
+            
+            if (isReplotDeployment) {
+              cookieHeader += '; Domain=.replit.app';
+            }
+            
+            res.setHeader('Set-Cookie', cookieHeader);
+            console.log(`[WHOOP AUTH] Manually set Set-Cookie header: ${cookieHeader}`);
+            
+            resolve();
           }
-          
-          console.log(`[WHOOP AUTH] Session regenerated - ID: ${req.sessionID}, UserID: ${whoopUserId}`);
-          
-          // Now send the success page
-          sendOAuthSuccessPage();
         });
       });
       
-      function sendOAuthSuccessPage() {
-      
-      // Return success page inside the regenerate callback
+      // Now send the success page
+
         const successHtml = `
           <!DOCTYPE html>
           <html>
@@ -725,7 +742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                       console.log('[WHOOP AUTH] Session test successful:', userData);
                       testDiv.innerHTML = '<p style="color: #10b981;">✅ Session verified - redirecting...</p>';
                       // Redirect after successful session verification - use location.href for proper navigation
-                      setTimeout(() => window.location.href = '/dashboard', 1500);
+                      setTimeout(() => window.location.href = '/', 1500);
                     } else {
                       const errorText = await response.text();
                       console.error('[WHOOP AUTH] Session test failed:', response.status, errorText);
@@ -762,7 +779,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Send success page with session verification
       res.send(successHtml);
-      } // End of sendOAuthSuccessPage function
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
@@ -953,35 +969,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[TEST SESSION] Session saved successfully for WHOOP user ${whoopUserId}`);
         console.log(`[TEST SESSION] Session after save:`, req.session);
         
-        // Force session regeneration to ensure new cookie is sent
-        req.session.regenerate((err) => {
-          if (err) {
-            console.error('[TEST SESSION] Session regeneration failed:', err);
-            return res.status(500).json({ error: 'Session creation failed' });
+        // Force session modification and save
+        req.session.touch();
+        (req.session as any).modified = true;
+        
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('[TEST SESSION] Session save failed:', saveErr);
+            return res.status(500).json({ error: 'Session save failed' });
           }
           
-          // Set userId again after regeneration
-          (req.session as any).userId = whoopUserId;
+          // Manually set the Set-Cookie header for testing
+          const cookieName = 'fitscore.sid';
+          const cookieValue = req.sessionID;
+          const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
+          const isReplotDeployment = !!process.env.REPLIT_DOMAINS;
           
-          // Save session with callback to ensure completion
-          req.session.save((saveErr) => {
-            if (saveErr) {
-              console.error('[TEST SESSION] Session save after regeneration failed:', saveErr);
-              return res.status(500).json({ error: 'Session save failed' });
-            }
-            
-            console.log(`[TEST SESSION] Session regenerated and saved with new cookie transmission`);
-            
-            res.json({ 
-              message: 'Test session created successfully',
-              userId: whoopUserId,
-              sessionId: req.sessionID,
-              cookieSet: true
-            });
+          let cookieHeader = `${cookieName}=${cookieValue}; Path=/; HttpOnly; Max-Age=${7 * 24 * 60 * 60}`;
+          
+          if (isProduction) {
+            cookieHeader += '; Secure; SameSite=None';
+          } else {
+            cookieHeader += '; SameSite=Lax';
+          }
+          
+          if (isReplotDeployment) {
+            cookieHeader += '; Domain=.replit.app';
+          }
+          
+          res.setHeader('Set-Cookie', cookieHeader);
+          console.log(`[TEST SESSION] Manually set Set-Cookie header: ${cookieHeader}`);
+          console.log(`[TEST SESSION] Session saved successfully with cookie transmission`);
+          
+          res.json({ 
+            message: 'Test session created successfully',
+            userId: whoopUserId,
+            sessionId: req.sessionID,
+            cookieSet: true
           });
         });
-        
-        // This line is handled in the regenerate callback above
+
       });
       
     } catch (error) {
