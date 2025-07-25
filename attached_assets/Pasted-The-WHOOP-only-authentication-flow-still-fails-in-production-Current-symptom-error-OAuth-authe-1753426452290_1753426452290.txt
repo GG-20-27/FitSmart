@@ -1,0 +1,44 @@
+The WHOOP-only authentication flow still fails in production.
+Current symptom: {"error":"OAuth authentication failed","details":"request_forbidden"}, and after “login successful” the app reloads to / login again.
+Please audit and fix every step of the OAuth pipeline — do not mark it resolved until you have verified a complete end-to-end login in a private browser window.
+
+Checklist to verify & repair
+
+WHOOP App settings
+• client_id, client_secret, and exact redirect_uri must match the values registered in the WHOOP developer portal.
+• Ensure the redirect URL uses https://health-data-hub.replit.app/api/whoop/callback (no localhost).
+
+OAuth “invalid_grant / request_forbidden” fix
+• Add detailed logging around the code-exchange step to print the raw WHOOP error body.
+• Confirm the code_verifier / PKCE flow (or client_secret) is sent exactly once; if the same code is reused it must trigger a fresh /login redirect, not a 400.
+
+Session creation
+• After a successful token exchange, immediately call WHOOP /users/profile and save whoopUserId in req.session.userId; then req.session.save().
+• Verify with console.log('[SESSION]', req.session) that userId persists and cookie is being set.
+
+Cookie & CORS
+• app.set('trust proxy', 1) is present.
+• Cookie options in production: { secure: true, sameSite: 'none', domain: '.replit.app' }.
+• Front-end fetches must include credentials:'include'.
+
+Database writes
+• Tokens stored under keys prefixed with the WHOOP ID (e.g., whoop_token_whoop_25283528).
+• Any FK constraints reference TEXT user IDs, not UUID.
+
+Dashboard guard
+• requireAuth middleware should redirect unauthenticated users to /api/whoop/login.
+• Authenticated users must land on /dashboard without manual refresh.
+
+Full end-to-end test
+• Open two incognito windows, log in with two different WHOOP accounts, confirm:
+– Each receives a cookie + session.userId.
+– Each sees only their own data on /dashboard.
+• Repeat after clearing cookies to ensure no redirect loop remains.
+
+Success criteria for “Done” reply
+• Browser dev-tools show Set-Cookie: fitscore.sid=…; Secure; SameSite=None.
+• GET /api/auth/me returns { userId: "whoop_xxx" }.
+• Dashboard loads once after OAuth; no further login prompts.
+• No “request_forbidden” or “invalid_grant” errors in logs during normal flow.
+
+Apply fixes, redeploy, and only respond “✅ WHOOP OAuth fixed and tested” once the above checklist passes in the deployed app.
