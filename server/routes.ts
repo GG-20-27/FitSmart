@@ -651,22 +651,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       });
       
-      // Manually set cookie with proper express-session format for OAuth callback
-      const cookieSignature = require('cookie-signature');
-      const secret = process.env.SESSION_SECRET || 'fallback-secret-for-development-only';
-      const signedSessionId = cookieSignature.sign(req.sessionID, secret);
+      // Force session regeneration to ensure cookie is sent for OAuth callback
+      req.session.regenerate((err) => {
+        if (err) {
+          console.error('[WHOOP AUTH] Session regeneration failed:', err);
+          return res.status(500).send('Session creation failed');
+        }
+        
+        // Set userId again after regeneration
+        (req.session as any).userId = whoopUserId;
+        
+        // Save session to ensure cookie is sent
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('[WHOOP AUTH] Session save after regeneration failed:', saveErr);
+            return res.status(500).send('Session save failed');
+          }
+          
+          console.log(`[WHOOP AUTH] Session regenerated - ID: ${req.sessionID}, UserID: ${whoopUserId}`);
+          
+          // Now send the success page
+          sendOAuthSuccessPage();
+        });
+      });
       
-      const cookieValue = `s:${signedSessionId}`;
-      res.setHeader('Set-Cookie', [
-        `fitscore.sid=${cookieValue}; Domain=.replit.app; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${7 * 24 * 60 * 60}`
-      ]);
+      function sendOAuthSuccessPage() {
       
-      console.log(`[WHOOP AUTH] Manually set OAuth cookie: fitscore.sid=s:${signedSessionId}`);
-      
-      console.log(`[WHOOP AUTH] Session middleware will handle cookie: fitscore.sid=${req.sessionID}`);
-      console.log(`[WHOOP AUTH] Session cookie domain: .replit.app, secure: true, sameSite: none`);
-
-        // Return success page instead of redirect to avoid losing session
+      // Return success page inside the regenerate callback
         const successHtml = `
           <!DOCTYPE html>
           <html>
@@ -751,6 +762,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Send success page with session verification
       res.send(successHtml);
+      } // End of sendOAuthSuccessPage function
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
@@ -941,24 +953,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[TEST SESSION] Session saved successfully for WHOOP user ${whoopUserId}`);
         console.log(`[TEST SESSION] Session after save:`, req.session);
         
-        // Manually set cookie with proper express-session format
-        const cookieSignature = require('cookie-signature');
-        const secret = process.env.SESSION_SECRET || 'fallback-secret-for-development-only';
-        const signedSessionId = cookieSignature.sign(req.sessionID, secret);
-        
-        const cookieValue = `s:${signedSessionId}`;
-        res.setHeader('Set-Cookie', [
-          `fitscore.sid=${cookieValue}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${7 * 24 * 60 * 60}`
-        ]);
-        
-        console.log(`[TEST SESSION] Manually set cookie: fitscore.sid=s:${signedSessionId}`);
-        
-        res.json({ 
-          message: 'Test session created successfully',
-          userId: whoopUserId,
-          sessionId: req.sessionID,
-          cookieSet: true
+        // Force session regeneration to ensure new cookie is sent
+        req.session.regenerate((err) => {
+          if (err) {
+            console.error('[TEST SESSION] Session regeneration failed:', err);
+            return res.status(500).json({ error: 'Session creation failed' });
+          }
+          
+          // Set userId again after regeneration
+          (req.session as any).userId = whoopUserId;
+          
+          // Save session with callback to ensure completion
+          req.session.save((saveErr) => {
+            if (saveErr) {
+              console.error('[TEST SESSION] Session save after regeneration failed:', saveErr);
+              return res.status(500).json({ error: 'Session save failed' });
+            }
+            
+            console.log(`[TEST SESSION] Session regenerated and saved with new cookie transmission`);
+            
+            res.json({ 
+              message: 'Test session created successfully',
+              userId: whoopUserId,
+              sessionId: req.sessionID,
+              cookieSet: true
+            });
+          });
         });
+        
+        // This line is handled in the regenerate callback above
       });
       
     } catch (error) {
@@ -970,16 +993,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Session debugging endpoint
   console.log('[ROUTE] GET /api/session/debug');
   app.get('/api/session/debug', (req, res) => {
+    const userId = getCurrentUserId(req);
     res.json({
       sessionId: req.sessionID,
-      session: req.session,
-      userId: getCurrentUserId(req),
+      userId: userId,
+      sessionExists: !!req.session,
+      sessionKeys: req.session ? Object.keys(req.session) : [],
       cookies: req.headers.cookie,
-      headers: {
-        'user-agent': req.headers['user-agent'],
-        'referer': req.headers.referer,
-        'host': req.headers.host
-      }
+      timestamp: new Date().toISOString()
     });
   });
 

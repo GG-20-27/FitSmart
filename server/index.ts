@@ -41,7 +41,7 @@ const sessionMiddleware = session({
     httpOnly: true, // XSS protection
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     sameSite: isProduction ? 'none' : 'lax', // 'none' for cross-origin in production
-    domain: undefined, // Remove domain restriction for testing
+    domain: isReplotDeployment ? '.replit.app' : undefined, // Replit domain for production only
   },
   name: 'fitscore.sid'
 });
