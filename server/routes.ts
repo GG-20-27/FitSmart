@@ -558,91 +558,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
-      // Regenerate session for security and force cookie refresh
-      await new Promise<void>((resolve, reject) => {
-        req.session.regenerate((err) => {
-          if (err) {
-            console.error('[WHOOP AUTH] Session regeneration error:', err);
-            reject(new Error(`Session regeneration failed: ${err.message}`));
-            return;
-          }
-          
-          // Set session using WHOOP user ID after regeneration
-          const session = req.session as any;
-          session.userId = whoopUserId;
-          
-          console.log(`[WHOOP AUTH] Session regenerated and userId set to: ${whoopUserId}`);
-          console.log(`[WHOOP AUTH] New Session ID: ${req.sessionID}`);
-          console.log(`[WHOOP AUTH] Session before save:`, JSON.stringify(session, null, 2));
-          
-          resolve();
-        });
-      });
+      // REMOVED SESSION REGENERATION - Now using JWT authentication
       
-      // Save session synchronously and verify database persistence
-      await new Promise<void>((resolve, reject) => {
-        req.session.save(async (err) => {
-          if (err) {
-            console.error('[WHOOP AUTH] Session save error:', err);
-            reject(new Error(`Session save failed: ${err.message}`));
-            return;
-          }
-          
-          console.log(`[WHOOP AUTH] Session saved successfully for WHOOP user ${whoopUserId}`);
-          console.log(`[WHOOP AUTH] Session after save:`, JSON.stringify(req.session, null, 2));
-          console.log(`[WHOOP AUTH] Session userId verification:`, (req.session as any).userId);
-          console.log(`[WHOOP AUTH] Session ID: ${req.sessionID}`);
-          
-          // Verify session was saved to database
-          try {
-            const { Client } = require('pg');
-            const client = new Client({ connectionString: process.env.DATABASE_URL });
-            await client.connect();
-            const result = await client.query('SELECT sess FROM sessions WHERE sid = $1', [req.sessionID]);
-            await client.end();
-            
-            if (result.rows.length > 0) {
-              const savedSession = result.rows[0].sess;
-              console.log(`[WHOOP AUTH] ✅ Session verified in database:`, JSON.stringify(savedSession, null, 2));
-              console.log(`[WHOOP AUTH] ✅ Database userId:`, savedSession.userId);
-            } else {
-              console.error(`[WHOOP AUTH] ❌ Session NOT found in database with ID: ${req.sessionID}`);
-            }
-          } catch (dbError) {
-            console.error(`[WHOOP AUTH] Database verification error:`, dbError);
-          }
-          
-          resolve();
-        });
-      });
-      
-      // 3. OAuth callback with session regeneration as specified
-      console.log(`[WHOOP AUTH] Starting session regeneration for user: ${whoopUserId}`);
-      
-      req.session.regenerate((err) => {
-        if (err) {
-          console.error(`[WHOOP AUTH] Session regeneration error:`, err);
-          return next(err);
-        }
-        
-        // Set userId in regenerated session
-        (req.session as any).userId = whoopUserId;
-        
-        // Save session and redirect
-        req.session.save((saveErr) => {
-          if (saveErr) {
-            console.error(`[WHOOP AUTH] Session save error:`, saveErr);
-            return res.status(500).send('Authentication failed - session save error');
-          }
-          
-          console.log(`[WHOOP AUTH] Session regenerated and saved successfully`);
-          console.log(`[WHOOP AUTH] Session ID: ${req.sessionID}, User ID: ${whoopUserId}`);
-          
-          // Redirect to dashboard 
-          res.redirect('/');
-        });
-      });
-      return;
+      // OAuth callback completed successfully - JWT token already generated and redirected above
       
       // OLD SUCCESS PAGE CODE (keeping as backup)
       const successHtml = `
@@ -1267,6 +1185,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Token refresh test failed',
         message: error.message
       });
+    }
+  });
+
+  // Test endpoint to generate JWT token for testing (development only)
+  console.log('[ROUTE] GET /api/test/jwt');
+  app.get('/api/test/jwt', async (req, res) => {
+    try {
+      const { generateJWT } = await import('./jwtAuth');
+      const testUserId = 'whoop_99999999';
+      const testToken = generateJWT(testUserId);
+      
+      console.log(`[TEST] Generated JWT token for test user: ${testUserId}`);
+      res.json({ 
+        token: testToken,
+        userId: testUserId,
+        message: 'Test JWT token generated successfully'
+      });
+    } catch (error) {
+      console.error('[TEST] JWT generation error:', error);
+      res.status(500).json({ error: 'Failed to generate test JWT token' });
     }
   });
 
