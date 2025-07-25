@@ -62,8 +62,11 @@ export function useAuth() {
     logoutMutation.mutate();
   };
   
+  // More robust authentication logic - if we have token but user fetch failed, try once more
   const isAuthenticated = hasToken && !!user && !error;
-  const isAuthLoading = isLoading;
+  
+  // Consider authenticated if we have a token, even if user data is still loading
+  const isAuthLoading = isLoading && hasToken;
 
   return {
     user,

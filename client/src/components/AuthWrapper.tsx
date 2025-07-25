@@ -16,8 +16,12 @@ export function AuthWrapper({ children }: AuthWrapperProps) {
       return;
     }
 
-    // Redirect to login if not authenticated (after loading completes)
-    if (!isAuthLoading && !isAuthenticated) {
+    // Check if we have a token in localStorage
+    const hasToken = !!localStorage.getItem('auth_token');
+    
+    // Only redirect to login if we definitively don't have authentication
+    // Wait for auth loading to complete AND ensure we don't have a stored token
+    if (!isAuthLoading && !isAuthenticated && !hasToken) {
       setLocation('/login');
     }
   }, [isAuthenticated, isAuthLoading, location, setLocation]);

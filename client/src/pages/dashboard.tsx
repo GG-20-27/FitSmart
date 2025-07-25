@@ -247,8 +247,8 @@ export default function Dashboard() {
     },
   });
 
-  // For JWT auth, user is connected if they have a valid token and can fetch WHOOP data
-  const isWhoopConnected = !!user && !!whoopData && !whoopError;
+  // For JWT auth, user is connected if they have a valid token (whoopData may be loading)
+  const isWhoopConnected = !!user;
   const isLoading = whoopLoading;
   const hasError = whoopError;
 
