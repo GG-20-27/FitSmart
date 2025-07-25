@@ -6,13 +6,15 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-jwt-secret-for-developmen
 // JWT payload interface
 interface JWTPayload {
   whoopId: string;
+  role: string;
   exp: number;
 }
 
 // Generate JWT token for authenticated user
-export function generateJWT(whoopId: string): string {
+export function generateJWT(whoopId: string, role: string = 'user'): string {
   const payload: JWTPayload = {
     whoopId,
+    role,
     exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
   };
   

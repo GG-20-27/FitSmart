@@ -7,6 +7,7 @@ export const users = pgTable("users", {
   id: text("id").primaryKey(), // WHOOP user ID like "whoop_25283528"
   email: text("email").notNull().unique(),
   whoopUserId: text("whoop_user_id").notNull(), // Original WHOOP numeric ID
+  role: text("role").notNull().default("user"), // "user" or "admin"
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -57,6 +58,7 @@ export const insertUserSchema = createInsertSchema(users).pick({
   id: true,
   email: true,
   whoopUserId: true,
+  role: true,
 });
 
 export const insertMealSchema = createInsertSchema(meals).omit({

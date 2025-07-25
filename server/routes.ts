@@ -15,6 +15,7 @@ import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
 import { requireAuth, attachUser, getCurrentUserId, requireAdmin } from './authMiddleware';
+import { requireJWTAuth } from './jwtAuth';
 import { db } from './db';
 import { users } from '@shared/schema';
 import { eq } from 'drizzle-orm';
@@ -508,13 +509,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[WHOOP AUTH] User authenticated: ${whoopUserId}`);
       console.log(`[WHOOP AUTH] Full user profile:`, JSON.stringify(userProfile, null, 2));
       
-      // Create or get user in database
+      // Create or get user in database with admin role check
       const userEmail = `${whoopUserId}@fitscore.local`;
+      const adminWhoopId = process.env.ADMIN_WHOOP_ID;
+      const isAdmin = adminWhoopId && userProfile.user_id.toString() === adminWhoopId;
+      
       const userData = {
         id: whoopUserId,
         email: userEmail,
-        whoopUserId: userProfile.user_id.toString()
+        whoopUserId: userProfile.user_id.toString(),
+        role: isAdmin ? 'admin' : 'user'
       };
+      
+      console.log(`[WHOOP AUTH] User role assignment: ${isAdmin ? 'admin' : 'user'} (Admin WHOOP ID: ${adminWhoopId})`);
       
       // Insert or update user in database with detailed logging
       console.log(`[WHOOP AUTH] Attempting to upsert user:`, userData);
@@ -526,10 +533,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await db.insert(users).values(userData);
           console.log(`[WHOOP AUTH] New user created in database: ${whoopUserId}`);
         } else {
-          // User exists, update their information
+          // User exists, update their information including role
           await db.update(users).set({
             email: userData.email,
             whoopUserId: userData.whoopUserId,
+            role: userData.role,
             updatedAt: new Date()
           }).where(eq(users.id, whoopUserId));
           console.log(`[WHOOP AUTH] Existing user updated in database: ${whoopUserId}`);
@@ -564,11 +572,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
-      // Generate JWT token for authentication
-      const { generateJWT } = await import('./jwtAuth');
-      const authToken = generateJWT(whoopUserId);
+      // Immediately fetch and store today's WHOOP data
+      console.log(`[WHOOP AUTH] Fetching today's WHOOP data for user: ${whoopUserId}`);
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const whoopDataResult = await whoopApiService.getTodayData(tokenResponse.access_token);
+        
+        if (whoopDataResult && whoopDataResult.recovery_score !== undefined) {
+          const whoopDataRecord = {
+            userId: whoopUserId,
+            date: today,
+            recoveryScore: Math.round(whoopDataResult.recovery_score),
+            sleepScore: Math.round(whoopDataResult.sleep_hours * 10) || 0, // Convert hours to score
+            strainScore: Math.round((whoopDataResult.strain || 0) * 10), // Store as integer * 10
+            restingHeartRate: Math.round(whoopDataResult.resting_heart_rate || 0)
+          };
+          
+          // Store or update today's data
+          await storage.upsertWhoopData(whoopDataRecord);
+          console.log(`[WHOOP AUTH] Today's data stored for user: ${whoopUserId}`, whoopDataRecord);
+        }
+      } catch (dataError) {
+        console.error(`[WHOOP AUTH] Failed to fetch initial WHOOP data:`, dataError);
+        // Continue with authentication even if data fetch fails
+      }
       
-      console.log(`[WHOOP AUTH] JWT token generated for user: ${whoopUserId}`);
+      // Generate JWT token for authentication with role
+      const { generateJWT } = await import('./jwtAuth');
+      const authToken = generateJWT(whoopUserId, userData.role);
+      
+      console.log(`[WHOOP AUTH] JWT token generated for user: ${whoopUserId} with role: ${userData.role}`);
       
       // Redirect to dashboard with token 
       res.redirect(`/#token=${authToken}`);
@@ -878,79 +911,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // WHOOP data endpoint - now uses live API data
-  app.get('/api/whoop/today', requireAuth, async (req, res) => {
+  // WHOOP today's data endpoint (JWT-authenticated)
+  app.get('/api/whoop/today', requireJWTAuth, async (req, res) => {
     try {
-      console.log('Fetching live WHOOP data for today...');
-      
-      // Get current user ID from session
       const userId = getCurrentUserId(req);
-      console.log(`Fetching WHOOP data for user: ${userId}`);
+      console.log(`[WHOOP TODAY] Getting today's WHOOP data for user: ${userId}`);
       
-      // Token validation using user-specific token
-      const tokenData = await whoopTokenStorage.getToken(userId);
-      if (!tokenData?.access_token) {
-        return res.status(401).json({ error: 'Missing WHOOP access token for user' });
-      }
-
-      if (!whoopTokenStorage.isTokenValid(tokenData)) {
-        console.warn('WHOOP access token has expired. Re-authentication required.');
+      if (!userId) {
         return res.status(401).json({ 
-          error: 'WHOOP token expired',
-          message: 'Please visit /api/whoop/login to re-authenticate with WHOOP',
-          auth_url: '/api/whoop/login'
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
         });
       }
       
-      // Fetch real WHOOP data using user-specific authentication
-      const whoopData = await whoopApiService.getTodaysData(userId);
+      // Check if we have today's data cached first
+      const todayDate = new Date().toISOString().split('T')[0];
+      const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
       
-      // Store in database for caching with correct user_id
-      const todayDate = getTodayDate();
-      await storage.createOrUpdateWhoopData({
-        userId: userId,
-        date: todayDate,
-        recoveryScore: Math.round(whoopData.recovery_score || 0),
-        sleepScore: Math.round(whoopData.sleep_score || 0),
-        strainScore: Math.round((whoopData.strain || 0) * 10), // Store as integer * 10
-        restingHeartRate: Math.round(whoopData.resting_heart_rate || 0)
+      if (cachedData) {
+        console.log(`[WHOOP TODAY] Returning cached data for user: ${userId}`);
+        return res.json({
+          recovery_score: cachedData.recoveryScore,
+          sleep_hours: cachedData.sleepScore / 10, // Convert back from stored format
+          strain: cachedData.strainScore / 10, // Convert back from stored format
+          resting_heart_rate: cachedData.restingHeartRate,
+          date: cachedData.date,
+          last_sync: cachedData.lastSync
+        });
+      }
+      
+      console.log(`[WHOOP TODAY] No cached data found, returning 404 for user: ${userId}`);
+      return res.status(404).json({
+        error: 'No WHOOP data available',
+        message: 'Please complete WHOOP OAuth authentication to fetch today\'s data',
+        date: todayDate
       });
-
-      // Log daily stats to userProfile.json
-      const dailyEntry = {
-        date: todayDate,
-        recovery_score: whoopData.recovery_score,
-        strain_score: whoopData.strain,
-        sleep_score: whoopData.sleep_score,
-        hrv: whoopData.hrv
-      };
-      logDailyStats(dailyEntry);
-
-      // Return the new response format as specified
-      const result = {
-        cycle_id: whoopData.cycle_id,
-        strain: whoopData.strain,
-        recovery_score: whoopData.recovery_score,
-        hrv: whoopData.hrv,
-        resting_heart_rate: whoopData.resting_heart_rate,
-        sleep_hours: whoopData.sleep_hours,
-        raw: whoopData.raw
-      };
-
-      console.log('WHOOP data retrieved successfully');
-      res.json(result);
+      
     } catch (error: any) {
-      console.error('Error in /api/whoop/today:', error.message);
-      
-      // Log non-200 responses clearly for debugging
-      if (error.response) {
-        console.error('WHOOP API Error Response:', {
-          status: error.response.status,
-          data: error.response.data,
-          endpoint: error.config?.url
-        });
-      }
-      
+      console.error('[WHOOP TODAY] Error:', error.message);
       res.status(500).json({ 
         error: 'Failed to fetch WHOOP data',
         details: error.message
@@ -977,6 +975,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store in database for caching
       const todayDate = getTodayDate();
       await storage.createOrUpdateWhoopData({
+        userId: defaultUserId,
         date: todayDate,
         recoveryScore: Math.round(whoopData.recovery_score || 0),
         sleepScore: Math.round(whoopData.sleep_hours || 0), // Fixed: use sleep_hours instead of sleep_score
@@ -1096,7 +1095,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { generateJWT } = await import('./jwtAuth');
       const testUserId = 'whoop_99999999';
-      const testToken = generateJWT(testUserId);
+      const testToken = generateJWT(testUserId, 'user');
       
       console.log(`[TEST] Generated JWT token for test user: ${testUserId}`);
       res.json({ 
@@ -1118,10 +1117,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Create user in database FIRST (before token) with conflict handling
       const userEmail = `${testUserId}@fitscore.local`;
+      const adminWhoopId = process.env.ADMIN_WHOOP_ID;
+      const isAdmin = adminWhoopId && testUserId.replace('whoop_', '') === adminWhoopId;
+      
       const userData = {
         id: testUserId,
         email: userEmail,
-        whoopUserId: testUserId.replace('whoop_', '')
+        whoopUserId: testUserId.replace('whoop_', ''),
+        role: isAdmin ? 'admin' : 'user'
       };
       
       console.log(`[TEST] Attempting to upsert user:`, userData);
@@ -1148,9 +1151,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         user_id: testUserId
       });
       
-      // Generate JWT token for authentication
+      // Generate JWT token for authentication with role
       const { generateJWT } = await import('./jwtAuth');
-      const authToken = generateJWT(testUserId);
+      const authToken = generateJWT(testUserId, userData.role);
       
       console.log(`[TEST] JWT token generated for simulated user: ${testUserId}`);
       

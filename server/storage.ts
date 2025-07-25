@@ -1,6 +1,6 @@
 import { users, meals, whoopData, userCalendars, type User, type InsertUser, type Meal, type InsertMeal, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar } from "@shared/schema";
 import { db } from "./db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
@@ -14,7 +14,9 @@ export interface IStorage {
   
   // WHOOP data operations
   getWhoopDataByDate(date: string): Promise<WhoopData | undefined>;
+  getWhoopDataByUserAndDate(userId: string, date: string): Promise<WhoopData | undefined>;
   createOrUpdateWhoopData(data: InsertWhoopData): Promise<WhoopData>;
+  upsertWhoopData(data: InsertWhoopData): Promise<WhoopData>;
   
   // WHOOP token operations
   getWhoopToken(userId: string): Promise<WhoopToken | undefined>;
@@ -68,8 +70,14 @@ export class DatabaseStorage implements IStorage {
     return data || undefined;
   }
 
+  async getWhoopDataByUserAndDate(userId: string, date: string): Promise<WhoopData | undefined> {
+    const [data] = await db.select().from(whoopData)
+      .where(and(eq(whoopData.userId, userId), eq(whoopData.date, date)));
+    return data || undefined;
+  }
+
   async createOrUpdateWhoopData(insertData: InsertWhoopData): Promise<WhoopData> {
-    const existing = await this.getWhoopDataByDate(insertData.date);
+    const existing = await this.getWhoopDataByUserAndDate(insertData.userId, insertData.date);
     
     if (existing) {
       const [updated] = await db
@@ -78,7 +86,7 @@ export class DatabaseStorage implements IStorage {
           ...insertData,
           lastSync: new Date()
         })
-        .where(eq(whoopData.date, insertData.date))
+        .where(and(eq(whoopData.userId, insertData.userId), eq(whoopData.date, insertData.date)))
         .returning();
       return updated;
     } else {
@@ -88,6 +96,10 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return data;
     }
+  }
+
+  async upsertWhoopData(insertData: InsertWhoopData): Promise<WhoopData> {
+    return this.createOrUpdateWhoopData(insertData);
   }
 
   // Calendar operations

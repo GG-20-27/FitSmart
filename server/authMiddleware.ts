@@ -46,23 +46,39 @@ export async function attachUser(req: Request, res: Response, next: NextFunction
 // Helper function to get current user ID (re-exported from jwtAuth for compatibility)
 export { getCurrentUserId } from './jwtAuth';
 
-// Admin middleware - checks if user is admin
-export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
+// Helper function to get user role from JWT token
+export function getUserRole(req: Request): string | null {
+  const authHeader = req.headers.authorization;
+  
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    const { verifyJWT } = require('./jwtAuth');
+    const payload = verifyJWT(token);
+    
+    return payload ? payload.role : null;
+  }
+  
+  return null;
+}
+
+// Admin middleware - checks if user has admin role in JWT
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   try {
     const userId = getCurrentUserId(req);
+    const userRole = getUserRole(req);
     
     if (!userId) {
       return res.status(401).json({ error: 'Authentication required' });
     }
     
-    const user = await userService.getUserById(userId);
-    if (!user || user.email !== 'admin@fitscore.local') {
+    if (userRole !== 'admin') {
       return res.status(403).json({ 
         error: 'Admin access required',
         message: 'This action requires administrator privileges'
       });
     }
     
+    console.log(`[ADMIN] Admin access granted for user: ${userId}`);
     next();
   } catch (error) {
     console.error('Error in admin middleware:', error);
