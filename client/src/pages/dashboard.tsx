@@ -252,6 +252,15 @@ export default function Dashboard() {
   const isLoading = whoopLoading;
   const hasError = whoopError;
 
+  // Debug logging to understand why data isn't showing
+  useEffect(() => {
+    console.log('[DASHBOARD DEBUG] User:', user);
+    console.log('[DASHBOARD DEBUG] WHOOP Data:', whoopData);
+    console.log('[DASHBOARD DEBUG] Loading:', whoopLoading);
+    console.log('[DASHBOARD DEBUG] Error:', whoopError);
+    console.log('[DASHBOARD DEBUG] Token in localStorage:', localStorage.getItem('auth_token'));
+  }, [user, whoopData, whoopLoading, whoopError]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 lg:py-8">
@@ -380,6 +389,25 @@ export default function Dashboard() {
                     <span className="text-slate-300 font-medium text-sm">WHOOP Connected</span>
                   </div>
                   <div className="flex space-x-2">
+                    <Button
+                      onClick={() => connectWhoopMutation.mutate()}
+                      disabled={connectWhoopMutation.isPending}
+                      variant="outline"
+                      size="sm"
+                      className="bg-transparent border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-all duration-200"
+                    >
+                      {connectWhoopMutation.isPending ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Reconnecting...
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw className="w-4 h-4 mr-2" />
+                          Reconnect
+                        </>
+                      )}
+                    </Button>
                     <Button
                       onClick={() => refetchWhoop()}
                       disabled={whoopLoading}
