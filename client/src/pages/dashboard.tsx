@@ -298,24 +298,7 @@ export default function Dashboard() {
               </Button>
             </Link>
             
-            {isWhoopConnected && (
-              <Button
-                onClick={() => window.open('/api/whoop/login', '_blank')}
-                variant="outline"
-                size="sm"
-                className="relative overflow-hidden border-transparent bg-gradient-to-r from-cyan-400 to-blue-500 text-white hover:from-cyan-500 hover:to-blue-600"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-cyan-300 to-blue-400 opacity-30 animate-pulse"></div>
-                <div className="relative flex items-center space-x-2">
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                  </svg>
-                  <RefreshCw className="h-4 w-4" />
-                  <span className="text-xs sm:text-sm font-medium hidden lg:inline">Reconnect WHOOP</span>
-                  <span className="text-xs sm:text-sm font-medium lg:hidden">Reconnect</span>
-                </div>
-              </Button>
-            )}
+
             
             {/* Logout Button */}
             <Button
@@ -491,8 +474,8 @@ export default function Dashboard() {
                   <Moon className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-purple-400">
-                  {whoopData?.raw?.sleep?.score?.sleep_performance_percentage !== null && whoopData?.raw?.sleep?.score?.sleep_performance_percentage !== undefined ? (
-                    <><CountUp end={whoopData.raw.sleep.score.sleep_performance_percentage} duration={1200} />%</>
+                  {whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
+                    <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1200} suffix="h" /></>
                   ) : (
                     <span className="text-sm text-slate-500">Sleep data still syncing from WHOOP</span>
                   )}
@@ -500,7 +483,7 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center justify-center space-x-2">
                 <Moon className="h-5 w-5 text-purple-400" />
-                <span className="text-slate-300 font-medium">Sleep Score</span>
+                <span className="text-slate-300 font-medium">Sleep Hours</span>
               </div>
             </CardContent>
           </Card>
