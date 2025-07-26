@@ -381,25 +381,6 @@ export default function Dashboard() {
                   </div>
                   <div className="flex space-x-2">
                     <Button
-                      onClick={() => connectWhoopMutation.mutate()}
-                      disabled={connectWhoopMutation.isPending}
-                      variant="outline"
-                      size="sm"
-                      className="bg-transparent border-orange-500 text-orange-500 hover:bg-orange-500 hover:text-white transition-all duration-200"
-                    >
-                      {connectWhoopMutation.isPending ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                          Reconnecting...
-                        </>
-                      ) : (
-                        <>
-                          <RotateCcw className="w-4 h-4 mr-2" />
-                          Reconnect
-                        </>
-                      )}
-                    </Button>
-                    <Button
                       onClick={() => refetchWhoop()}
                       disabled={whoopLoading}
                       variant="outline"

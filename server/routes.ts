@@ -932,8 +932,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[WHOOP TODAY] Returning cached data for user: ${userId}`);
         return res.json({
           recovery_score: cachedData.recoveryScore,
-          sleep_hours: cachedData.sleepScore, // Sleep score is already in correct format
-          strain: cachedData.strainScore, // Strain score is already in correct format  
+          sleep_hours: cachedData.sleepScore / 10, // Convert back to hours (7.6 hrs not 84)
+          strain: cachedData.strainScore / 10, // Convert back to decimal (4.5 not 45)
           resting_heart_rate: cachedData.restingHeartRate,
           date: cachedData.date,
           last_sync: cachedData.lastSync
