@@ -439,7 +439,9 @@ export default function Dashboard() {
                   <Heart className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-blue-400">
-                  {whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
                     <><CountUp end={whoopData.recovery_score} duration={1200} />%</>
                   ) : (
                     <span className="text-slate-500">N/A</span>
@@ -461,7 +463,9 @@ export default function Dashboard() {
                   <Zap className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-orange-400">
-                  {whoopData?.strain !== null && whoopData?.strain !== undefined ? (
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.strain !== null && whoopData?.strain !== undefined ? (
                     <CountUp end={whoopData.strain} decimals={1} duration={1200} />
                   ) : (
                     <span className="text-slate-500">N/A</span>
@@ -483,10 +487,12 @@ export default function Dashboard() {
                   <Moon className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-purple-400">
-                  {whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
                     <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1200} suffix="h" /></>
                   ) : (
-                    <span className="text-sm text-slate-500">Sleep data still syncing from WHOOP</span>
+                    <span className="text-slate-500">N/A</span>
                   )}
                 </div>
               </div>
@@ -505,7 +511,9 @@ export default function Dashboard() {
                   <Activity className="h-8 w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-green-400">
-                  {whoopData?.hrv !== null && whoopData?.hrv !== undefined ? (
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.hrv !== null && whoopData?.hrv !== undefined ? (
                     <CountUp end={whoopData.hrv} suffix=" ms" decimals={1} duration={1200} />
                   ) : (
                     <span className="text-slate-500">N/A</span>
