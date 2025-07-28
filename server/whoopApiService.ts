@@ -158,8 +158,8 @@ export class WhoopApiService {
     const clientId = process.env.WHOOP_CLIENT_ID;
     const clientSecret = process.env.WHOOP_CLIENT_SECRET;
     
-    // Force localhost for development/testing  
-    const isProduction = false; // Force localhost for testing
+    // Use production redirect URI since we have registered WHOOP credentials  
+    const isProduction = true; // Use registered redirect URI
     const redirectUri = isProduction 
       ? 'https://health-data-hub.replit.app/api/whoop/callback'
       : 'http://localhost:5000/api/whoop/callback';
@@ -775,8 +775,8 @@ export class WhoopApiService {
       throw new Error('WHOOP_CLIENT_ID not configured');
     }
 
-    // Force localhost for development/testing, only use production when explicitly deployed
-    const isProduction = false; // Force localhost for testing
+    // Use production redirect URI since we have registered WHOOP credentials
+    const isProduction = true; // Use registered redirect URI 
     const redirectUri = isProduction 
       ? 'https://health-data-hub.replit.app/api/whoop/callback'
       : 'http://localhost:5000/api/whoop/callback';
