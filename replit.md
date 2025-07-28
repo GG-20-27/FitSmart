@@ -118,7 +118,16 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `WHOOP_ACCESS_TOKEN`: WHOOP API authentication token
 - `NODE_ENV`: Environment specification (development/production)
 
-## Recent Changes
+## Recent Changes  
+- January 28, 2025: **COMPLETE AUTHENTICATION SYSTEM OVERHAUL - ALL ISSUES RESOLVED**
+  - ✅ **AUTHENTICATION FLOW FIXED**: useAuth now checks token expiration and redirects to /api/whoop/login if expired/missing
+  - ✅ **API AUTHORIZATION HEADERS**: All API requests include Authorization: Bearer token from localStorage
+  - ✅ **OAUTH CALLBACK ENHANCED**: Saves access/refresh tokens → fetches today's data → generates JWT with role → redirects with #token=<jwt>
+  - ✅ **ADMIN ROLE SYSTEM**: Added role column (default 'user'), ADMIN_WHOOP_ID check sets role='admin', JWT includes role
+  - ✅ **ADMIN UI VISIBILITY**: Dashboard shows Admin button only for users with role='admin'
+  - ✅ **BUTTON STYLING FIXED**: Removed orange outline from Reconnect button, improved focus states
+  - ✅ **DATABASE PATTERN**: WHOOP data stored with whoop_data_<id>_<yyyy-mm-dd> pattern for unique identification
+  - ✅ **TOKEN EXPIRATION HANDLING**: Frontend automatically redirects expired/invalid tokens to OAuth flow
 - January 28, 2025: **CRITICAL FIX: JWT Authentication Flow and Data Display FULLY RESOLVED - ROOT CAUSE IDENTIFIED AND FIXED**
   - ✅ **ROOT CAUSE IDENTIFIED**: Frontend showing N/A values due to missing JWT tokens and improper authentication flow
   - ✅ **DATA FLOW VERIFIED**: Real WHOOP data accessible via API with proper JWT authentication (Recovery 55%, Sleep 7.6h, Strain 4.5, HR 44bpm)

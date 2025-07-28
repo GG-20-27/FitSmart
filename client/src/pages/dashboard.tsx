@@ -309,6 +309,23 @@ export default function Dashboard() {
             
 
             
+            {/* Admin Panel - Only for admin users */}
+            {user?.role === 'admin' && (
+              <Link href="/admin">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="relative overflow-hidden border-transparent bg-gradient-to-r from-orange-500 to-red-600 text-white hover:from-orange-600 hover:to-red-700"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-orange-400 to-red-500 opacity-30 animate-pulse"></div>
+                  <div className="relative flex items-center space-x-2">
+                    <User className="h-4 w-4" />
+                    <span className="text-xs sm:text-sm font-medium hidden sm:inline">Admin</span>
+                  </div>
+                </Button>
+              </Link>
+            )}
+            
             {/* Logout Button */}
             <Button
               onClick={() => logout()}
@@ -394,7 +411,7 @@ export default function Dashboard() {
                       disabled={connectWhoopMutation.isPending}
                       variant="outline"
                       size="sm"
-                      className="bg-transparent border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-all duration-200"
+                      className="bg-transparent border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                     >
                       {connectWhoopMutation.isPending ? (
                         <>

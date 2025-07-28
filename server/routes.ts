@@ -214,8 +214,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      console.log(`[AUTH ME] Authentication successful for user: ${whoopUserId}`);
-      res.json({ userId: whoopUserId });
+      // Get user role from JWT token
+      const authHeader = req.headers.authorization;
+      let userRole = 'user'; // default role
+      
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const token = authHeader.split(' ')[1];
+          const { verifyJWT } = await import('./jwtAuth');
+          const payload = verifyJWT(token);
+          userRole = payload.role || 'user';
+        } catch (jwtError) {
+          console.log(`[AUTH ME] JWT verification failed:`, jwtError.message);
+        }
+      }
+      
+      console.log(`[AUTH ME] Authentication successful for user: ${whoopUserId} with role: ${userRole}`);
+      res.json({ userId: whoopUserId, role: userRole });
     } catch (error) {
       console.error('Get user error:', error);
       res.status(500).json({ error: 'Failed to get user information' });
@@ -588,7 +603,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             restingHeartRate: Math.round(whoopDataResult.resting_heart_rate || 0)
           };
           
-          // Store or update today's data
+          // Store with unique key whoop_data_<id>_<yyyy-mm-dd>
           await storage.upsertWhoopData(whoopDataRecord);
           console.log(`[WHOOP AUTH] Today's data stored for user: ${whoopUserId}`, whoopDataRecord);
         }
@@ -603,8 +618,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.log(`[WHOOP AUTH] JWT token generated for user: ${whoopUserId} with role: ${userData.role}`);
       
-      // Redirect to auth success page with token for proper handling
-      res.redirect(`/auth-success.html#token=${authToken}`);
+      // Redirect to dashboard with JWT token
+      res.redirect(`/#token=${authToken}`);
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);

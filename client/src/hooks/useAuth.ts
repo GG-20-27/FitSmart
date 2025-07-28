@@ -5,10 +5,20 @@ import { useEffect } from 'react';
 
 interface AuthUser {
   userId: string;
+  role?: string;
 }
 
 interface AuthResponse {
   message: string;
+}
+
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return payload.exp * 1000 < Date.now();
+  } catch {
+    return true; // Invalid token format
+  }
 }
 
 export function useAuth() {
@@ -30,6 +40,16 @@ export function useAuth() {
         queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
         
         console.log('[AUTH] JWT token received and stored');
+        return;
+      }
+      
+      // Check if current token is expired or missing
+      const currentToken = localStorage.getItem('auth_token');
+      if (!currentToken || isTokenExpired(currentToken)) {
+        console.log('[AUTH] No valid token found, redirecting to WHOOP OAuth');
+        localStorage.removeItem('auth_token');
+        window.location.href = '/api/whoop/login';
+        return;
       }
     };
 
@@ -44,8 +64,9 @@ export function useAuth() {
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
-  // Check if token exists in localStorage
-  const hasToken = !!localStorage.getItem('auth_token');
+  // Check if token exists and is valid in localStorage
+  const currentToken = localStorage.getItem('auth_token');
+  const hasValidToken = currentToken && !isTokenExpired(currentToken);
 
   // Logout mutation
   const logoutMutation = useMutation({
@@ -62,11 +83,11 @@ export function useAuth() {
     logoutMutation.mutate();
   };
   
-  // More robust authentication logic - if we have token but user fetch failed, try once more
-  const isAuthenticated = hasToken && !!user && !error;
+  // More robust authentication logic
+  const isAuthenticated = hasValidToken && !!user && !error;
   
-  // Consider authenticated if we have a token, even if user data is still loading
-  const isAuthLoading = isLoading && hasToken;
+  // Consider authenticated if we have a valid token, even if user data is still loading
+  const isAuthLoading = isLoading && hasValidToken;
 
   return {
     user,
