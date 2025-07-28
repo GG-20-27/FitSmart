@@ -5,11 +5,12 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown } from 'lucide-react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useState } from 'react';
 import SocialAuth from '@/components/social-auth';
 import { CalendarManagement } from '@/components/calendar-management';
+import { useAuth } from '@/hooks/useAuth';
 
 interface UserProfile {
   id: string;
@@ -29,6 +30,12 @@ interface WhoopAuthStatus {
 
 export default function Profile() {
   const [newUserEmail, setNewUserEmail] = useState('');
+  const { user } = useAuth();
+
+  const { data: userProfile } = useQuery({
+    queryKey: ['/api/users/me'],
+    enabled: !!user,
+  });
 
   const { data: authStatus, isLoading: authLoading } = useQuery<WhoopAuthStatus>({
     queryKey: ['/api/whoop/status'],
@@ -125,21 +132,24 @@ export default function Profile() {
               <CardDescription>Your account information and WHOOP connection</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {currentUser ? (
+              {userProfile ? (
                 <div className="space-y-4">
                   <div className="grid grid-cols-1 gap-4">
                     <div>
-                      <Label className="text-slate-300">Email</Label>
-                      <div className="text-white font-medium">{currentUser.email}</div>
+                      <Label className="text-slate-300">WHOOP ID</Label>
+                      <div className="text-white font-medium font-mono">{userProfile.whoopId || 'Not available'}</div>
                     </div>
                     <div>
-                      <Label className="text-slate-300">User ID</Label>
-                      <div className="text-slate-400 text-sm font-mono">{currentUser.id}</div>
-                    </div>
-                    <div>
-                      <Label className="text-slate-300">Account Created</Label>
-                      <div className="text-slate-400 text-sm">
-                        {new Date(currentUser.created_at).toLocaleDateString()}
+                      <Label className="text-slate-300">Role</Label>
+                      <div className="flex items-center space-x-2">
+                        {userProfile.role === 'admin' ? (
+                          <Badge className="bg-gradient-to-r from-orange-500 to-red-600 text-white">
+                            <Crown className="h-3 w-3 mr-1" />
+                            Admin
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary">User</Badge>
+                        )}
                       </div>
                     </div>
                   </div>

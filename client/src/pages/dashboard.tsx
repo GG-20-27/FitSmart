@@ -410,8 +410,8 @@ export default function Dashboard() {
                       onClick={() => connectWhoopMutation.mutate()}
                       disabled={connectWhoopMutation.isPending}
                       variant="outline"
-                      size="sm"
-                      className="bg-transparent border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      size="sm"  
+                      className="bg-transparent border-0 bg-gradient-to-r from-[#4F8CFF] to-[#6F4BFF] text-white hover:from-[#3F7CFF] hover:to-[#5F3BFF] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                     >
                       {connectWhoopMutation.isPending ? (
                         <>
@@ -430,7 +430,7 @@ export default function Dashboard() {
                       disabled={whoopLoading}
                       variant="outline"
                       size="sm"
-                      className="bg-transparent border-blue-500 text-blue-500 hover:bg-blue-500 hover:text-white transition-all duration-200"
+                      className="bg-transparent border-2 border-[#4F8CFF] text-[#4F8CFF] hover:bg-gradient-to-r hover:from-[#4F8CFF] hover:to-[#6F4BFF] hover:text-white hover:border-transparent transition-all duration-200"
                     >
                       {whoopLoading ? (
                         <RefreshCw className="w-4 h-4 animate-spin" />
@@ -496,7 +496,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Sleep Card */}
+          {/* Sleep Score Card */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-6 text-center">
               <div className="mb-4">
@@ -506,8 +506,8 @@ export default function Dashboard() {
                 <div className="text-2xl font-bold text-purple-400">
                   {whoopLoading ? (
                     <span className="text-slate-400">Syncing...</span>
-                  ) : whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
-                    <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1200} suffix="h" /></>
+                  ) : whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
+                    <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
                   ) : (
                     <span className="text-slate-500">N/A</span>
                   )}
@@ -515,7 +515,7 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center justify-center space-x-2">
                 <Moon className="h-5 w-5 text-purple-400" />
-                <span className="text-slate-300 font-medium">Sleep Hours</span>
+                <span className="text-slate-300 font-medium">Sleep Score</span>
               </div>
             </CardContent>
           </Card>

@@ -7,6 +7,7 @@ import { AuthWrapper } from "@/components/AuthWrapper";
 import Dashboard from "@/pages/dashboard";
 import CalendarPage from "@/pages/calendar";
 import Profile from "@/pages/profile";
+import AdminPage from "@/pages/admin";
 import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -18,6 +19,7 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/calendar" component={CalendarPage} />
       <Route path="/profile" component={Profile} />
+      <Route path="/admin" component={AdminPage} />
       <Route component={NotFound} />
     </Switch>
   );

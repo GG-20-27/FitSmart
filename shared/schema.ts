@@ -109,13 +109,19 @@ export interface WhoopTodayResponse {
   cycle_id?: string;
   strain?: number;
   recovery_score?: number;
+  sleep_score?: number;
   hrv?: number;
   resting_heart_rate?: number;
   sleep_hours?: number;
+  skin_temp_celsius?: number;
+  spo2_percentage?: number;
+  average_heart_rate?: number;
   raw?: {
     cycle?: any;
     recovery?: any;
     sleep?: any;
+    workout?: any;
+    body_measurements?: any;
   };
   error?: {
     type: string;

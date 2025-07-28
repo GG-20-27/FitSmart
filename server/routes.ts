@@ -63,7 +63,7 @@ async function getDefaultUserId(): Promise<string> {
 async function fetchWhoopData(userId?: string): Promise<WhoopTodayResponse> {
   try {
     const actualUserId = userId || await getDefaultUserId();
-    const data = await whoopApiService.today(actualUserId);
+    const data = await whoopApiService.getTodaysData(actualUserId);
     return data;
   } catch (error) {
     console.error('Failed to fetch live WHOOP data:', error);
@@ -234,6 +234,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Get user error:', error);
       res.status(500).json({ error: 'Failed to get user information' });
+    }
+  });
+
+  // User profile endpoint
+  console.log('[ROUTE] GET /api/users/me');
+  app.get('/api/users/me', requireJWTAuth, async (req, res) => {
+    try {
+      const whoopUserId = getCurrentUserId(req);
+      
+      // Get user role from JWT token
+      const authHeader = req.headers.authorization;
+      let userRole = 'user';
+      
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const token = authHeader.split(' ')[1];
+          const { verifyJWT } = await import('./jwtAuth');
+          const payload = verifyJWT(token);
+          userRole = payload.role || 'user';
+        } catch (jwtError) {
+          console.log(`[USERS ME] JWT verification failed:`, jwtError.message);
+        }
+      }
+      
+      res.json({ 
+        whoopId: whoopUserId, 
+        role: userRole 
+      });
+    } catch (error) {
+      console.error('Get user profile error:', error);
+      res.status(500).json({ error: 'Failed to get user profile' });
     }
   });
 

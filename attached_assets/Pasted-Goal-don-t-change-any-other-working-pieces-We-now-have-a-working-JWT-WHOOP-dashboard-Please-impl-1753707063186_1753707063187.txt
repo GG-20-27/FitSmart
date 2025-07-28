@@ -1,0 +1,47 @@
+Goal (don’t change any other working pieces!)
+We now have a working JWT/WHOOP dashboard. Please implement the three cosmetic & data tweaks below, test thoroughly in the deployed build, and commit only the minimal code you add or edit.
+
+1 · Add all “Today” metrics
+• In client/src/pages/Dashboard*.tsx (or the component that renders the four big metric cards) extend the query/DTO so the API response includes all available daily fields:
+
+recovery_score ( % )
+
+strain ( 0-21 )
+
+sleep_score ( % ) ← use this in the main card instead of “Sleep Hours”
+
+sleep_hours ( h ) – keep it for “Other Insights” section
+
+hrv ( ms )
+
+resting_heart_rate ( bpm )
+
+skin_temp_celsius, spo2_percentage, average_heart_rate etc. if WHOOP returns them
+• Update the Today cards so they render Sleep Score (with % icon) where “Sleep Hours” is now, move Sleep Hours down to “Other Insights from Today”, and add HRV there (show N/A gracefully).
+• API layer: in whoopApiService.getTodaysData already fetches most of these—just expose missing fields in the JSON sent by /api/whoop/today.
+
+2 · User Profile & Admin tools
+• Backend: when JWT is issued, payload already has whoopId and role. Add endpoint /api/users/me returning { whoopId, role }.
+• Frontend “Current User Profile” card: display Whoop ID and role badge (“Admin” or “User”). If data unavailable, show placeholder.
+• Admin panel
+– Create a new page/section “User Management” visible only when decoded JWT.role === 'admin'.
+– Hit existing /api/admin/users to list users. For each show email (or placeholder), whoop ID, date added, and a “View / Revoke” token link (call already-implemented admin endpoints).
+– Do not expose raw access tokens in UI.
+
+3 · UI polish (two buttons)
+• Blue outlined “Reconnect” button in the WHOOP connection card → change class/style to same neon-blue gradient used by the solid top-bar button (from-[#4F8CFF] to-[#6F4BFF]).
+• Tiny inline circular “refresh-loading” button → keep outline-only but use the neon-blue gradient as its border color, with transparent center.
+• No other colors should be altered.
+
+Acceptance tests (run before replying “done”)
+Fresh incognito visit → redirected to WHOOP OAuth → dashboard shows Sleep Score instead of Sleep Hours and HRV card no longer N/A once WHOOP provides data.
+
+/#token=<admin-jwt> → Profile page displays my Whoop ID (whoop_25283528) and an “Admin” badge; “User Management” table lists at least myself.
+
+Non-admin account sees regular profile card, no “User Management” section.
+
+New button styles match spec (compare screenshots).
+
+eslint / type-check pass, no unused imports, zero console errors.
+
+Commit and deploy; reply only with a short confirmation + any URLs to test.

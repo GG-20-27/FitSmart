@@ -70,9 +70,13 @@ export interface WhoopTodayData {
   cycle_id?: string;
   strain?: number;
   recovery_score?: number;
+  sleep_score?: number;
   hrv?: number;
   resting_heart_rate?: number;
   sleep_hours?: number;
+  skin_temp_celsius?: number;
+  spo2_percentage?: number;
+  average_heart_rate?: number;
   raw?: {
     cycle?: any;
     recovery?: any;
@@ -766,9 +770,13 @@ export class WhoopApiService {
         cycle_id: latestCycle.id,
         strain: latestCycle.score?.strain || null,
         recovery_score: recovery?.score?.recovery_score || null,
+        sleep_score: sleepData?.score?.sleep_performance_percentage || sleepData?.score?.sleep_score || null,
         hrv: recovery?.score?.hrv_rmssd_milli || null,
         resting_heart_rate: recovery?.score?.resting_heart_rate || null,
         sleep_hours: sleepHours,
+        skin_temp_celsius: recovery?.score?.skin_temp_celsius || null,
+        spo2_percentage: recovery?.score?.spo2_percentage || null,
+        average_heart_rate: latestCycle.score?.average_heart_rate || null,
         raw: {
           cycle: latestCycle,
           recovery: recovery,
