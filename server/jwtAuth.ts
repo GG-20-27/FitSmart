@@ -41,8 +41,9 @@ export function jwtAuthMiddleware(req: Request, res: Response, next: NextFunctio
     const payload = verifyJWT(token);
     
     if (payload) {
-      // Set userId on request for compatibility with existing code
+      // Set userId and role on request for compatibility with existing code
       (req as any).userId = payload.whoopId;
+      (req as any).role = payload.role;
       console.log(`[JWT] Authentication successful for user: ${payload.whoopId}`);
       return next();
     }

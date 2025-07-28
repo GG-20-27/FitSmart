@@ -28,13 +28,10 @@ export function useAuth() {
   // Check for token in URL hash on mount (OAuth callback)
   useEffect(() => {
     const checkForToken = () => {
-      const hash = window.location.hash;
-      if (hash.startsWith('#token=')) {
-        const token = hash.substring(7); // Remove '#token='
-        localStorage.setItem('auth_token', token);
-        
-        // Clear the hash and redirect to dashboard
-        window.history.replaceState(null, '', '/');
+      if (window.location.hash.startsWith('#token=')) {
+        const token = window.location.hash.replace('#token=', '');
+        localStorage.setItem('token', token);
+        window.history.replaceState({}, '', '/');
         
         // Trigger a refetch of user data
         queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
@@ -44,10 +41,10 @@ export function useAuth() {
       }
       
       // Check if current token is expired or missing
-      const currentToken = localStorage.getItem('auth_token');
+      const currentToken = localStorage.getItem('token');
       if (!currentToken || isTokenExpired(currentToken)) {
         console.log('[AUTH] No valid token found, redirecting to WHOOP OAuth');
-        localStorage.removeItem('auth_token');
+        localStorage.removeItem('token');
         window.location.href = '/api/whoop/login';
         return;
       }
@@ -65,7 +62,7 @@ export function useAuth() {
   });
 
   // Check if token exists and is valid in localStorage
-  const currentToken = localStorage.getItem('auth_token');
+  const currentToken = localStorage.getItem('token');
   const hasValidToken = currentToken && !isTokenExpired(currentToken);
 
   // Logout mutation
@@ -73,7 +70,7 @@ export function useAuth() {
     mutationFn: () => apiRequest<AuthResponse>('/api/auth/logout', { method: 'POST' }),
     onSuccess: () => {
       // Remove JWT token from localStorage
-      localStorage.removeItem('auth_token');
+      localStorage.removeItem('token');
       queryClient.clear(); // Clear all cached data
       setLocation('/');
     },

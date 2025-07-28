@@ -88,12 +88,18 @@ export interface WhoopTodayData {
 }
 
 export class WhoopApiService {
-  private async authHeader(userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5') {
+  private async authHeader(userId: string) {
+    if (!userId) {
+      throw new Error('User ID is required for authentication');
+    }
     const tokenData = await this.getValidWhoopToken(userId);
     return { Authorization: `Bearer ${tokenData.access_token}` };
   }
 
-  private async refreshToken(refreshToken: string, userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
+  private async refreshToken(refreshToken: string, userId: string): Promise<any> {
+    if (!userId) {
+      throw new Error('User ID is required for token refresh');
+    }
     const clientId = process.env.WHOOP_CLIENT_ID;
     const clientSecret = process.env.WHOOP_CLIENT_SECRET;
     
@@ -137,11 +143,15 @@ export class WhoopApiService {
   }
 
   // New function to ensure we always have a valid token
-  async getValidWhoopToken(userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
+  async getValidWhoopToken(userId: string): Promise<any> {
+    if (!userId) {
+      throw new Error('User ID is required to get WHOOP token');
+    }
+    
     let tokenData = await whoopTokenStorage.getToken(userId);
     
     if (!tokenData?.access_token) {
-      console.log('[TOKEN VALIDATION] No WHOOP access token found');
+      console.log('[TOKEN VALIDATION] No WHOOP access token found for user:', userId);
       throw new WhoopApiError({
         type: WhoopErrorType.AUTHENTICATION_ERROR,
         message: 'Missing WHOOP access token',
@@ -150,7 +160,7 @@ export class WhoopApiService {
     }
 
     // For now, just return the token without refresh checks to fix the issue
-    console.log('[TOKEN VALIDATION] Using existing token');
+    console.log('[TOKEN VALIDATION] Using existing token for user:', userId);
     return tokenData;
   }
 
@@ -248,7 +258,10 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestCycle(userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
+  async getLatestCycle(userId: string): Promise<any> {
+    if (!userId) {
+      throw new Error('User ID is required to get latest cycle');
+    }
     try {
       const headers = await this.authHeader(userId);
       console.log('Fetching latest cycle from WHOOP API...');
@@ -272,7 +285,10 @@ export class WhoopApiService {
     }
   }
 
-  async getRecovery(cycleId: string, userId: string = 'd5fc289b-82a1-4e7c-b6fb-df042cb2c5a5'): Promise<any> {
+  async getRecovery(cycleId: string, userId: string): Promise<any> {
+    if (!userId) {
+      throw new Error('User ID is required to get recovery data');
+    }
     try {
       const headers = await this.authHeader(userId);
       console.log(`Fetching recovery for cycle ${cycleId}...`);
@@ -294,7 +310,10 @@ export class WhoopApiService {
     }
   }
 
-  async getSleep(cycleId: string, userId: string = 'default'): Promise<any> {
+  async getSleep(cycleId: string, userId: string): Promise<any> {
+    if (!userId) {
+      throw new Error('User ID is required to get sleep data');
+    }
     try {
       const headers = await this.authHeader(userId);
       console.log(`Fetching sleep for cycle ${cycleId}...`);
@@ -345,7 +364,10 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestSleepData(userId: string = 'default'): Promise<{ sleep_score: number | null; cycleDate: string | null }> {
+  async getLatestSleepData(userId: string): Promise<{ sleep_score: number | null; cycleDate: string | null }> {
+    if (!userId) {
+      throw new Error('User ID is required to get latest sleep data');
+    }
     try {
       const headers = await this.authHeader(userId);
       const response = await axios.get(`${BASE}/cycle?limit=3`, { headers });
@@ -389,7 +411,10 @@ export class WhoopApiService {
     }
   }
 
-  async getLatestSleepSession(userId: string = 'default'): Promise<number | null> {
+  async getLatestSleepSession(userId: string): Promise<number | null> {
+    if (!userId) {
+      throw new Error('User ID is required to get latest sleep session');
+    }
     try {
       console.log('Fetching latest sleep session data...');
       
@@ -478,7 +503,10 @@ export class WhoopApiService {
     }
   }
 
-  async getWorkoutData(userId?: string): Promise<any> {
+  async getWorkoutData(userId: string): Promise<any> {
+    if (!userId) {
+      throw new Error('User ID is required to get workout data');
+    }
     try {
       console.log('Fetching recent workout data...');
       
@@ -513,7 +541,10 @@ export class WhoopApiService {
     }
   }
 
-  async getBodyMeasurements(userId?: string): Promise<any> {
+  async getBodyMeasurements(userId: string): Promise<any> {
+    if (!userId) {
+      throw new Error('User ID is required to get body measurements');
+    }
     try {
       console.log('Fetching body measurements...');
       
@@ -536,12 +567,15 @@ export class WhoopApiService {
     }
   }
 
-  async getWeeklyAverages(userId?: string): Promise<{
+  async getWeeklyAverages(userId: string): Promise<{
     avgRecovery: number | null;
     avgStrain: number | null;
     avgSleep: number | null;
     avgHRV: number | null;
   }> {
+    if (!userId) {
+      throw new Error('User ID is required to get weekly averages');
+    }
     try {
       const headers = await this.authHeader(userId);
       
@@ -649,7 +683,10 @@ export class WhoopApiService {
     }
   }
 
-  async getTodaysData(userId?: string): Promise<WhoopTodayData> {
+  async getTodaysData(userId: string): Promise<WhoopTodayData> {
+    if (!userId) {
+      throw new Error('User ID is required to get today\'s data');
+    }
     try {
       // Get the latest cycle with user-specific authentication
       const latestCycle = await this.getLatestCycle(userId);

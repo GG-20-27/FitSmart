@@ -54,6 +54,49 @@ export const userCalendars = pgTable("user_calendars", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// Sleep Challenge Tables
+export const sleepChallenges = pgTable("sleep_challenges", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  challengeType: text("challenge_type").notNull(), // 'weekly', 'monthly', 'custom'
+  title: text("title").notNull(),
+  description: text("description"),
+  targetSleepHours: integer("target_sleep_hours").notNull(), // Target * 10 (7.5 hours = 75)
+  startDate: timestamp("start_date").notNull(),
+  endDate: timestamp("end_date").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  completedDays: integer("completed_days").default(0).notNull(),
+  totalDays: integer("total_days").notNull(),
+  rewardPoints: integer("reward_points").default(0).notNull(),
+  badgeEarned: text("badge_earned"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const sleepChallengeProgress = pgTable("sleep_challenge_progress", {
+  id: serial("id").primaryKey(),
+  challengeId: integer("challenge_id").notNull().references(() => sleepChallenges.id, { onDelete: 'cascade' }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  sleepHours: integer("sleep_hours"), // Actual sleep * 10
+  targetMet: boolean("target_met").default(false).notNull(),
+  pointsEarned: integer("points_earned").default(0).notNull(),
+  bonusMultiplier: integer("bonus_multiplier").default(1).notNull(), // For streak bonuses
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const userRewards = pgTable("user_rewards", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }).unique(),
+  totalPoints: integer("total_points").default(0).notNull(),
+  lifetimePoints: integer("lifetime_points").default(0).notNull(),
+  currentStreak: integer("current_streak").default(0).notNull(),
+  longestStreak: integer("longest_streak").default(0).notNull(),
+  level: integer("level").default(1).notNull(),
+  badges: text("badges").array().default([]).notNull(), // Array of earned badges
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   id: true,
   email: true,
@@ -99,6 +142,60 @@ export type InsertWhoopToken = z.infer<typeof insertWhoopTokenSchema>;
 export type WhoopToken = typeof whoopTokens.$inferSelect;
 export type InsertUserCalendar = z.infer<typeof insertUserCalendarSchema>;
 export type UserCalendar = typeof userCalendars.$inferSelect;
+
+// Sleep Challenge schemas
+export const insertSleepChallengeSchema = createInsertSchema(sleepChallenges).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertSleepChallengeProgressSchema = createInsertSchema(sleepChallengeProgress).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertUserRewardsSchema = createInsertSchema(userRewards).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type SleepChallenge = typeof sleepChallenges.$inferSelect;
+export type InsertSleepChallenge = z.infer<typeof insertSleepChallengeSchema>;
+export type SleepChallengeProgress = typeof sleepChallengeProgress.$inferSelect;
+export type InsertSleepChallengeProgress = z.infer<typeof insertSleepChallengeProgressSchema>;
+export type UserRewards = typeof userRewards.$inferSelect;
+export type InsertUserRewards = z.infer<typeof insertUserRewardsSchema>;
+
+// Challenge constants
+export const CHALLENGE_TYPES = {
+  WEEKLY: 'weekly',
+  MONTHLY: 'monthly',
+  CUSTOM: 'custom'
+} as const;
+
+export const BADGE_TYPES = {
+  SLEEP_STREAK_3: 'sleep_streak_3',
+  SLEEP_STREAK_7: 'sleep_streak_7',
+  SLEEP_STREAK_14: 'sleep_streak_14',
+  SLEEP_STREAK_30: 'sleep_streak_30',
+  PERFECT_WEEK: 'perfect_week',
+  PERFECT_MONTH: 'perfect_month',
+  SLEEP_CHAMPION: 'sleep_champion',
+  EARLY_BIRD: 'early_bird',
+  CONSISTENCY_MASTER: 'consistency_master'
+} as const;
+
+export const POINT_SYSTEM = {
+  TARGET_MET: 10,
+  STREAK_BONUS_MULTIPLIER: 1.5,
+  PERFECT_WEEK_BONUS: 50,
+  PERFECT_MONTH_BONUS: 200,
+  CHALLENGE_COMPLETION_BONUS: 100
+} as const;
+
+export type ChallengeType = typeof CHALLENGE_TYPES[keyof typeof CHALLENGE_TYPES];
+export type BadgeType = typeof BADGE_TYPES[keyof typeof BADGE_TYPES];
 
 // WHOOP API response types
 export interface WhoopTodayResponse {

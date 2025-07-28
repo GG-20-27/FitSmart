@@ -591,7 +591,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[WHOOP AUTH] Fetching today's WHOOP data for user: ${whoopUserId}`);
       try {
         const today = new Date().toISOString().split('T')[0];
-        const whoopDataResult = await whoopApiService.getTodayData(tokenResponse.access_token);
+        const whoopDataResult = await whoopApiService.getTodaysData(whoopUserId);
         
         if (whoopDataResult && whoopDataResult.recovery_score !== undefined) {
           const whoopDataRecord = {
@@ -1191,6 +1191,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       
       // Token validation using user-specific token
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
       const tokenData = await whoopTokenStorage.getToken(userId);
       if (!tokenData?.access_token) {
         return res.status(401).json({ error: 'Missing WHOOP access token for user' });
@@ -1205,6 +1208,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
       const weeklyData = await whoopApiService.getWeeklyAverages(userId);
       
       console.log('Weekly WHOOP averages retrieved successfully');
@@ -1269,8 +1275,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const today = getTodayDate();
       const uploadedMeals = [];
       
+      const userId = getCurrentUserId(req) || 'default-user';
+      
       for (const file of files) {
         const meal = await storage.createMeal({
+          userId: userId,
           filename: file.filename,
           originalName: file.originalname,
           mimetype: file.mimetype,
@@ -1329,6 +1338,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Get current user ID from session
       const userId = getCurrentUserId(req);
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
       
       // Get user's calendars from database
       const userCalendars = await storage.getUserCalendars(userId);
@@ -1430,6 +1443,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Get current user ID from session
       const userId = getCurrentUserId(req);
       
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
       // Get user's calendars from database
       const userCalendars = await storage.getUserCalendars(userId);
       
@@ -1524,6 +1541,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/calendars', requireAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
       const calendars = await storage.getUserCalendars(userId);
       res.json(calendars);
     } catch (error) {
