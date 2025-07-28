@@ -1569,7 +1569,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Calendar Management Endpoints
   
   // Get user's calendars
-  app.get('/api/calendars', requireAuth, async (req, res) => {
+  app.get('/api/calendars', requireJWTAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req);
       if (!userId) {
@@ -1584,7 +1584,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Add new calendar
-  app.post('/api/calendars', requireAuth, async (req, res) => {
+  app.post('/api/calendars', requireJWTAuth, async (req, res) => {
     try {
       const { calendarUrl, calendarName } = req.body;
       const userId = getCurrentUserId(req);
@@ -1593,10 +1593,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Calendar URL and name are required' });
       }
       
-      const finalUserId = userId || await getDefaultUserId();
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
       
       const calendar = await storage.createUserCalendar({
-        userId: finalUserId,
+        userId: userId,
         calendarUrl,
         calendarName,
         isActive: true

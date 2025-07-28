@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind, User, LogOut } from 'lucide-react';
+import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind, User, LogOut, Crown } from 'lucide-react';
 import { HealthIcon } from '@/components/HealthIcon';
 import { formatTime } from '@/lib/utils';
 import { WhoopTodayResponse } from '@shared/schema';
@@ -319,7 +319,7 @@ export default function Dashboard() {
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-orange-400 to-red-500 opacity-30 animate-pulse"></div>
                   <div className="relative flex items-center space-x-2">
-                    <User className="h-4 w-4" />
+                    <Crown className="h-4 w-4" />
                     <span className="text-xs sm:text-sm font-medium hidden sm:inline">Admin</span>
                   </div>
                 </Button>
@@ -426,7 +426,10 @@ export default function Dashboard() {
                       )}
                     </Button>
                     <Button
-                      onClick={() => refetchWhoop()}
+                      onClick={() => {
+                        refetchWhoop();
+                        window.location.reload();
+                      }}
                       disabled={whoopLoading}
                       variant="outline"
                       size="sm"

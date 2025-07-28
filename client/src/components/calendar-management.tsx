@@ -47,16 +47,30 @@ export function CalendarManagement() {
   const { data: calendars = [], isLoading } = useQuery<UserCalendar[]>({
     queryKey: ['/api/calendars'],
     retry: false,
+    queryFn: async () => {
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('/api/calendars', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch calendars');
+      }
+      return response.json();
+    },
   });
 
   // Add calendar mutation
   const addCalendarMutation = useMutation({
     mutationFn: async ({ calendarUrl, calendarName }: { calendarUrl: string; calendarName: string }) => {
+      const token = localStorage.getItem('auth_token');
       const response = await fetch('/api/calendars', {
         method: 'POST',
         body: JSON.stringify({ calendarUrl, calendarName }),
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
       });
       
