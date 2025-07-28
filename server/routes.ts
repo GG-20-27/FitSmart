@@ -557,8 +557,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Create or get user in database with admin role check
       const userEmail = `${whoopUserId}@fitscore.local`;
-      const adminWhoopId = process.env.ADMIN_WHOOP_ID;
-      const isAdmin = adminWhoopId && userProfile.user_id.toString() === adminWhoopId;
+      const adminWhoopId = process.env.ADMIN_WHOOP_ID || '25283528';
+      const isAdmin = userProfile.user_id.toString() === adminWhoopId;
       
       const userData = {
         id: whoopUserId,

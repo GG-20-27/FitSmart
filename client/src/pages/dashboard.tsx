@@ -375,12 +375,12 @@ export default function Dashboard() {
                 </p>
                 <Button 
                   onClick={() => connectWhoopMutation.mutate()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                  className="bg-gradient-to-r from-[#00D4FF] to-[#0099FF] hover:from-[#00C4EF] hover:to-[#0089EF] text-white shadow-[0_0_20px_rgba(0,212,255,0.3)] hover:shadow-[0_0_25px_rgba(0,212,255,0.4)] transition-all duration-200"
                   disabled={connectWhoopMutation.isPending}
                 >
                   {connectWhoopMutation.isPending ? (
                     <div className="flex items-center space-x-2">
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                      <div className="w-4 h-4 border-2 border-[#00D4FF]/30 border-t-[#00D4FF] rounded-full animate-spin shadow-[0_0_10px_rgba(0,212,255,0.5)]"></div>
                       <span>Connecting...</span>
                     </div>
                   ) : (
@@ -411,7 +411,7 @@ export default function Dashboard() {
                       disabled={connectWhoopMutation.isPending}
                       variant="outline"
                       size="sm"  
-                      className="bg-transparent border-0 bg-gradient-to-r from-[#4F8CFF] to-[#6F4BFF] text-white hover:from-[#3F7CFF] hover:to-[#5F3BFF] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      className="bg-transparent border-0 bg-gradient-to-r from-[#00D4FF] to-[#0099FF] text-white hover:from-[#00C4EF] hover:to-[#0089EF] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 shadow-[0_0_20px_rgba(0,212,255,0.3)]"
                     >
                       {connectWhoopMutation.isPending ? (
                         <>
@@ -430,7 +430,7 @@ export default function Dashboard() {
                       disabled={whoopLoading}
                       variant="outline"
                       size="sm"
-                      className="bg-transparent border-2 border-[#4F8CFF] text-[#4F8CFF] hover:bg-gradient-to-r hover:from-[#4F8CFF] hover:to-[#6F4BFF] hover:text-white hover:border-transparent transition-all duration-200"
+                      className="bg-transparent border-2 border-[#00D4FF] text-[#00D4FF] hover:bg-gradient-to-r hover:from-[#00D4FF] hover:to-[#0099FF] hover:text-white hover:border-transparent transition-all duration-200 hover:shadow-[0_0_20px_rgba(0,212,255,0.3)]"
                     >
                       {whoopLoading ? (
                         <RefreshCw className="w-4 h-4 animate-spin" />

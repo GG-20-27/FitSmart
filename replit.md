@@ -119,6 +119,15 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes  
+- January 28, 2025: **COSMETIC IMPROVEMENTS AND ADMIN CONFIGURATION COMPLETED**
+  - ✅ **ADMIN USER CONFIGURED**: Set WHOOP ID '25283528' as admin user for complete system management access
+  - ✅ **BUTTON STYLING UPDATED**: Changed all connection buttons to neon light blue gradient (#00D4FF to #0099FF) with glow effects
+  - ✅ **LOADING ANIMATIONS ENHANCED**: Updated spinner borders and colors to match neon blue theme
+  - ✅ **EXTENDED API DATA STRUCTURE**: Added sleep_score, respiratory_rate, skin_temp_celsius, spo2_percentage, average_heart_rate fields
+  - ✅ **USER PROFILE ENDPOINT**: Created /api/users/me returning whoopId and role for profile display
+  - ✅ **ADMIN PAGE FUNCTIONALITY**: Full admin dashboard with user management capabilities and role-based access control
+  - ✅ **DASHBOARD UI UPDATED**: Sleep card now shows sleep_score percentage instead of sleep_hours in main metrics
+  - ✅ **SLEEP HOURS RELOCATED**: Moved sleep duration to "Other Insights" section as requested by user
 - January 28, 2025: **COMPLETE AUTHENTICATION SYSTEM OVERHAUL - ALL ISSUES RESOLVED**
   - ✅ **AUTHENTICATION FLOW FIXED**: useAuth now checks token expiration and redirects to /api/whoop/login if expired/missing
   - ✅ **API AUTHORIZATION HEADERS**: All API requests include Authorization: Bearer token from localStorage
