@@ -1,0 +1,60 @@
+We have ONE bug left: the SPA shows “N/A” because the token header and
+user-id plumbing aren’t fully connected.  Do **ONLY** the changes below and
+touch nothing else.
+
+────────────────────────────────────────────────────────
+1. jwtAuth.ts  (server)
+   • After verifying the JWT payload:
+       req.userId = payload.whoopId
+       req.role   = payload.role
+   • Then next()
+
+2. whoopApiService.ts
+   • REMOVE every hard-coded default userId like
+       authHeader(userId = 'd5fc289b-82a1…')
+   • All public methods must receive an explicit userId and **throw**
+     if it’s undefined.
+   • getValidWhoopToken(userId) – no fallback, require real id.
+
+3. routes.ts
+   • Wherever you call whoopApiService.* pass the real user id:
+       const userId = getCurrentUserId(req);          // already exists
+       const data   = await whoopApiService.getTodaysData(userId);
+   • Same for authHeader helpers, etc.
+
+4. storage/upsertWhoopData (or createOrUpdateWhoopData)
+   • Sleep hours are stored as integer *10 (7.6h ⇒ 76) and read back
+     with `/10`.  Keep that consistent (no mixing sleepScore vs
+     sleep_hours).
+
+5. client/src/hooks/useAuth.ts
+   • On first load:
+       if (location.hash.startsWith('#token=')) {
+         const tok = location.hash.replace('#token=','');
+         localStorage.setItem('token', tok);
+         history.replaceState({}, '', '/');
+       }
+   • If no token OR jwtDecode(tok).exp < Date.now()/1000
+       → redirect to /api/whoop/login
+
+6. client/src/lib/queryClient.ts  (or your single fetch wrapper)
+   • Read token = localStorage.getItem('token')
+   • If token exists, add
+       headers: { ...init.headers, Authorization:`Bearer ${token}` }
+
+7. Dashboard page
+   • Remove orange outline “Reconnect”, keep blue gradient button.
+   • Show “Syncing…” while /api/whoop/today is 404, show numbers on 200.
+
+8. Admin flag
+   • ENV var ADMIN_WHOOP_ID is already read in callback; nothing to change.
+
+After patch:
+   • First visit → OAuth → redirect → #token saved → tiles populate.
+   • curl with Bearer token returns today’s JSON.
+   • Admin UI visible only for ADMIN_WHOOP_ID.
+────────────────────────────────────────────────────────
+Make ONLY these targeted edits; leave all other logic untouched.
+Run unit test:
+   curl -H "Authorization: Bearer $TOKEN" /api/whoop/today  (should 200)
+Then redeploy.
