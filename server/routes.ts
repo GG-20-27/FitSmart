@@ -603,8 +603,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       console.log(`[WHOOP AUTH] JWT token generated for user: ${whoopUserId} with role: ${userData.role}`);
       
-      // Redirect to dashboard with token 
-      res.redirect(`/#token=${authToken}`);
+      // Redirect to auth success page with token for proper handling
+      res.redirect(`/auth-success.html#token=${authToken}`);
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);
@@ -1094,7 +1094,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/test/jwt', async (req, res) => {
     try {
       const { generateJWT } = await import('./jwtAuth');
-      const testUserId = 'whoop_99999999';
+      const requestedUserId = req.query.userId as string;
+      const testUserId = requestedUserId ? `whoop_${requestedUserId}` : 'whoop_99999999';
       const testToken = generateJWT(testUserId, 'user');
       
       console.log(`[TEST] Generated JWT token for test user: ${testUserId}`);

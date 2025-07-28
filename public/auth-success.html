@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WHOOP Authentication Success</title>
+    <meta charset="utf-8">
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
+            background: #0f172a; 
+            color: white; 
+            padding: 40px; 
+            text-align: center; 
+        }
+        .container { max-width: 600px; margin: 0 auto; }
+        .success { background: #059669; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .loading { background: #374151; padding: 20px; border-radius: 8px; margin: 20px 0; }
+        .data { background: #1e293b; padding: 15px; border-radius: 8px; margin: 15px 0; font-family: monospace; text-align: left; }
+        button { background: #3b82f6; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; margin: 10px; }
+        .metric { display: inline-block; background: #4338ca; padding: 20px; margin: 15px; border-radius: 12px; min-width: 120px; }
+        .metric-value { font-size: 28px; font-weight: bold; color: #60a5fa; }
+        .metric-label { font-size: 14px; color: #e2e8f0; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎉 WHOOP Authentication Successful!</h1>
+        
+        <div id="status" class="loading">
+            <div>🔄 Processing authentication...</div>
+            <div>Extracting JWT token from URL...</div>
+        </div>
+        
+        <div id="token-info" style="display: none;"></div>
+        <div id="data-display" style="display: none;"></div>
+        <div id="dashboard-redirect" style="display: none;"></div>
+    </div>
+
+    <script>
+        async function processAuth() {
+            try {
+                // Extract token from URL hash
+                const hash = window.location.hash;
+                if (!hash.startsWith('#token=')) {
+                    throw new Error('No token found in URL hash');
+                }
+                
+                const token = hash.substring(7); // Remove '#token='
+                
+                // Store token in localStorage
+                localStorage.setItem('auth_token', token);
+                
+                document.getElementById('status').innerHTML = `
+                    <div class="success">✅ JWT Token Extracted and Stored</div>
+                `;
+                
+                document.getElementById('token-info').style.display = 'block';
+                document.getElementById('token-info').innerHTML = `
+                    <div class="data">
+                        <strong>JWT Token:</strong> ${token.substring(0, 50)}...<br>
+                        <strong>Stored in:</strong> localStorage['auth_token']<br>
+                        <strong>Status:</strong> Ready for API calls
+                    </div>
+                `;
+                
+                // Test authentication
+                console.log('[AUTH] Testing authentication with stored token...');
+                const authResponse = await fetch('/api/auth/me', {
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!authResponse.ok) {
+                    throw new Error(`Auth check failed: ${authResponse.status}`);
+                }
+                
+                const authData = await authResponse.json();
+                console.log('[AUTH] Authentication successful:', authData);
+                
+                // Fetch WHOOP data
+                console.log('[WHOOP] Fetching today\'s WHOOP data...');
+                const whoopResponse = await fetch('/api/whoop/today', {
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (!whoopResponse.ok) {
+                    const errorText = await whoopResponse.text();
+                    throw new Error(`WHOOP data fetch failed: ${whoopResponse.status} - ${errorText}`);
+                }
+                
+                const whoopData = await whoopResponse.json();
+                console.log('[WHOOP] Data retrieved successfully:', whoopData);
+                
+                // Display the data
+                document.getElementById('data-display').style.display = 'block';
+                document.getElementById('data-display').innerHTML = `
+                    <div class="success">✅ Your WHOOP Data Retrieved Successfully</div>
+                    <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+                        <div class="metric">
+                            <div class="metric-value">${whoopData.recovery_score || 'N/A'}</div>
+                            <div class="metric-label">Recovery Score</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value">${whoopData.sleep_hours ? whoopData.sleep_hours + 'h' : 'N/A'}</div>
+                            <div class="metric-label">Sleep Hours</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value">${whoopData.strain || 'N/A'}</div>
+                            <div class="metric-label">Strain</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-value">${whoopData.resting_heart_rate ? whoopData.resting_heart_rate + 'bpm' : 'N/A'}</div>
+                            <div class="metric-label">Heart Rate</div>
+                        </div>
+                    </div>
+                    <div class="data">
+                        <strong>Raw Data:</strong><br>
+                        ${JSON.stringify(whoopData, null, 2)}
+                    </div>
+                `;
+                
+                // Show redirect options
+                document.getElementById('dashboard-redirect').style.display = 'block';
+                document.getElementById('dashboard-redirect').innerHTML = `
+                    <div class="success">✅ Authentication Complete - Data Available</div>
+                    <div>
+                        <button onclick="window.location.href = '/'">Go to Dashboard</button>
+                        <button onclick="window.location.href = '/dashboard-fix-test.html'">Test Dashboard</button>
+                    </div>
+                    <div style="margin-top: 20px; font-size: 14px; color: #94a3b8;">
+                        Your JWT token is now stored and the dashboard should display your real WHOOP data!
+                    </div>
+                `;
+                
+                // Clear the hash from URL for clean appearance
+                window.history.replaceState(null, '', '/auth-success.html');
+                
+            } catch (error) {
+                console.error('[AUTH ERROR]', error);
+                document.getElementById('status').innerHTML = `
+                    <div style="background: #dc2626; padding: 20px; border-radius: 8px;">
+                        ❌ Authentication Error: ${error.message}
+                    </div>
+                `;
+            }
+        }
+        
+        // Process authentication immediately when page loads
+        processAuth();
+    </script>
+</body>
+</html>
