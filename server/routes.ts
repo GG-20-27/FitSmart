@@ -729,6 +729,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // WHOOP raw data debug endpoint (JWT-authenticated)
+  app.get('/api/whoop/raw', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[WHOOP RAW] Getting raw WHOOP data for user: ${userId}`);
+      
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
+        });
+      }
+      
+      // Fetch comprehensive raw data for debugging
+      const rawData = await whoopApiService.getTodaysData(userId);
+      
+      return res.json({
+        timestamp: new Date().toISOString(),
+        userId: userId,
+        rawData: rawData,
+        message: 'Raw WHOOP API response for debugging purposes'
+      });
+      
+    } catch (error: any) {
+      console.error('[WHOOP RAW] Error:', error.message);
+      res.status(500).json({ 
+        error: 'Failed to fetch raw WHOOP data',
+        details: error.message 
+      });
+    }
+  });
+
   // WHOOP authentication status endpoint
   app.get('/api/whoop/status', requireJWTAuth, async (req, res) => {
     // Disable caching for this endpoint
@@ -975,9 +1007,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[WHOOP TODAY] Returning cached data for user: ${userId}`);
         return res.json({
           recovery_score: cachedData.recoveryScore,
-          sleep_hours: cachedData.sleepScore / 10, // Convert back to hours (7.6 hrs not 84)
+          sleep_score: cachedData.sleepScore || null, // Primary sleep metric
+          sleep_hours: cachedData.sleepHours || (cachedData.sleepScore ? cachedData.sleepScore / 10 : null), // Secondary
+          sleep_stages: null, // Not stored in current cache schema
           strain: cachedData.strainScore / 10, // Convert back to decimal (4.5 not 45)
           resting_heart_rate: cachedData.restingHeartRate,
+          average_heart_rate: cachedData.averageHeartRate || null,
+          hrv: cachedData.hrv || null,
+          stress_score: null, // Not available in WHOOP API
+          skin_temperature: cachedData.skinTempCelsius || null,
+          spo2_percentage: cachedData.spo2Percentage || null,
+          respiratory_rate: cachedData.respiratoryRate || null,
+          calories_burned: null, // Not stored in current cache schema
+          activity_log: [], // Not stored in current cache schema
           date: cachedData.date,
           last_sync: cachedData.lastSync
         });
@@ -1008,15 +1050,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[WHOOP TODAY] Fresh data fetched and stored for user: ${userId}`);
           return res.json({
             recovery_score: freshData.recovery_score,
-            sleep_score: freshData.sleep_score,
-            sleep_hours: freshData.sleep_hours, 
+            sleep_score: freshData.sleep_score, // Primary sleep metric
+            sleep_hours: freshData.sleep_hours, // Secondary sleep metric
+            sleep_stages: freshData.sleep_stages || null,
             strain: freshData.strain,
             resting_heart_rate: freshData.resting_heart_rate,
+            average_heart_rate: freshData.average_heart_rate || null,
             hrv: freshData.hrv,
-            respiratory_rate: freshData.respiratory_rate,
-            skin_temp_celsius: freshData.skin_temp_celsius,
-            spo2_percentage: freshData.spo2_percentage,
-            average_heart_rate: freshData.average_heart_rate,
+            stress_score: freshData.stress_score || null,
+            skin_temperature: freshData.skin_temperature || null,
+            spo2_percentage: freshData.spo2_percentage || null,
+            respiratory_rate: freshData.respiratory_rate || null,
+            calories_burned: freshData.calories_burned || null,
+            activity_log: freshData.activity_log || [],
             date: todayDate,
             last_sync: new Date().toISOString()
           });

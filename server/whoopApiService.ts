@@ -71,8 +71,23 @@ export interface WhoopTodayData {
   strain?: number;
   recovery_score?: number;
   sleep_score?: number;
+  sleep_hours?: number;
+  sleep_stages?: {
+    light_sleep_minutes?: number;
+    deep_sleep_minutes?: number;
+    rem_sleep_minutes?: number;
+    awake_minutes?: number;
+  };
   hrv?: number;
   resting_heart_rate?: number;
+  average_heart_rate?: number;
+  stress_score?: number;
+  skin_temperature?: number;
+  spo2_percentage?: number;
+  respiratory_rate?: number;
+  calories_burned?: number;
+  activity_log?: any[];
+  raw_data?: any;
   sleep_hours?: number;
   skin_temp_celsius?: number;
   spo2_percentage?: number;
@@ -766,21 +781,34 @@ export class WhoopApiService {
         console.log('Error fetching additional insights:', error);
       }
 
+      // Calculate sleep stages in minutes if available
+      const sleepStages = sleepData?.score?.stage_summary ? {
+        light_sleep_minutes: Math.round((sleepData.score.stage_summary.total_light_sleep_time_milli || 0) / (1000 * 60)),
+        deep_sleep_minutes: Math.round((sleepData.score.stage_summary.total_slow_wave_sleep_time_milli || 0) / (1000 * 60)),
+        rem_sleep_minutes: Math.round((sleepData.score.stage_summary.total_rem_sleep_time_milli || 0) / (1000 * 60)),
+        awake_minutes: Math.round((sleepData.score.stage_summary.total_awake_time_milli || 0) / (1000 * 60))
+      } : null;
+
       const result: WhoopTodayData = {
         cycle_id: latestCycle.id,
         strain: latestCycle.score?.strain || null,
         recovery_score: recovery?.score?.recovery_score || null,
         sleep_score: sleepData?.score?.sleep_performance_percentage || sleepData?.score?.sleep_score || null,
+        sleep_stages: sleepStages,
+        sleep_hours: sleepHours,
         hrv: recovery?.score?.hrv_rmssd_milli || null,
         resting_heart_rate: recovery?.score?.resting_heart_rate || null,
-        sleep_hours: sleepHours,
-        skin_temp_celsius: recovery?.score?.skin_temp_celsius || null,
+        average_heart_rate: workoutData?.avgHeartRate || latestCycle.score?.average_heart_rate || null,
+        stress_score: null, // WHOOP doesn't provide stress score in current API
+        skin_temperature: recovery?.score?.skin_temp_celsius || null,
         spo2_percentage: recovery?.score?.spo2_percentage || null,
-        average_heart_rate: latestCycle.score?.average_heart_rate || null,
-        raw: {
+        respiratory_rate: recovery?.score?.respiratory_rate || null,
+        calories_burned: workoutData?.kilojoule ? Math.round(workoutData.kilojoule * 0.239) : null, // Convert kJ to calories
+        activity_log: workoutData?.activities || [],
+        raw_data: {
           cycle: latestCycle,
           recovery: recovery,
-          sleep: sleepData || sleepHours,
+          sleep: sleepData,
           workout: workoutData,
           body_measurements: bodyMeasurements
         }

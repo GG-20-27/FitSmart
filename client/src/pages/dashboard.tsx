@@ -562,26 +562,148 @@ export default function Dashboard() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
               {/* Sleep Hours */}
-              {whoopData.sleep_hours && (
-                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                  <CardContent className="p-6">
-                    <div className="flex items-center space-x-3 mb-4">
-                      <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
-                        <Moon className="h-6 w-6 text-white" />
-                      </div>
-                      <div>
-                        <p className="text-slate-400 text-sm">Sleep Duration</p>
-                        <p className="text-2xl font-bold text-purple-400">
-                          <CountUp end={whoopData.sleep_hours} decimals={1} duration={1000} /> hrs
-                        </p>
-                      </div>
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                      <Moon className="h-6 w-6 text-white" />
                     </div>
-                    <div className="text-xs text-slate-500">
-                      Total time spent sleeping
+                    <div>
+                      <p className="text-slate-400 text-sm">Sleep Duration</p>
+                      <p className="text-2xl font-bold text-purple-400">
+                        {whoopData.sleep_hours ? (
+                          <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1000} /> hrs</>
+                        ) : (
+                          <span className="text-slate-500">N/A</span>
+                        )}
+                      </p>
                     </div>
-                  </CardContent>
-                </Card>
-              )}
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Total time spent sleeping
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Skin Temperature */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center">
+                      <Activity className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">Skin Temperature</p>
+                      <p className="text-2xl font-bold text-orange-400">
+                        {whoopData.skin_temperature ? (
+                          <><CountUp end={whoopData.skin_temperature} decimals={1} duration={1000} />°C</>
+                        ) : (
+                          <span className="text-slate-500">N/A</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Body temperature variation
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Respiratory Rate */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                      <Wind className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">Respiratory Rate</p>
+                      <p className="text-2xl font-bold text-blue-400">
+                        {whoopData.respiratory_rate ? (
+                          <><CountUp end={whoopData.respiratory_rate} decimals={1} duration={1000} /> rpm</>
+                        ) : (
+                          <span className="text-slate-500">N/A</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Breaths per minute
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Blood Oxygen */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
+                      <Heart className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">Blood Oxygen</p>
+                      <p className="text-2xl font-bold text-red-400">
+                        {whoopData.spo2_percentage ? (
+                          <><CountUp end={whoopData.spo2_percentage} decimals={1} duration={1000} />%</>
+                        ) : (
+                          <span className="text-slate-500">N/A</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    SpO2 saturation level
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Calories Burned */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="w-12 h-12 bg-yellow-500 rounded-full flex items-center justify-center">
+                      <Zap className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">Calories Burned</p>
+                      <p className="text-2xl font-bold text-yellow-400">
+                        {whoopData.calories_burned ? (
+                          <><CountUp end={whoopData.calories_burned} duration={1000} /> cal</>
+                        ) : (
+                          <span className="text-slate-500">N/A</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Total energy expenditure
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Average Heart Rate */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="w-12 h-12 bg-pink-500 rounded-full flex items-center justify-center">
+                      <Heart className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">Average Heart Rate</p>
+                      <p className="text-2xl font-bold text-pink-400">
+                        {whoopData.average_heart_rate ? (
+                          <><CountUp end={whoopData.average_heart_rate} duration={1000} /> bpm</>
+                        ) : (
+                          <span className="text-slate-500">N/A</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    Daily average heart rate
+                  </div>
+                </CardContent>
+              </Card>
 
               {/* Resting Heart Rate */}
               {whoopData.resting_heart_rate && (

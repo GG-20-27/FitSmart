@@ -17,10 +17,15 @@ export class WhoopTokenStorage {
         return null;
       }
       
+      // Convert Date object back to unix timestamp for consistency
+      const expiresAtTimestamp = token.expiresAt instanceof Date 
+        ? Math.floor(token.expiresAt.getTime() / 1000)
+        : token.expiresAt;
+
       return {
         access_token: token.accessToken,
         refresh_token: token.refreshToken || undefined,
-        expires_at: token.expiresAt || undefined,
+        expires_at: expiresAtTimestamp || undefined,
         user_id: userId
       };
     } catch (error) {
@@ -37,18 +42,25 @@ export class WhoopTokenStorage {
         throw new Error(`User ${userId} does not exist. Create user first.`);
       }
 
+      // Fix expires_at Date handling to prevent .toISOString() errors
+      const expiresAt = tokenData.expires_at
+        ? tokenData.expires_at instanceof Date
+          ? tokenData.expires_at
+          : new Date(tokenData.expires_at * 1000)
+        : null;
+
       // Upsert the token
       await db.insert(whoopTokens).values({
         userId: userId,
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token || null,
-        expiresAt: tokenData.expires_at || null,
+        expiresAt: expiresAt,
       }).onConflictDoUpdate({
         target: whoopTokens.userId,
         set: {
           accessToken: tokenData.access_token,
           refreshToken: tokenData.refresh_token || null,
-          expiresAt: tokenData.expires_at || null,
+          expiresAt: expiresAt,
           updatedAt: new Date(),
         },
       });
