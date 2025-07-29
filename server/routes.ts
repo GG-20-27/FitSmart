@@ -14,7 +14,7 @@ import { userService } from "./userService";
 import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
-import { requireAuth, attachUser, getCurrentUserId, requireAdmin } from './authMiddleware';
+import { getCurrentUserId, requireAdmin } from './authMiddleware';
 import { requireJWTAuth } from './jwtAuth';
 import { db } from './db';
 import { users } from '@shared/schema';
@@ -155,9 +155,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Handle pre-flight requests for all routes
   app.options('*', cors());
-  
-  // Attach user to all requests (if authenticated)
-  app.use(attachUser);
 
   // Serve static files from uploads directory
   app.use('/uploads', express.static(uploadsDir));
@@ -733,7 +730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // WHOOP authentication status endpoint
-  app.get('/api/whoop/status', requireAuth, async (req, res) => {
+  app.get('/api/whoop/status', requireJWTAuth, async (req, res) => {
     // Disable caching for this endpoint
     res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.set('Pragma', 'no-cache');
@@ -1256,7 +1253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // WHOOP weekly averages endpoint
-  app.get('/api/whoop/weekly', requireAuth, async (req, res) => {
+  app.get('/api/whoop/weekly', requireJWTAuth, async (req, res) => {
     try {
       console.log('Fetching weekly WHOOP averages...');
       
@@ -1307,7 +1304,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // WHOOP summary analytics endpoint
-  app.get('/api/whoop/summary', async (req, res) => {
+  app.get('/api/whoop/summary', requireJWTAuth, async (req, res) => {
     try {
       const days = parseInt(req.query.days as string) || 7;
       
@@ -1405,7 +1402,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User-specific calendar today's events endpoint
-  app.get('/api/calendar/today', requireAuth, async (req, res) => {
+  app.get('/api/calendar/today', requireJWTAuth, async (req, res) => {
     try {
       console.log('Fetching today\'s calendar events...');
       
@@ -1503,7 +1500,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // User-specific calendar events endpoint with date range support
-  app.get('/api/calendar/events', requireAuth, async (req, res) => {
+  app.get('/api/calendar/events', requireJWTAuth, async (req, res) => {
     try {
       const { start, end } = req.query as { start?: string; end?: string };
       
@@ -1665,7 +1662,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete calendar
-  app.delete('/api/calendars/:id', async (req, res) => {
+  app.delete('/api/calendars/:id', requireJWTAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       await storage.deleteUserCalendar(id);
@@ -1677,7 +1674,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update calendar (toggle active status or change name)
-  app.patch('/api/calendars/:id', async (req, res) => {
+  app.patch('/api/calendars/:id', requireJWTAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const updates = req.body;

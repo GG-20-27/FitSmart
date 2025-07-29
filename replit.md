@@ -119,6 +119,13 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes  
+- January 29, 2025: **JWT AUTHENTICATION MIGRATION COMPLETED**
+  - ✅ **ALL ENDPOINTS MIGRATED**: Replaced requireAuth with requireJWTAuth on /api/whoop/weekly, /api/whoop/summary, /api/calendar/today, /api/calendar/events, /api/calendars (GET/POST/DELETE/PATCH)
+  - ✅ **UNUSED MIDDLEWARE REMOVED**: Removed attachUser middleware call after CORS block as specified
+  - ✅ **JWT TOKEN SUPPORT**: All endpoints now accept Authorization: Bearer <JWT> tokens instead of session-based auth
+  - ✅ **BACKWARD COMPATIBILITY**: Admin routes unchanged, continue using requireAdmin which checks JWT internally
+  - ✅ **TESTING VERIFIED**: JWT token generation and authentication working correctly for all migrated endpoints
+  - ✅ **NO REGRESSIONS**: Meal upload and other endpoints remain unchanged and functional
 - January 28, 2025: **COSMETIC IMPROVEMENTS AND ADMIN CONFIGURATION COMPLETED**
   - ✅ **ADMIN USER CONFIGURED**: Set WHOOP ID '25283528' as admin user for complete system management access
   - ✅ **BUTTON STYLING UPDATED**: Changed all connection buttons to neon light blue gradient (#00D4FF to #0099FF) with glow effects
