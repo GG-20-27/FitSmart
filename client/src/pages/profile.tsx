@@ -12,6 +12,60 @@ import SocialAuth from '@/components/social-auth';
 import { CalendarManagement } from '@/components/calendar-management';
 import { useAuth } from '@/hooks/useAuth';
 
+function FitScoreLogo({ size = 64 }: { size?: number }) {
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      <svg 
+        width={size} 
+        height={size} 
+        viewBox="0 0 100 100" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+        className="drop-shadow-lg"
+      >
+        <defs>
+          <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#06B6D4" />
+            <stop offset="30%" stopColor="#3B82F6" />
+            <stop offset="70%" stopColor="#8B5CF6" />
+            <stop offset="100%" stopColor="#D946EF" />
+          </linearGradient>
+        </defs>
+        
+        {/* Background circle */}
+        <circle 
+          cx="50" 
+          cy="50" 
+          r="48" 
+          fill="rgba(30, 41, 59, 0.8)"
+          stroke="url(#logoGradient)"
+          strokeWidth="1"
+        />
+        
+        {/* Heartbeat line */}
+        <path
+          d="M15 50 L20 50 L25 35 L30 65 L35 20 L40 80 L45 50 L50 40 L55 60 L60 50 L65 45 L70 55 L75 50 L85 50"
+          fill="none"
+          stroke="white"
+          strokeWidth="2.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.95"
+        />
+        
+        {/* Center pulse dot */}
+        <circle
+          cx="50"
+          cy="50"
+          r="2.5"
+          fill="white"
+          opacity="1"
+        />
+      </svg>
+    </div>
+  );
+}
+
 interface UserProfile {
   id: string;
   email: string;
@@ -312,19 +366,25 @@ export default function Profile() {
               <Button
                 onClick={() => window.open('/', '_blank')}
                 variant="outline"
-                className="h-auto p-6 flex flex-col items-center space-y-3 bg-gradient-to-br from-slate-800 to-slate-700 border-slate-600 text-white hover:from-slate-700 hover:to-slate-600 transition-all duration-300"
+                className="relative overflow-hidden border-transparent bg-gradient-to-r from-pink-500 to-rose-600 text-white hover:from-pink-600 hover:to-rose-700 h-auto p-6 flex flex-col items-center space-y-3 transition-all duration-300"
               >
-                <Activity className="h-8 w-8 text-blue-400" />
-                <span className="font-medium">Dashboard</span>
+                <div className="absolute inset-0 bg-gradient-to-r from-pink-400 to-rose-500 opacity-30 animate-pulse"></div>
+                <div className="relative flex flex-col items-center space-y-3">
+                  <FitScoreLogo size={32} />
+                  <span className="font-medium">Dashboard</span>
+                </div>
               </Button>
               
               <Button
                 onClick={() => window.open('/calendar', '_blank')}
                 variant="outline"
-                className="h-auto p-6 flex flex-col items-center space-y-3 bg-gradient-to-br from-slate-800 to-slate-700 border-slate-600 text-white hover:from-slate-700 hover:to-slate-600 transition-all duration-300"
+                className="relative overflow-hidden border-transparent bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 h-auto p-6 flex flex-col items-center space-y-3 transition-all duration-300"
               >
-                <Calendar className="h-8 w-8 text-purple-400" />
-                <span className="font-medium">Calendar View</span>
+                <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-emerald-500 opacity-30 animate-pulse"></div>
+                <div className="relative flex flex-col items-center space-y-3">
+                  <Calendar className="h-8 w-8" />
+                  <span className="font-medium">Calendar View</span>
+                </div>
               </Button>
             </div>
           </CardContent>

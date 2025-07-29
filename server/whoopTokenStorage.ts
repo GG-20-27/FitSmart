@@ -1,8 +1,8 @@
 import { db } from './db';
-import { whoopTokens, type InsertWhoopToken, type WhoopToken } from '@shared/schema';
+import { whoopTokens, users } from '@shared/schema';
 import { eq } from 'drizzle-orm';
 
-interface WhoopTokenData {
+export interface WhoopTokenData {
   access_token: string;
   refresh_token?: string;
   expires_at?: number;
@@ -10,125 +10,146 @@ interface WhoopTokenData {
 }
 
 export class WhoopTokenStorage {
-  constructor() {
-    // Database-based storage, no initialization needed
+  async getToken(userId: string): Promise<WhoopTokenData | null> {
+    try {
+      const [token] = await db.select().from(whoopTokens).where(eq(whoopTokens.userId, userId));
+      if (!token) {
+        return null;
+      }
+      
+      return {
+        access_token: token.accessToken,
+        refresh_token: token.refreshToken || undefined,
+        expires_at: token.expiresAt || undefined,
+        user_id: userId
+      };
+    } catch (error) {
+      console.error('Error fetching WHOOP token:', error);
+      return null;
+    }
   }
 
-  async setToken(userId: string, tokenData: WhoopTokenData) {
+  async setToken(userId: string, tokenData: WhoopTokenData): Promise<void> {
     try {
-      // Delete existing token for this user
-      await db.delete(whoopTokens).where(eq(whoopTokens.userId, userId));
-      
-      const insertData: InsertWhoopToken = {
-        userId,
+      // First ensure the user exists
+      const existingUser = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (existingUser.length === 0) {
+        throw new Error(`User ${userId} does not exist. Create user first.`);
+      }
+
+      // Upsert the token
+      await db.insert(whoopTokens).values({
+        userId: userId,
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token || null,
-        expiresAt: tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : null,
-      };
+        expiresAt: tokenData.expires_at || null,
+      }).onConflictDoUpdate({
+        target: whoopTokens.userId,
+        set: {
+          accessToken: tokenData.access_token,
+          refreshToken: tokenData.refresh_token || null,
+          expiresAt: tokenData.expires_at || null,
+          updatedAt: new Date(),
+        },
+      });
 
-      // Insert new token
-      await db.insert(whoopTokens).values(insertData);
-      
-      console.log(`WHOOP token saved to database for user: ${userId}`);
+      console.log(`WHOOP token stored successfully for user: ${userId}`);
     } catch (error) {
-      console.error('Failed to save WHOOP token to database:', error);
+      console.error('Error storing WHOOP token:', error);
       throw error;
     }
   }
 
-  async getToken(userId: string): Promise<WhoopTokenData | undefined> {
-    try {
-      const [token] = await db.select().from(whoopTokens).where(eq(whoopTokens.userId, userId));
-      
-      if (!token) {
-        console.log(`Getting token for user: ${userId} found: false`);
-        return undefined;
-      }
-
-      console.log(`Getting token for user: ${userId} found: true`);
-      return {
-        access_token: token.accessToken,
-        refresh_token: token.refreshToken || undefined,
-        expires_at: token.expiresAt ? Math.floor(token.expiresAt.getTime() / 1000) : undefined,
-        user_id: token.userId,
-      };
-    } catch (error) {
-      console.error('Failed to get WHOOP token from database:', error);
-      return undefined;
-    }
-  }
-
-  async setDefaultToken(tokenData: WhoopTokenData) {
-    await this.setToken('d5fc289b-82a1-4e7c-b6fb-df042cb2c5a5', tokenData);
-  }
-
-  async getDefaultToken(): Promise<WhoopTokenData | undefined> {
-    return await this.getToken('d5fc289b-82a1-4e7c-b6fb-df042cb2c5a5');
-  }
-
-  isTokenValid(token: WhoopTokenData): boolean {
-    if (!token.expires_at) return true; // No expiry info, assume valid
-    return Date.now() / 1000 < token.expires_at;
-  }
-
-  async deleteWhoopToken(userId: string): Promise<void> {
+  async deleteToken(userId: string): Promise<void> {
     try {
       await db.delete(whoopTokens).where(eq(whoopTokens.userId, userId));
       console.log(`WHOOP token deleted for user: ${userId}`);
     } catch (error) {
-      console.error('Failed to delete WHOOP token:', error);
+      console.error('Error deleting WHOOP token:', error);
+      throw error;
     }
   }
 
-  async getAllTokens(): Promise<WhoopToken[]> {
+  isTokenValid(tokenData: WhoopTokenData): boolean {
+    if (!tokenData || !tokenData.access_token) {
+      return false;
+    }
+    
+    if (!tokenData.expires_at) {
+      return true; // No expiration set, assume valid
+    }
+    
+    const now = Math.floor(Date.now() / 1000);
+    const bufferTime = 5 * 60; // 5 minutes buffer
+    return now < (tokenData.expires_at - bufferTime);
+  }
+
+  async getAllTokens(): Promise<Array<{ userId: string; tokenData: WhoopTokenData }>> {
     try {
       const tokens = await db.select().from(whoopTokens);
-      return tokens;
+      return tokens.map(token => ({
+        userId: token.userId,
+        tokenData: {
+          access_token: token.accessToken,
+          refresh_token: token.refreshToken || undefined,
+          expires_at: token.expiresAt || undefined,
+          user_id: token.userId
+        }
+      }));
     } catch (error) {
-      console.error('Failed to get all WHOOP tokens:', error);
+      console.error('Error fetching all tokens:', error);
       return [];
     }
   }
 
   async refreshWhoopToken(userId: string, refreshToken: string): Promise<WhoopTokenData | null> {
+    const clientId = process.env.WHOOP_CLIENT_ID;
+    const clientSecret = process.env.WHOOP_CLIENT_SECRET;
+    
+    if (!clientId || !clientSecret) {
+      throw new Error('Missing WHOOP OAuth credentials');
+    }
+
     try {
       const response = await fetch('https://api.prod.whoop.com/oauth/oauth2/token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
         },
         body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
           grant_type: 'refresh_token',
           refresh_token: refreshToken,
-          client_id: process.env.WHOOP_CLIENT_ID || '',
-          client_secret: process.env.WHOOP_CLIENT_SECRET || '',
         }),
       });
 
       if (!response.ok) {
-        console.error(`Failed to refresh token for user ${userId}:`, response.status, response.statusText);
-        return null;
+        const errorText = await response.text();
+        throw new Error(`Token refresh failed: HTTP ${response.status} - ${errorText}`);
       }
 
-      const tokenData = await response.json();
+      const tokenResponse = await response.json();
       
       const newTokenData: WhoopTokenData = {
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token || refreshToken, // Use new if provided, fallback to old
-        expires_at: Math.floor(Date.now() / 1000) + tokenData.expires_in,
-        user_id: userId,
+        access_token: tokenResponse.access_token,
+        refresh_token: tokenResponse.refresh_token || refreshToken,
+        expires_at: tokenResponse.expires_in ? Math.floor(Date.now() / 1000) + tokenResponse.expires_in : undefined,
+        user_id: userId
       };
 
-      // Save the new token
+      // Store the refreshed token
       await this.setToken(userId, newTokenData);
       
-      console.log(`Token refreshed successfully for user: ${userId}`);
+      console.log(`WHOOP token refreshed successfully for user: ${userId}`);
       return newTokenData;
     } catch (error) {
-      console.error(`Failed to refresh token for user ${userId}:`, error);
-      return null;
+      console.error(`Failed to refresh WHOOP token for user ${userId}:`, error);
+      throw error;
     }
   }
 }
 
+// Export singleton instance
 export const whoopTokenStorage = new WhoopTokenStorage();

@@ -986,7 +986,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      console.log(`[WHOOP TODAY] No cached data found, returning 404 for user: ${userId}`);
+      console.log(`[WHOOP TODAY] No cached data found, attempting to fetch fresh data for user: ${userId}`);
+      
+      // Try to fetch fresh data from WHOOP API
+      try {
+        const freshData = await whoopApiService.getTodaysData(userId);
+        if (freshData && typeof freshData.recovery_score === 'number') {
+          // Store the fresh data
+          await storage.upsertWhoopData({
+            userId: userId,
+            date: todayDate,
+            recoveryScore: Math.round(freshData.recovery_score),
+            sleepScore: Math.round((freshData.sleep_score || 0) * 10), // Store as percentage * 10
+            strainScore: Math.round((freshData.strain || 0) * 10), // Store as decimal * 10
+            restingHeartRate: Math.round(freshData.resting_heart_rate || 0),
+            sleepHours: freshData.sleep_hours || 0,
+            hrv: freshData.hrv || 0,
+            respiratoryRate: freshData.respiratory_rate || 0,
+            skinTempCelsius: freshData.skin_temp_celsius || 0,
+            spo2Percentage: freshData.spo2_percentage || 0,
+            averageHeartRate: freshData.average_heart_rate || 0
+          });
+          
+          console.log(`[WHOOP TODAY] Fresh data fetched and stored for user: ${userId}`);
+          return res.json({
+            recovery_score: freshData.recovery_score,
+            sleep_score: freshData.sleep_score,
+            sleep_hours: freshData.sleep_hours, 
+            strain: freshData.strain,
+            resting_heart_rate: freshData.resting_heart_rate,
+            hrv: freshData.hrv,
+            respiratory_rate: freshData.respiratory_rate,
+            skin_temp_celsius: freshData.skin_temp_celsius,
+            spo2_percentage: freshData.spo2_percentage,
+            average_heart_rate: freshData.average_heart_rate,
+            date: todayDate,
+            last_sync: new Date().toISOString()
+          });
+        }
+      } catch (fetchError) {
+        console.log(`[WHOOP TODAY] Failed to fetch fresh data:`, fetchError.message);
+      }
+      
+      console.log(`[WHOOP TODAY] No data available for user: ${userId}`);
       return res.status(404).json({
         error: 'No WHOOP data available',
         message: 'Please complete WHOOP OAuth authentication to fetch today\'s data',
@@ -1589,12 +1631,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { calendarUrl, calendarName } = req.body;
       const userId = getCurrentUserId(req);
       
+      console.log('[CALENDAR] Add request - URL:', calendarUrl, 'Name:', calendarName, 'UserId:', userId);
+      
       if (!calendarUrl || !calendarName) {
+        console.log('[CALENDAR] Missing required fields');
         return res.status(400).json({ error: 'Calendar URL and name are required' });
       }
       
       if (!userId) {
+        console.log('[CALENDAR] User ID not found in JWT');
         return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Validate the calendar URL format
+      if (!calendarUrl.includes('calendar.google.com') && !calendarUrl.includes('.ics')) {
+        console.log('[CALENDAR] Invalid URL format');
+        return res.status(400).json({ error: 'Please provide a valid Google Calendar ICS URL' });
       }
       
       const calendar = await storage.createUserCalendar({
@@ -1604,6 +1656,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true
       });
       
+      console.log('[CALENDAR] Calendar created successfully:', calendar);
       res.json(calendar);
     } catch (error) {
       console.error('Error creating calendar:', error);
