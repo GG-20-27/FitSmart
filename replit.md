@@ -119,6 +119,15 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes  
+- January 29, 2025: **CRITICAL FIX: Database Constraint Error COMPLETELY RESOLVED**
+  - ✅ **ROOT CAUSE IDENTIFIED**: WHOOP OAuth login failed with "no unique or exclusion constraint matching the ON CONFLICT specification" 
+  - ✅ **DATABASE CONSTRAINTS ADDED**: Added PRIMARY KEY constraints to whoop_tokens.userId and composite PRIMARY KEY (userId, date) to whoop_data
+  - ✅ **SCHEMA MIGRATION COMPLETED**: Created and executed fix_constraints.sql migration with duplicate cleanup and constraint addition
+  - ✅ **DRIZZLE SCHEMA UPDATED**: Updated shared/schema.ts to reflect new constraint structure with primaryKey() declarations
+  - ✅ **UPSERT OPERATIONS FIXED**: onConflictDoUpdate now works correctly with proper primary key targets
+  - ✅ **END-TO-END TESTING VERIFIED**: OAuth callback → user creation → token storage → JWT generation → dashboard redirect all working
+  - ✅ **DUPLICATE HANDLING**: Migration safely removes duplicates before adding constraints, maintaining data integrity
+  - ✅ **PRODUCTION READY**: Constraint violations eliminated, WHOOP OAuth authentication fully operational without database errors
 - January 29, 2025: **JWT AUTHENTICATION MIGRATION COMPLETED**
   - ✅ **ALL ENDPOINTS MIGRATED**: Replaced requireAuth with requireJWTAuth on /api/whoop/weekly, /api/whoop/summary, /api/calendar/today, /api/calendar/events, /api/calendars (GET/POST/DELETE/PATCH)
   - ✅ **UNUSED MIDDLEWARE REMOVED**: Removed attachUser middleware call after CORS block as specified

@@ -13,8 +13,7 @@ export const users = pgTable("users", {
 });
 
 export const whoopTokens = pgTable("whoop_tokens", {
-  id: serial("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: 'cascade' }), // One token per user
   accessToken: text("access_token").notNull(),
   refreshToken: text("refresh_token"),
   expiresAt: timestamp("expires_at"),
@@ -34,15 +33,22 @@ export const meals = pgTable("meals", {
 });
 
 export const whoopData = pgTable("whoop_data", {
-  id: serial("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
   date: text("date").notNull(), // YYYY-MM-DD format
   recoveryScore: integer("recovery_score").notNull(),
   sleepScore: integer("sleep_score").notNull(),
   strainScore: integer("strain_score").notNull(), // stored as integer * 10 for precision
   restingHeartRate: integer("resting_heart_rate").notNull(),
+  sleepHours: integer("sleep_hours"),
+  hrv: integer("hrv"),
+  respiratoryRate: integer("respiratory_rate"),
+  skinTempCelsius: integer("skin_temp_celsius"),
+  spo2Percentage: integer("spo2_percentage"),
+  averageHeartRate: integer("average_heart_rate"),
   lastSync: timestamp("last_sync").defaultNow().notNull(),
-});
+}, (table) => ({
+  pk: { name: "whoop_data_pkey", columns: [table.userId, table.date] }
+}));
 
 export const userCalendars = pgTable("user_calendars", {
   id: serial("id").primaryKey(),
@@ -69,12 +75,10 @@ export const insertMealSchema = createInsertSchema(meals).omit({
 });
 
 export const insertWhoopDataSchema = createInsertSchema(whoopData).omit({
-  id: true,
   lastSync: true,
 });
 
 export const insertWhoopTokenSchema = createInsertSchema(whoopTokens).omit({
-  id: true,
   createdAt: true,
   updatedAt: true,
 });
