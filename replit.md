@@ -119,6 +119,14 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes  
+- January 29, 2025: **JWT SECURITY SCHEME TO OPENAPI + TOKEN TABLE UNIQUENESS COMPLETED**
+  - ✅ **OPENAPI SECURITY ADDED**: Created comprehensive openapi.yaml with JWT bearerAuth security scheme for all protected endpoints
+  - ✅ **CUSTOM GPT INTEGRATION**: Added bearerAuth security to /api/whoop/today, /api/whoop/weekly, /api/whoop/summary, /api/meals, /api/calendar endpoints
+  - ✅ **UNIQUE CONSTRAINT MIGRATION**: Created and executed 2024-add-whoopTokens-unique-idx.sql to add UNIQUE constraint on user_id
+  - ✅ **ON CONFLICT OPERATIONS**: onConflictDoUpdate now works properly with unique constraint, preventing database errors
+  - ✅ **END-TO-END TESTING**: JWT authentication working correctly for all protected API endpoints (401 → 200/404 with valid token)
+  - ✅ **CUSTOM GPT READY**: OpenAPI specification allows Custom GPT platform to automatically attach Bearer tokens for authentication
+  - ✅ **ROLLBACK PLAN**: Constraint can be safely dropped with ALTER TABLE whoop_tokens DROP CONSTRAINT whoop_tokens_userid_uq
 - January 29, 2025: **CRITICAL FIX: Database Constraint Error COMPLETELY RESOLVED**
   - ✅ **ROOT CAUSE IDENTIFIED**: WHOOP OAuth login failed with "no unique or exclusion constraint matching the ON CONFLICT specification" 
   - ✅ **DATABASE CONSTRAINTS ADDED**: Added PRIMARY KEY constraints to whoop_tokens.userId and composite PRIMARY KEY (userId, date) to whoop_data

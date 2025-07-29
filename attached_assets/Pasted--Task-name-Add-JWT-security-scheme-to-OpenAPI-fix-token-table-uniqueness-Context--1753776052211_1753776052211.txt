@@ -1,0 +1,88 @@
+### ☑️  Task name
+Add JWT security scheme to OpenAPI + fix token-table uniqueness
+
+### 💡  Context
+* Custom GPT keeps getting **401** because the platform does not know it has to
+  send the Bearer token; we must declare the JWT scheme in `openapi.yaml`.
+* WHOOP callback sometimes throws  
+  `Failed to store token: there is no unique or exclusion constraint matching the ON CONFLICT specification`  
+  because the `whoop_tokens` table has no unique index on `userId` even though
+  we use `ON CONFLICT (userId)`.
+
+### 🛠️  Exact changes
+1. **`openapi.yaml`**  
+   *Add a global bearerAuth scheme and reference it on every protected route.*
+
+```yaml
+openapi: 3.1.0
+info:
+  title: FitScore GPT API
+  version: 1.0.2
+servers:
+  - url: https://health-data-hub.replit.app
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+paths:
+  /api/whoop/today:
+    get:
+      operationId: getWhoopToday
+      summary: Get today's WHOOP data
+      security:
+        - bearerAuth: []       # <-- ADDED
+      responses:
+        "200":
+          description: Returns recovery, sleep, strain, and RHR values
+  /api/whoop/weekly:
+    get:
+      operationId: getWhoopWeekly
+      summary: Get WHOOP metrics for last 7 days
+      security:                # <-- ADDED
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 7 }
+      responses:
+        "200":
+          description: Returns array of daily metrics
+  # …leave the other public endpoints as they are …
+migrations/2024-add-whoopTokens-unique-idx.sql
+(New migration file – run automatically by drizzle on start-up)
+
+sql
+Kopēt
+Rediģēt
+-- Make ON CONFLICT (userId) work
+ALTER TABLE whoop_tokens
+ADD CONSTRAINT whoop_tokens_userId_uq UNIQUE (userId);
+No application-logic changes — routes, middleware and the JWT code stay exactly the same.
+
+✅ Acceptance criteria
+After deploy, curl -H "Authorization: Bearer <VALID_TOKEN>" https://health-data-hub.replit.app/api/whoop/today returns 200 (or 404 if no data) instead of 401.
+
+WHOOP OAuth callback no longer crashes with the “no unique … ON CONFLICT” error.
+
+All existing tests pass.
+
+🚦 Roll-back plan
+If anything fails, revert the OpenAPI file and drop the new index:
+
+sql
+Kopēt
+Rediģēt
+ALTER TABLE whoop_tokens DROP CONSTRAINT whoop_tokens_userId_uq;
+pgsql
+Kopēt
+Rediģēt
+
+Copy everything inside the grey block ⬆️ and run it in Replit-Agent.  
+Once the agent finishes, redeploy your Custom GPT — the platform will detect
+the new `bearerAuth` scheme and automatically attach each user’s JWT, so the
+API calls will authenticate correctly.
+::contentReference[oaicite:0]{index=0}

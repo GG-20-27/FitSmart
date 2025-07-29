@@ -1,0 +1,361 @@
+openapi: 3.1.0
+info:
+  title: FitScore GPT API
+  version: 1.0.2
+  description: Health data integration API with WHOOP fitness tracking, meal logging, and calendar management
+servers:
+  - url: https://health-data-hub.replit.app
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+paths:
+  /api/health:
+    get:
+      operationId: getHealthCheck
+      summary: API health check
+      responses:
+        "200":
+          description: API status and configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  timestamp:
+                    type: string
+                  environment:
+                    type: string
+
+  /api/whoop/today:
+    get:
+      operationId: getWhoopToday
+      summary: Get today's WHOOP data
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Returns recovery, sleep, strain, and RHR values
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recovery_score:
+                    type: integer
+                  sleep_score:
+                    type: integer
+                  strain:
+                    type: number
+                  resting_heart_rate:
+                    type: integer
+                  sleep_hours:
+                    type: number
+                  hrv:
+                    type: integer
+                  date:
+                    type: string
+        "401":
+          description: Authentication required
+        "404":
+          description: No WHOOP data available
+
+  /api/whoop/weekly:
+    get:
+      operationId: getWhoopWeekly
+      summary: Get WHOOP metrics for last 7 days
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: days
+          schema:
+            type: integer
+            default: 7
+          description: Number of days to retrieve (default 7)
+      responses:
+        "200":
+          description: Returns array of daily metrics
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    date:
+                      type: string
+                    recovery_score:
+                      type: integer
+                    sleep_score:
+                      type: integer
+                    strain:
+                      type: number
+                    resting_heart_rate:
+                      type: integer
+        "401":
+          description: Authentication required
+
+  /api/whoop/summary:
+    get:
+      operationId: getWhoopSummary
+      summary: Get WHOOP weekly averages and trends
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Returns weekly averages and summary data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  averages:
+                    type: object
+                    properties:
+                      recovery:
+                        type: number
+                      sleep:
+                        type: number
+                      strain:
+                        type: number
+                      hrv:
+                        type: number
+                  period:
+                    type: string
+        "401":
+          description: Authentication required
+
+  /api/meals:
+    post:
+      operationId: uploadMeals
+      summary: Upload meal photos
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                mealPhotos:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "200":
+          description: Meals uploaded successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  files:
+                    type: array
+                    items:
+                      type: string
+        "401":
+          description: Authentication required
+
+  /api/meals/today:
+    get:
+      operationId: getMealsToday
+      summary: Get today's uploaded meals
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Returns array of today's meal photo URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meals:
+                    type: array
+                    items:
+                      type: string
+                      format: uri
+                  date:
+                    type: string
+        "401":
+          description: Authentication required
+
+  /api/calendar/today:
+    get:
+      operationId: getCalendarToday
+      summary: Get today's calendar events
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Returns today's events from configured calendars
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        title:
+                          type: string
+                        start:
+                          type: string
+                        end:
+                          type: string
+                        calendar:
+                          type: string
+                  date:
+                    type: string
+        "401":
+          description: Authentication required
+
+  /api/calendar/events:
+    get:
+      operationId: getCalendarEvents
+      summary: Get calendar events for date range
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: start
+          schema:
+            type: string
+            format: date
+          description: Start date (YYYY-MM-DD)
+        - in: query
+          name: end
+          schema:
+            type: string
+            format: date
+          description: End date (YYYY-MM-DD)
+      responses:
+        "200":
+          description: Returns events for specified date range
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    title:
+                      type: string
+                    start:
+                      type: string
+                    end:
+                      type: string
+                    calendar:
+                      type: string
+        "401":
+          description: Authentication required
+
+  /api/calendars:
+    get:
+      operationId: getCalendars
+      summary: Get user's configured calendars
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Returns list of configured calendars
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    name:
+                      type: string
+                    url:
+                      type: string
+                    isActive:
+                      type: boolean
+        "401":
+          description: Authentication required
+
+    post:
+      operationId: addCalendar
+      summary: Add a new calendar
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+              required:
+                - name
+                - url
+      responses:
+        "201":
+          description: Calendar added successfully
+        "401":
+          description: Authentication required
+
+  /api/calendars/{id}:
+    delete:
+      operationId: deleteCalendar
+      summary: Delete a calendar
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Calendar deleted successfully
+        "401":
+          description: Authentication required
+
+    patch:
+      operationId: updateCalendar
+      summary: Update calendar settings
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                isActive:
+                  type: boolean
+      responses:
+        "200":
+          description: Calendar updated successfully
+        "401":
+          description: Authentication required
