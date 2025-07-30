@@ -1029,34 +1029,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      // Check if we have today's data cached first
       const todayDate = new Date().toISOString().split('T')[0];
-      const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
       
-      if (cachedData) {
-        console.log(`[WHOOP TODAY] Returning cached data for user: ${userId}`, cachedData);
-        return res.json({
-          recovery_score: cachedData.recoveryScore,
-          sleep_score: cachedData.sleepScore || null, // Primary sleep metric
-          sleep_hours: cachedData.sleepScore ? (cachedData.sleepScore / 10) : 8.5, // Convert or use default
-          sleep_stages: null, // Not stored in current cache schema
-          strain: cachedData.strainScore / 10, // Convert back to decimal (4.5 not 45)
-          resting_heart_rate: cachedData.restingHeartRate,
-          average_heart_rate: cachedData.averageHeartRate || null,
-          hrv: cachedData.hrv || (cachedData.recoveryScore + 20), // Use recovery + offset if no HRV
-          stress_score: null, // Not available in WHOOP API
-          skin_temperature: null,
-          spo2_percentage: null,
-          respiratory_rate: null,
-          calories_burned: null,
-          date: todayDate,
-          user_id: userId,
-          timestamp: new Date().toISOString(),
-          source: 'database'
-        });
+      // For admin user (25283528), always fetch fresh data from WHOOP API
+      const isAdminUser = userId === 'whoop_25283528';
+      
+      if (!isAdminUser) {
+        // Check cached data for non-admin users first
+        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
+        
+        if (cachedData) {
+          console.log(`[WHOOP TODAY] Returning cached data for user: ${userId}`, cachedData);
+          return res.json({
+            recovery_score: cachedData.recoveryScore,
+            sleep_score: cachedData.sleepScore,
+            sleep_hours: cachedData.sleepHours || 8.5,
+            strain: cachedData.strainScore / 10,
+            resting_heart_rate: cachedData.restingHeartRate,
+            hrv: cachedData.hrv || null,
+            date: todayDate,
+            user_id: userId,
+            timestamp: new Date().toISOString(),
+            source: 'database'
+          });
+        }
       }
       
-      console.log(`[WHOOP TODAY] No cached data found, attempting to fetch fresh data for user: ${userId}`);
+      console.log(`[WHOOP TODAY] ${isAdminUser ? 'Admin user - fetching fresh data' : 'No cached data found'}, attempting to fetch fresh data for user: ${userId}`);
       
       // Try to fetch fresh data from WHOOP API
       try {
@@ -1067,35 +1066,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
             userId: userId,
             date: todayDate,
             recoveryScore: Math.round(freshData.recovery_score),
-            sleepScore: Math.round((freshData.sleep_score || 0) * 10), // Store as percentage * 10
-            strainScore: Math.round((freshData.strain || 0) * 10), // Store as decimal * 10
+            sleepScore: Math.round(freshData.sleep_score || 0), // Store sleep score as percentage
+            strainScore: Math.round((freshData.strain || 0) * 10), // Store strain * 10
             restingHeartRate: Math.round(freshData.resting_heart_rate || 0),
             sleepHours: freshData.sleep_hours || 0,
-            hrv: freshData.hrv || 0,
+            hrv: Math.round(freshData.hrv || 0),
             respiratoryRate: freshData.respiratory_rate || 0,
-            skinTempCelsius: freshData.skin_temp_celsius || 0,
-            spo2Percentage: freshData.spo2_percentage || 0,
-            averageHeartRate: freshData.average_heart_rate || 0
+            skinTempCelsius: freshData.skin_temperature || 0,
+            spo2Percentage: Math.round(freshData.spo2_percentage || 0),
+            averageHeartRate: Math.round(freshData.average_heart_rate || 0)
           });
           
-          console.log(`[WHOOP TODAY] Fresh data fetched and stored for user: ${userId}`);
+          console.log(`[WHOOP TODAY] Fresh data fetched and stored for user: ${userId}`, {
+            recovery: freshData.recovery_score,
+            sleep_score: freshData.sleep_score,
+            strain: freshData.strain,
+            hrv: freshData.hrv
+          });
+          
           return res.json({
             recovery_score: freshData.recovery_score,
-            sleep_score: freshData.sleep_score, // Primary sleep metric
-            sleep_hours: freshData.sleep_hours, // Secondary sleep metric
-            sleep_stages: freshData.sleep_stages || null,
+            sleep_score: freshData.sleep_score,
+            sleep_hours: freshData.sleep_hours,
             strain: freshData.strain,
             resting_heart_rate: freshData.resting_heart_rate,
-            average_heart_rate: freshData.average_heart_rate || null,
-            hrv: freshData.hrv,
-            stress_score: freshData.stress_score || null,
-            skin_temperature: freshData.skin_temperature || null,
-            spo2_percentage: freshData.spo2_percentage || null,
-            respiratory_rate: freshData.respiratory_rate || null,
-            calories_burned: freshData.calories_burned || null,
-            activity_log: freshData.activity_log || [],
+            hrv: Math.round(freshData.hrv),
             date: todayDate,
-            last_sync: new Date().toISOString()
+            user_id: userId,
+            timestamp: new Date().toISOString(),
+            source: 'live_api'
           });
         }
       } catch (fetchError) {
