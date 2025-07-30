@@ -1508,6 +1508,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const todayEnd = zurichTime.endOf('day');
       
       const allEvents: any[] = [];
+      const failedCalendars: string[] = [];
       
       // Fetch and parse each calendar
       for (const calendarUrl of calendarUrls) {
@@ -1517,6 +1518,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (!response.ok) {
             console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
+            failedCalendars.push(calendarUrl);
             continue;
           }
           
@@ -1558,7 +1560,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const result = {
         date: zurichTime.toISODate(), // Returns YYYY-MM-DD format
-        events: allEvents
+        events: allEvents,
+        ...(failedCalendars.length > 0 && {
+          warnings: [
+            `${failedCalendars.length} calendar(s) could not be accessed. Please check that your Google Calendar is set to public sharing.`,
+            "Go to Google Calendar → Settings → Your calendar → Access permissions → Make available to public"
+          ]
+        })
       };
       
       console.log(`Found ${allEvents.length} events for today`);
@@ -1611,6 +1619,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rangeEnd = DateTime.fromISO(end).setZone('Europe/Zurich').endOf('day');
       
       const allEvents: any[] = [];
+      const failedCalendars: string[] = [];
       
       // Fetch and parse each calendar
       for (const calendarUrl of calendarUrls) {
@@ -1620,6 +1629,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (!response.ok) {
             console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
+            failedCalendars.push(calendarUrl);
             continue;
           }
           
@@ -1664,7 +1674,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         range: {
           start: rangeStart.toISODate(),
           end: rangeEnd.toISODate()
-        }
+        },
+        ...(failedCalendars.length > 0 && {
+          warnings: [
+            `${failedCalendars.length} calendar(s) could not be accessed. Please check that your Google Calendar is set to public sharing.`,
+            "Go to Google Calendar → Settings → Your calendar → Access permissions → Make available to public"
+          ]
+        })
       };
       
       console.log(`Found ${allEvents.length} events in date range`);

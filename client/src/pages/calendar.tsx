@@ -87,6 +87,7 @@ interface CalendarEventsResponse {
     start: string;
     end: string;
   };
+  warnings?: string[];
 }
 
 export default function CalendarPage() {
@@ -317,6 +318,29 @@ export default function CalendarPage() {
             </Button>
           </div>
         </div>
+
+        {/* Calendar Warnings */}
+        {calendarData?.warnings && calendarData.warnings.length > 0 && (
+          <Card className="bg-yellow-500/10 border-yellow-500/30 backdrop-blur-sm mb-6">
+            <CardContent className="p-4">
+              <div className="flex items-start space-x-3">
+                <div className="text-yellow-500 mt-0.5">
+                  <CalendarIcon className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <h4 className="text-yellow-400 font-medium mb-2">Calendar Access Issue</h4>
+                  <div className="space-y-1">
+                    {calendarData.warnings.map((warning, index) => (
+                      <p key={index} className="text-yellow-300 text-sm">
+                        {warning}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Calendar or Empty State */}
         {calendarEvents.length === 0 ? (
