@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, uuid, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, uuid, boolean, real } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -40,7 +40,7 @@ export const whoopData = pgTable("whoop_data", {
   sleepScore: integer("sleep_score").notNull(),
   strainScore: integer("strain_score").notNull(), // stored as integer * 10 for precision
   restingHeartRate: integer("resting_heart_rate").notNull(),
-  sleepHours: integer("sleep_hours"),
+  sleepHours: real("sleep_hours"),
   hrv: integer("hrv"),
   respiratoryRate: integer("respiratory_rate"),
   skinTempCelsius: integer("skin_temp_celsius"),

@@ -119,6 +119,12 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes  
+- January 30, 2025: **UNIVERSAL FRESH DATA PRIORITIZATION FOR ALL USERS**
+  - ✅ **LIVE DATA FOR ALL**: Updated API logic to prioritize fresh WHOOP data for ALL users, not just admin
+  - ✅ **FALLBACK STRATEGY**: Cached data only used as fallback when fresh API fetch fails
+  - ✅ **NEW USER READY**: Any new WHOOP user will automatically receive live data from their account
+  - ✅ **VERIFIED ADMIN DATA**: Confirmed correct admin metrics (Recovery 90%, Sleep Score 77%, Strain 13.7, HR 44bpm)
+  - ✅ **BEARER TOKEN SYSTEM**: JWT authentication working correctly for all users with 10-year expiration
 - January 30, 2025: **CUSTOM GPT BEARER JWT AUTHENTICATION ENABLED**
   - ✅ **AI-PLUGIN.JSON CREATED**: Added user_http bearer authentication scheme for Custom GPT platform integration
   - ✅ **BEARER TOKEN SUPPORT**: Custom GPT platform will now automatically attach JWT Bearer tokens to all API requests

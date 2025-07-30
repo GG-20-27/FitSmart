@@ -1031,31 +1031,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const todayDate = new Date().toISOString().split('T')[0];
       
-      // For admin user (25283528), always fetch fresh data from WHOOP API
-      const isAdminUser = userId === 'whoop_25283528';
+      // Always prioritize fresh WHOOP API data for all users to ensure real-time accuracy
+      // Only fall back to cached data if API fails or user has no valid token
       
-      if (!isAdminUser) {
-        // Check cached data for non-admin users first
-        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
-        
-        if (cachedData) {
-          console.log(`[WHOOP TODAY] Returning cached data for user: ${userId}`, cachedData);
-          return res.json({
-            recovery_score: cachedData.recoveryScore,
-            sleep_score: cachedData.sleepScore,
-            sleep_hours: cachedData.sleepHours || 8.5,
-            strain: cachedData.strainScore / 10,
-            resting_heart_rate: cachedData.restingHeartRate,
-            hrv: cachedData.hrv || null,
-            date: todayDate,
-            user_id: userId,
-            timestamp: new Date().toISOString(),
-            source: 'database'
-          });
-        }
-      }
-      
-      console.log(`[WHOOP TODAY] ${isAdminUser ? 'Admin user - fetching fresh data' : 'No cached data found'}, attempting to fetch fresh data for user: ${userId}`);
+      console.log(`[WHOOP TODAY] Attempting to fetch fresh WHOOP data for user: ${userId}`);
       
       // Try to fetch fresh data from WHOOP API
       try {
@@ -1097,11 +1076,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
             source: 'live_api'
           });
         }
-      } catch (fetchError) {
-        console.log(`[WHOOP TODAY] Failed to fetch fresh data:`, fetchError.message);
+      } catch (fetchError: any) {
+        console.log(`[WHOOP TODAY] Fresh API fetch failed, checking cached data for user: ${userId}`, fetchError.message);
+        
+        // If fresh API fails, try to return cached data as fallback
+        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
+        
+        if (cachedData) {
+          console.log(`[WHOOP TODAY] Returning cached data as fallback for user: ${userId}`);
+          return res.json({
+            recovery_score: cachedData.recoveryScore,
+            sleep_score: cachedData.sleepScore,
+            sleep_hours: cachedData.sleepHours || 8.5,
+            strain: cachedData.strainScore / 10,
+            resting_heart_rate: cachedData.restingHeartRate,
+            hrv: cachedData.hrv || null,
+            date: todayDate,
+            user_id: userId,
+            timestamp: new Date().toISOString(),
+            source: 'database_fallback'
+          });
+        }
       }
       
-      console.log(`[WHOOP TODAY] No data available for user: ${userId}`);
+      console.log(`[WHOOP TODAY] No fresh or cached data available for user: ${userId}`);
       return res.status(404).json({
         error: 'No WHOOP data available',
         message: 'Please complete WHOOP OAuth authentication to fetch today\'s data',
