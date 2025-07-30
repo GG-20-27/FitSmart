@@ -499,50 +499,50 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Sleep Hours Card */}
+          {/* Sleep Score Card */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-            <CardContent className="p-6 text-center">
-              <div className="mb-4">
-                <div className="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Moon className="h-8 w-8 text-white" />
+            <CardContent className="p-4 sm:p-6 text-center">
+              <div className="mb-3 sm:mb-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
+                  <Moon className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-purple-400">
                   {whoopLoading ? (
                     <span className="text-slate-400">Syncing...</span>
-                  ) : whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
-                    <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1200} /> hrs</>
+                  ) : whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
+                    <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
                   ) : (
                     <span className="text-slate-500">N/A</span>
                   )}
                 </div>
               </div>
               <div className="flex items-center justify-center space-x-2">
-                <Moon className="h-5 w-5 text-purple-400" />
-                <span className="text-slate-300 font-medium">Sleep Hours</span>
+                <Moon className="h-4 w-4 sm:h-5 sm:w-5 text-purple-400" />
+                <span className="text-slate-300 font-medium text-sm sm:text-base">Sleep Score</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* Resting Heart Rate Card */}
+          {/* HRV Card */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-            <CardContent className="p-6 text-center">
-              <div className="mb-4">
-                <div className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Heart className="h-8 w-8 text-white" />
+            <CardContent className="p-4 sm:p-6 text-center">
+              <div className="mb-3 sm:mb-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
+                  <Activity className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
                 </div>
                 <div className="text-2xl font-bold text-red-400">
                   {whoopLoading ? (
                     <span className="text-slate-400">Syncing...</span>
-                  ) : whoopData?.resting_heart_rate !== null && whoopData?.resting_heart_rate !== undefined ? (
-                    <><CountUp end={whoopData.resting_heart_rate} duration={1200} /> bpm</>
+                  ) : whoopData?.hrv !== null && whoopData?.hrv !== undefined ? (
+                    <><CountUp end={whoopData.hrv} duration={1200} /> ms</>
                   ) : (
                     <span className="text-slate-500">N/A</span>
                   )}
                 </div>
               </div>
               <div className="flex items-center justify-center space-x-2">
-                <Heart className="h-5 w-5 text-red-400" />
-                <span className="text-slate-300 font-medium">Resting HR</span>
+                <Activity className="h-4 w-4 sm:h-5 sm:w-5 text-red-400" />
+                <span className="text-slate-300 font-medium text-sm sm:text-base">HRV</span>
               </div>
             </CardContent>
           </Card>
@@ -560,56 +560,8 @@ export default function Dashboard() {
               <p className="text-slate-400">Detailed physiological metrics and sleep analytics</p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
-              {/* Recovery Trend */}
-              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
-                      <TrendingUp className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-slate-400 text-sm">Recovery Trend</p>
-                      <p className="text-2xl font-bold text-blue-400">
-                        {whoopData.recovery_score ? (
-                          <>Good</>
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    Based on recovery score
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Strain Assessment */}
-              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center">
-                      <Activity className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-slate-400 text-sm">Strain Level</p>
-                      <p className="text-2xl font-bold text-orange-400">
-                        {whoopData.strain ? (
-                          <>{whoopData.strain >= 15 ? 'High' : whoopData.strain >= 10 ? 'Moderate' : 'Low'}</>
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    Today's strain assessment
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Sleep Quality */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
+              {/* Sleep Hours */}
               <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-4">
@@ -617,10 +569,10 @@ export default function Dashboard() {
                       <Moon className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-slate-400 text-sm">Sleep Quality</p>
+                      <p className="text-slate-400 text-sm">Sleep Hours</p>
                       <p className="text-2xl font-bold text-purple-400">
                         {whoopData.sleep_hours ? (
-                          <>{whoopData.sleep_hours >= 8 ? 'Excellent' : whoopData.sleep_hours >= 7 ? 'Good' : 'Poor'}</>
+                          <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1000} /> hrs</>
                         ) : (
                           <span className="text-slate-500">N/A</span>
                         )}
@@ -628,7 +580,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Based on sleep duration
+                    Total sleep duration
                   </div>
                 </CardContent>
               </Card>
@@ -816,95 +768,6 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
             )}
-          </div>
-        )}
-
-        {/* Weekly Averages */}
-        {isWhoopConnected && (
-          <div className="mt-16">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
-              <TrendingUp className="h-8 w-8 mr-3 text-blue-400" />
-              Weekly Averages
-            </h2>
-            <p className="text-slate-400">Averages based on real WHOOP data</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {/* Avg Recovery */}
-            <Card className="bg-gradient-to-br from-blue-400 to-blue-500 border-0 text-white hover:from-blue-300 hover:to-blue-400 transition-all duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-center space-x-2 mb-3">
-                  <Heart className="h-4 w-4 text-white" />
-                  <span className="text-sm font-medium text-white">Avg Recovery</span>
-                </div>
-                <div className="text-3xl font-bold">
-                  {whoopSummary?.avgRecovery !== null && whoopSummary?.avgRecovery !== undefined ? (
-                    <CountUp end={whoopSummary.avgRecovery} suffix="%" duration={1500} />
-                  ) : (
-                    "N/A"
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Avg Strain */}
-            <Card className="bg-gradient-to-br from-orange-400 to-orange-500 border-0 text-white hover:from-orange-300 hover:to-orange-400 transition-all duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-center space-x-2 mb-3">
-                  <Zap className="h-4 w-4 text-white" />
-                  <span className="text-sm font-medium text-white">Avg Strain</span>
-                </div>
-                <div className="text-3xl font-bold">
-                  {whoopSummary?.avgStrain !== null && whoopSummary?.avgStrain !== undefined ? (
-                    <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1500} />
-                  ) : (
-                    "N/A"
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Avg Sleep Score */}
-            <Card className="bg-gradient-to-br from-purple-400 to-purple-500 border-0 text-white hover:from-purple-300 hover:to-purple-400 transition-all duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-center space-x-2 mb-3">
-                  <Moon className="h-4 w-4 text-white" />
-                  <span className="text-sm font-medium text-white">Avg Sleep Score</span>
-                </div>
-                <div className="text-3xl font-bold">
-                  {whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
-                    <CountUp end={whoopSummary.avgSleep} suffix="%" duration={1500} />
-                  ) : (
-                    "N/A"
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Avg HRV */}
-            <Card className="bg-gradient-to-br from-green-400 to-green-500 border-0 text-white hover:from-green-300 hover:to-green-400 transition-all duration-300">
-              <CardContent className="p-6">
-                <div className="flex items-center space-x-2 mb-3">
-                  <Activity className="h-4 w-4 text-white" />
-                  <span className="text-sm font-medium text-white">Avg HRV</span>
-                </div>
-                <div className="text-3xl font-bold">
-                  {whoopSummary?.avgHRV !== null && whoopSummary?.avgHRV !== undefined ? (
-                    <CountUp end={whoopSummary.avgHRV} suffix=" ms" decimals={1} duration={1500} />
-                  ) : (
-                    "N/A"
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-          
-          <div className="text-center mt-6">
-            <p className="text-sm text-slate-500">
-              Averages calculated from the past 7 days of real WHOOP data
-            </p>
-          </div>
           </div>
         )}
       </div>
