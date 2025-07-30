@@ -1031,12 +1031,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const todayDate = new Date().toISOString().split('T')[0];
       
-      // Always prioritize fresh WHOOP API data for all users to ensure real-time accuracy
-      // Only fall back to cached data if API fails or user has no valid token
+      // UNIVERSAL FRESH DATA PRIORITIZATION: Always try live WHOOP API first for ALL users
+      // This ensures every user gets real-time data when available, not just admin
       
-      console.log(`[WHOOP TODAY] Attempting to fetch fresh WHOOP data for user: ${userId}`);
+      console.log(`[WHOOP TODAY] UNIVERSAL FRESH DATA: Attempting live WHOOP API fetch for user: ${userId}`);
       
-      // Try to fetch fresh data from WHOOP API
+      // Try to fetch fresh data from WHOOP API - prioritize live data for everyone
       try {
         const freshData = await whoopApiService.getTodaysData(userId);
         if (freshData && typeof freshData.recovery_score === 'number') {
