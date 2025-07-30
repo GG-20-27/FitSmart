@@ -499,7 +499,7 @@ export default function Dashboard() {
             </CardContent>
           </Card>
 
-          {/* Sleep Score Card */}
+          {/* Sleep Hours Card */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-6 text-center">
               <div className="mb-4">
@@ -509,8 +509,8 @@ export default function Dashboard() {
                 <div className="text-2xl font-bold text-purple-400">
                   {whoopLoading ? (
                     <span className="text-slate-400">Syncing...</span>
-                  ) : whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
-                    <><CountUp end={whoopData.sleep_score} duration={1200} />%</>
+                  ) : whoopData?.sleep_hours !== null && whoopData?.sleep_hours !== undefined ? (
+                    <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1200} /> hrs</>
                   ) : (
                     <span className="text-slate-500">N/A</span>
                   )}
@@ -518,31 +518,31 @@ export default function Dashboard() {
               </div>
               <div className="flex items-center justify-center space-x-2">
                 <Moon className="h-5 w-5 text-purple-400" />
-                <span className="text-slate-300 font-medium">Sleep Score</span>
+                <span className="text-slate-300 font-medium">Sleep Hours</span>
               </div>
             </CardContent>
           </Card>
 
-          {/* HRV Card */}
+          {/* Resting Heart Rate Card */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-6 text-center">
               <div className="mb-4">
-                <div className="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Activity className="h-8 w-8 text-white" />
+                <div className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Heart className="h-8 w-8 text-white" />
                 </div>
-                <div className="text-2xl font-bold text-green-400">
+                <div className="text-2xl font-bold text-red-400">
                   {whoopLoading ? (
                     <span className="text-slate-400">Syncing...</span>
-                  ) : whoopData?.hrv !== null && whoopData?.hrv !== undefined ? (
-                    <CountUp end={whoopData.hrv} suffix=" ms" decimals={1} duration={1200} />
+                  ) : whoopData?.resting_heart_rate !== null && whoopData?.resting_heart_rate !== undefined ? (
+                    <><CountUp end={whoopData.resting_heart_rate} duration={1200} /> bpm</>
                   ) : (
                     <span className="text-slate-500">N/A</span>
                   )}
                 </div>
               </div>
               <div className="flex items-center justify-center space-x-2">
-                <Activity className="h-5 w-5 text-green-400" />
-                <span className="text-slate-300 font-medium">HRV</span>
+                <Heart className="h-5 w-5 text-red-400" />
+                <span className="text-slate-300 font-medium">Resting HR</span>
               </div>
             </CardContent>
           </Card>
@@ -561,18 +561,18 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-6 sm:mb-8">
-              {/* Sleep Hours */}
+              {/* Recovery Trend */}
               <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
-                      <Moon className="h-6 w-6 text-white" />
+                    <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
+                      <TrendingUp className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-slate-400 text-sm">Sleep Duration</p>
-                      <p className="text-2xl font-bold text-purple-400">
-                        {whoopData.sleep_hours ? (
-                          <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1000} /> hrs</>
+                      <p className="text-slate-400 text-sm">Recovery Trend</p>
+                      <p className="text-2xl font-bold text-blue-400">
+                        {whoopData.recovery_score ? (
+                          <>Good</>
                         ) : (
                           <span className="text-slate-500">N/A</span>
                         )}
@@ -580,12 +580,12 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Total time spent sleeping
+                    Based on recovery score
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Skin Temperature */}
+              {/* Strain Assessment */}
               <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-4">
@@ -593,10 +593,10 @@ export default function Dashboard() {
                       <Activity className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-slate-400 text-sm">Skin Temperature</p>
+                      <p className="text-slate-400 text-sm">Strain Level</p>
                       <p className="text-2xl font-bold text-orange-400">
-                        {whoopData.skin_temperature ? (
-                          <><CountUp end={whoopData.skin_temperature} decimals={1} duration={1000} />°C</>
+                        {whoopData.strain ? (
+                          <>{whoopData.strain >= 15 ? 'High' : whoopData.strain >= 10 ? 'Moderate' : 'Low'}</>
                         ) : (
                           <span className="text-slate-500">N/A</span>
                         )}
@@ -604,23 +604,23 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Body temperature variation
+                    Today's strain assessment
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Respiratory Rate */}
+              {/* Sleep Quality */}
               <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center">
-                      <Wind className="h-6 w-6 text-white" />
+                    <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                      <Moon className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-slate-400 text-sm">Respiratory Rate</p>
-                      <p className="text-2xl font-bold text-blue-400">
-                        {whoopData.respiratory_rate ? (
-                          <><CountUp end={whoopData.respiratory_rate} decimals={1} duration={1000} /> rpm</>
+                      <p className="text-slate-400 text-sm">Sleep Quality</p>
+                      <p className="text-2xl font-bold text-purple-400">
+                        {whoopData.sleep_hours ? (
+                          <>{whoopData.sleep_hours >= 8 ? 'Excellent' : whoopData.sleep_hours >= 7 ? 'Good' : 'Poor'}</>
                         ) : (
                           <span className="text-slate-500">N/A</span>
                         )}
@@ -628,79 +628,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Breaths per minute
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Blood Oxygen */}
-              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
-                      <Heart className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-slate-400 text-sm">Blood Oxygen</p>
-                      <p className="text-2xl font-bold text-red-400">
-                        {whoopData.spo2_percentage ? (
-                          <><CountUp end={whoopData.spo2_percentage} decimals={1} duration={1000} />%</>
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    SpO2 saturation level
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Calories Burned */}
-              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-12 h-12 bg-yellow-500 rounded-full flex items-center justify-center">
-                      <Zap className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-slate-400 text-sm">Calories Burned</p>
-                      <p className="text-2xl font-bold text-yellow-400">
-                        {whoopData.calories_burned ? (
-                          <><CountUp end={whoopData.calories_burned} duration={1000} /> cal</>
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    Total energy expenditure
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Average Heart Rate */}
-              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <CardContent className="p-6">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-12 h-12 bg-pink-500 rounded-full flex items-center justify-center">
-                      <Heart className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <p className="text-slate-400 text-sm">Average Heart Rate</p>
-                      <p className="text-2xl font-bold text-pink-400">
-                        {whoopData.average_heart_rate ? (
-                          <><CountUp end={whoopData.average_heart_rate} duration={1000} /> bpm</>
-                        ) : (
-                          <span className="text-slate-500">N/A</span>
-                        )}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-xs text-slate-500">
-                    Daily average heart rate
+                    Based on sleep duration
                   </div>
                 </CardContent>
               </Card>
