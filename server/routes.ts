@@ -1733,6 +1733,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Serve ai-plugin.json for Custom GPT integration
+  app.get('/ai-plugin.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const pluginManifest = {
+      "schema_version": "v1",
+      "name_for_human": "FitScore Health Dashboard",
+      "name_for_model": "fitscore_health",
+      "description_for_human": "Access your WHOOP fitness data, meal tracking, and calendar integration through a comprehensive health dashboard.",
+      "description_for_model": "FitScore Health Dashboard provides access to WHOOP fitness metrics (recovery, sleep, strain, HRV), meal photo uploads, and Google Calendar integration. Use this to retrieve health data, track meals, and manage calendar events for health and productivity insights.",
+      "auth": {
+        "type": "user_http",
+        "authorization_type": "bearer",
+        "verification_tokens": {}
+      },
+      "api": {
+        "type": "openapi",
+        "url": `${req.protocol}://${req.get('host')}/openapi.yaml`
+      },
+      "logo_url": `${req.protocol}://${req.get('host')}/generated-icon.png`,
+      "contact_email": "support@fitscore.local",
+      "legal_info_url": `${req.protocol}://${req.get('host')}`
+    };
+    res.json(pluginManifest);
+  });
+
+  // Serve OpenAPI specification for Custom GPT integration
+  app.get('/openapi.yaml', (req, res) => {
+    res.setHeader('Content-Type', 'text/yaml');
+    res.sendFile(path.join(process.cwd(), 'openapi.yaml'));
+  });
+
+  // Static file serving
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
   const httpServer = createServer(app);
   return httpServer;
 }

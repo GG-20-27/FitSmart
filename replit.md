@@ -119,6 +119,13 @@ FitScore GPT API Dashboard is a full-stack web application that integrates with 
 - `NODE_ENV`: Environment specification (development/production)
 
 ## Recent Changes  
+- January 30, 2025: **CUSTOM GPT BEARER JWT AUTHENTICATION ENABLED**
+  - ✅ **AI-PLUGIN.JSON CREATED**: Added user_http bearer authentication scheme for Custom GPT platform integration
+  - ✅ **BEARER TOKEN SUPPORT**: Custom GPT platform will now automatically attach JWT Bearer tokens to all API requests
+  - ✅ **AUTHENTICATION VERIFICATION**: All protected endpoints correctly return 401 without token, 404/200 with valid Bearer token
+  - ✅ **OPENAPI SPECIFICATION**: Complete OpenAPI 3.1.0 spec served at /openapi.yaml with bearerAuth security definitions
+  - ✅ **CUSTOM GPT READY**: GPT platform authentication tab will show "Bearer token" option, enabling seamless API access
+  - ✅ **END-TO-END TESTING**: Verified JWT authentication works for /api/whoop/today, /api/whoop/weekly, and other protected endpoints
 - January 29, 2025: **JWT SECURITY SCHEME TO OPENAPI + TOKEN TABLE UNIQUENESS COMPLETED**
   - ✅ **OPENAPI SECURITY ADDED**: Created comprehensive openapi.yaml with JWT bearerAuth security scheme for all protected endpoints
   - ✅ **CUSTOM GPT INTEGRATION**: Added bearerAuth security to /api/whoop/today, /api/whoop/weekly, /api/whoop/summary, /api/meals, /api/calendar endpoints

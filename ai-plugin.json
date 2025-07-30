@@ -1,0 +1,19 @@
+{
+  "schema_version": "v1",
+  "name_for_human": "FitScore Health Dashboard",
+  "name_for_model": "fitscore_health",
+  "description_for_human": "Access your WHOOP fitness data, meal tracking, and calendar integration through a comprehensive health dashboard.",
+  "description_for_model": "FitScore Health Dashboard provides access to WHOOP fitness metrics (recovery, sleep, strain, HRV), meal photo uploads, and Google Calendar integration. Use this to retrieve health data, track meals, and manage calendar events for health and productivity insights.",
+  "auth": {
+    "type": "user_http",
+    "authorization_type": "bearer",
+    "verification_tokens": {}
+  },
+  "api": {
+    "type": "openapi",
+    "url": "https://health-data-hub.replit.app/openapi.yaml"
+  },
+  "logo_url": "https://health-data-hub.replit.app/generated-icon.png",
+  "contact_email": "support@fitscore.local",
+  "legal_info_url": "https://health-data-hub.replit.app"
+}
