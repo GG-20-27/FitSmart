@@ -265,6 +265,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Static JWT endpoint for Custom GPT integration
+  console.log('[ROUTE] GET /api/auth/static-jwt');
+  app.get('/api/auth/static-jwt', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[STATIC JWT] Fetching static JWT for user: ${userId}`);
+      
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
+        });
+      }
+      
+      const tokenData = await whoopTokenStorage.getToken(userId);
+      const staticJwt = tokenData?.static_jwt || null;
+      
+      console.log(`[STATIC JWT] Found static JWT for user ${userId}:`, staticJwt ? 'Present' : 'Not found');
+      
+      res.json({ 
+        static_jwt: staticJwt 
+      });
+    } catch (error) {
+      console.error('Get static JWT error:', error);
+      res.status(500).json({ error: 'Failed to get static JWT token' });
+    }
+  });
+
   // Remove registration - users are created via WHOOP OAuth only
   console.log('[ROUTE] POST /api/auth/register');
   app.post('/api/auth/register', (req, res) => {
@@ -597,18 +625,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       console.log(`[WHOOP AUTH] User verified in database: ${whoopUserId}`);
       
-      // Store the token with proper expiration using WHOOP user ID
+      // Generate long-lived JWT token for Custom GPT integration (10 years)
+      const { generateJWT } = await import('./jwtAuth');
+      const staticJwtToken = generateJWT(whoopUserId, userData.role);
+      console.log(`[WHOOP AUTH] Generated static JWT token for user: ${whoopUserId} (10-year expiration)`);
+      
+      // Store the token with proper expiration using WHOOP user ID, including static JWT
       const tokenData = {
         access_token: tokenResponse.access_token,
         refresh_token: tokenResponse.refresh_token,
         expires_at: tokenResponse.expires_in ? Math.floor(Date.now() / 1000) + tokenResponse.expires_in : undefined,
-        user_id: whoopUserId
+        user_id: whoopUserId,
+        static_jwt: staticJwtToken
       };
       
       console.log(`[WHOOP AUTH] Attempting to store token for user: ${whoopUserId}`);
       try {
         await whoopTokenStorage.setToken(whoopUserId, tokenData);
-        console.log(`[WHOOP AUTH] Token stored successfully for WHOOP user ${whoopUserId}`);
+        console.log(`[WHOOP AUTH] Token and static JWT stored successfully for WHOOP user ${whoopUserId}`);
       } catch (tokenError) {
         console.error(`[WHOOP AUTH] Token storage failed:`, tokenError);
         throw new Error(`Failed to store token: ${tokenError.message}`);
@@ -640,14 +674,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Continue with authentication even if data fetch fails
       }
       
-      // Generate JWT token for authentication with role
-      const { generateJWT } = await import('./jwtAuth');
-      const authToken = generateJWT(whoopUserId, userData.role);
+      console.log(`[WHOOP AUTH] Using static JWT token for redirect to user: ${whoopUserId} with role: ${userData.role}`);
       
-      console.log(`[WHOOP AUTH] JWT token generated for user: ${whoopUserId} with role: ${userData.role}`);
-      
-      // Redirect to dashboard with JWT token
-      res.redirect(`/#token=${authToken}`);
+      // Redirect to dashboard with the same static JWT token
+      res.redirect(`/#token=${staticJwtToken}`);
       
     } catch (error) {
       console.error('[WHOOP AUTH] Callback error:', error);

@@ -7,6 +7,7 @@ export interface WhoopTokenData {
   refresh_token?: string;
   expires_at?: number;
   user_id?: string;
+  static_jwt?: string;
 }
 
 export class WhoopTokenStorage {
@@ -26,7 +27,8 @@ export class WhoopTokenStorage {
         access_token: token.accessToken,
         refresh_token: token.refreshToken || undefined,
         expires_at: expiresAtTimestamp || undefined,
-        user_id: userId
+        user_id: userId,
+        static_jwt: token.staticJwt || undefined
       };
     } catch (error) {
       console.error('Error fetching WHOOP token:', error);
@@ -55,12 +57,14 @@ export class WhoopTokenStorage {
         accessToken: tokenData.access_token,
         refreshToken: tokenData.refresh_token || null,
         expiresAt: expiresAt,
+        staticJwt: tokenData.static_jwt || null,
       }).onConflictDoUpdate({
         target: whoopTokens.userId,
         set: {
           accessToken: tokenData.access_token,
           refreshToken: tokenData.refresh_token || null,
           expiresAt: expiresAt,
+          staticJwt: tokenData.static_jwt || null,
           updatedAt: new Date(),
         },
       });

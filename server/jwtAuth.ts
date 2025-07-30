@@ -15,7 +15,7 @@ export function generateJWT(whoopId: string, role: string = 'user'): string {
   const payload: JWTPayload = {
     whoopId,
     role,
-    exp: Math.floor(Date.now() / 1000) + (7 * 24 * 60 * 60) // 7 days
+    exp: Math.floor(Date.now() / 1000) + (10 * 365 * 24 * 60 * 60) // 10 years (set-and-forget)
   };
   
   return jwt.sign(payload, JWT_SECRET);

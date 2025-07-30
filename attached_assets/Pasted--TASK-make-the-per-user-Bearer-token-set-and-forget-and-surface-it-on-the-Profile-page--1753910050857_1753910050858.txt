@@ -1,0 +1,69 @@
+‼️ TASK:  make the per-user Bearer token “set-and-forget” **and** surface it on the Profile page  
+────────────────────────────────────────────────────────────────────────
+BACK-END
+1. **jwtAuth.ts**
+   • Change `generateJWT()` so the token lives for 10 years ⇢  
+     `exp = Math.floor(Date.now()/1000) + 10*365*24*60*60`  
+     (practically never expires, so you don’t have to paste a new one every
+     7 days in the GPT schema).
+
+2. **routes.ts**  (WHOOP OAuth callback block)
+   • _After_ calling `generateJWT`, also write the fresh JWT to
+     `whoop_tokens` table in a column `staticJwt` (create it with
+     `varchar(512)` if it doesn’t exist).  
+     This lets us fetch the long-lived token later if we ever need it.
+
+   • Add a tiny endpoint:
+     ```
+     // GET /api/auth/static-jwt   (JWT auth required)
+     app.get('/api/auth/static-jwt', requireJWTAuth, async (req,res)=>{
+       const userId = getCurrentUserId(req);
+       const tok = await whoopTokenStorage.getToken(userId);
+       return res.json({ static_jwt: tok?.staticJwt || null });
+     });
+     ```
+     The front-end will call this once and keep it in state.
+
+3. **whoopTokenStorage.ts**
+   • When `setToken()` is called **and** `tokenData.static_jwt` is present,
+     store it (upsert) into the new `staticJwt` column.
+
+────────────────────────────────────────────────────────────────────────
+FRONT-END  (client/src/pages/Profile.tsx - or wherever the profile sits)
+1. At top-level of the component, fetch the static token once:
+   ```ts
+   const {data:jwtData} = useQuery('static-jwt', ()=>api.get('/api/auth/static-jwt')
+                                     .then(r=>r.data.static_jwt));
+Under Current User Profile add a small card:
+
+jsx
+Kopēt
+Rediģēt
+{jwtData && (
+  <Card className="mt-6">
+    <CardHeader className="flex justify-between items-center">
+      <span>Your API Bearer token</span>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={()=>navigator.clipboard.writeText(jwtData)}
+      >
+        Copy
+      </Button>
+    </CardHeader>
+    <CardContent className="break-all text-xs text-muted-foreground">
+      {jwtData}
+    </CardContent>
+    <CardFooter className="text-sm italic">
+      Send this to Gustavs if he hasn’t added it to your Custom GPT yet.
+    </CardFooter>
+  </Card>
+)}
+• Style: use existing Card / Button components; tailwind classes as shown.
+
+Remove the old blue “Reconnect” button if it still duplicates the header one.
+
+────────────────────────────────────────────────────────────────────────
+MIGRATION
+• Create a drizzle migration (or raw SQL) to add
+ALTER TABLE whoop_tokens ADD COLUMN IF NOT EXISTS "staticJwt" varchar(512);

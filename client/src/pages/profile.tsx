@@ -5,9 +5,10 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown } from 'lucide-react';
+import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key } from 'lucide-react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useState } from 'react';
+import { useToast } from '@/hooks/use-toast';
 import SocialAuth from '@/components/social-auth';
 import { CalendarManagement } from '@/components/calendar-management';
 import { useAuth } from '@/hooks/useAuth';
@@ -85,6 +86,7 @@ interface WhoopAuthStatus {
 export default function Profile() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const { user } = useAuth();
+  const { toast } = useToast();
 
   const { data: userProfile } = useQuery({
     queryKey: ['/api/users/me'],
@@ -98,6 +100,13 @@ export default function Profile() {
 
   const { data: users, isLoading: usersLoading, refetch: refetchUsers } = useQuery<UserProfile[]>({
     queryKey: ['/api/admin/users'],
+    retry: 3,
+  });
+
+  // Fetch static JWT token for Custom GPT integration
+  const { data: staticJwtData } = useQuery({
+    queryKey: ['/api/auth/static-jwt'],
+    enabled: !!user,
     retry: 3,
   });
 
@@ -150,6 +159,18 @@ export default function Profile() {
 
   const currentUser = users?.find(user => user.hasWhoopToken) || users?.[0];
   const isAdminUser = currentUser?.email === 'admin@fitscore.local';
+
+  // Copy JWT token to clipboard
+  const copyJwtToken = () => {
+    if (staticJwtData?.static_jwt) {
+      navigator.clipboard.writeText(staticJwtData.static_jwt);
+      toast({
+        title: "Token Copied",
+        description: "JWT Bearer token copied to clipboard",
+        variant: "default",
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -253,6 +274,43 @@ export default function Profile() {
               )}
             </CardContent>
           </Card>
+
+          {/* Custom GPT Bearer Token */}
+          {staticJwtData?.static_jwt && (
+            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-white">
+                  <Key className="h-5 w-5" />
+                  Bearer Token for Custom GPT
+                </CardTitle>
+                <CardDescription>Your personal JWT token for ChatGPT integration</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-3">
+                  <Label className="text-slate-300">JWT Bearer Token</Label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="flex-1 bg-slate-700/50 border border-slate-600 rounded-md p-3 font-mono text-xs text-slate-300 break-all overflow-hidden">
+                      {staticJwtData.static_jwt}
+                    </div>
+                    <Button
+                      onClick={copyJwtToken}
+                      variant="outline"
+                      size="sm"
+                      className="w-full sm:w-auto bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
+                    >
+                      <Copy className="h-4 w-4 mr-2" />
+                      Copy
+                    </Button>
+                  </div>
+                  <div className="text-sm text-slate-400 space-y-1">
+                    <p>• Send this to Gustavs if he hasn't added this to your personal ChatGPT assistant.</p>
+                    <p>• This token expires in 10 years and provides secure API access.</p>
+                    <p>• Keep this token private - it grants access to your health data.</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* User Management - Only show for admin users */}
           {isAdminUser && (
