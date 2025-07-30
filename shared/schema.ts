@@ -17,7 +17,7 @@ export const whoopTokens = pgTable("whoop_tokens", {
   accessToken: text("access_token").notNull(),
   refreshToken: text("refresh_token"),
   expiresAt: timestamp("expires_at"),
-  staticJwt: text("staticJwt", { length: 512 }), // Long-lived Bearer token for Custom GPT
+  staticJwt: text("staticJwt"), // Long-lived Bearer token for Custom GPT
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
