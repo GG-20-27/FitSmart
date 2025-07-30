@@ -130,8 +130,8 @@ export default function AdminPage() {
                 <div className="absolute inset-0 bg-gradient-to-r from-pink-400 to-rose-500 opacity-30 animate-pulse"></div>
                 <div className="relative flex items-center space-x-2">
                   <FitScoreLogo size={16} />
-                  <span className="hidden sm:inline">Dashboard</span>
-                  <span className="sm:hidden">Back</span>
+                  <span className="hidden sm:inline">Back to Dashboard</span>
+                  <span className="sm:hidden">Dashboard</span>
                 </div>
               </Button>
             </Link>
