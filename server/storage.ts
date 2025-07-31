@@ -3,8 +3,7 @@ import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 
 export interface IStorage {
-  getUser(id: number): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
+  getUser(id: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   
   // Meal operations
@@ -18,11 +17,6 @@ export interface IStorage {
   createOrUpdateWhoopData(data: InsertWhoopData): Promise<WhoopData>;
   upsertWhoopData(data: InsertWhoopData): Promise<WhoopData>;
   
-  // WHOOP token operations
-  getWhoopToken(userId: string): Promise<WhoopToken | undefined>;
-  createOrUpdateWhoopToken(data: InsertWhoopToken): Promise<WhoopToken>;
-  deleteWhoopToken(userId: string): Promise<void>;
-  
   // Calendar operations
   getUserCalendars(userId: string): Promise<UserCalendar[]>;
   createUserCalendar(data: InsertUserCalendar): Promise<UserCalendar>;
@@ -31,13 +25,8 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  async getUser(id: number): Promise<User | undefined> {
+  async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user || undefined;
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
     return user || undefined;
   }
 
