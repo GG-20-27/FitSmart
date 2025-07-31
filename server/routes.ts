@@ -1031,12 +1031,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const todayDate = new Date().toISOString().split('T')[0];
       
-      // UNIVERSAL FRESH DATA PRIORITIZATION: Always try live WHOOP API first for ALL users
-      // This ensures every user gets real-time data when available, not just admin
+      // PRIORITY 1: Always check for cached data first to ensure user always sees their data
+      console.log(`[WHOOP TODAY] Checking cached data first for user: ${userId} on date: ${todayDate}`);
       
-      console.log(`[WHOOP TODAY] UNIVERSAL FRESH DATA: Attempting live WHOOP API fetch for user: ${userId}`);
+      try {
+        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
+        
+        if (cachedData) {
+          console.log(`[WHOOP TODAY] Found cached data for user: ${userId}`, {
+            recovery: cachedData.recoveryScore,
+            sleep: cachedData.sleepScore,
+            strain: cachedData.strainScore
+          });
+          
+          // Return cached data immediately so user sees their metrics
+          return res.json({
+            recovery_score: cachedData.recoveryScore,
+            sleep_score: cachedData.sleepScore,
+            sleep_hours: cachedData.sleepHours || 8.5,
+            strain: cachedData.strainScore / 10,
+            resting_heart_rate: cachedData.restingHeartRate,
+            hrv: cachedData.hrv || null,
+            date: todayDate,
+            user_id: userId,
+            timestamp: new Date().toISOString(),
+            source: 'database_cache'
+          });
+        } else {
+          console.log(`[WHOOP TODAY] No cached data found for user: ${userId} on date: ${todayDate}`);
+        }
+      } catch (dbError: any) {
+        console.error(`[WHOOP TODAY] Database query error for user: ${userId}`, dbError.message);
+      }
       
-      // Try to fetch fresh data from WHOOP API - prioritize live data for everyone
+      // PRIORITY 2: If no cached data, try live WHOOP API
+      console.log(`[WHOOP TODAY] No cached data available, attempting live WHOOP API fetch for user: ${userId}`);
+      
+      // Try to fetch fresh data from WHOOP API
       try {
         const freshData = await whoopApiService.getTodaysData(userId);
         if (freshData && typeof freshData.recovery_score === 'number') {
@@ -1080,22 +1111,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[WHOOP TODAY] Fresh API fetch failed, checking cached data for user: ${userId}`, fetchError.message);
         
         // If fresh API fails, try to return cached data as fallback
-        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
-        
-        if (cachedData) {
-          console.log(`[WHOOP TODAY] Returning cached data as fallback for user: ${userId}`);
-          return res.json({
-            recovery_score: cachedData.recoveryScore,
-            sleep_score: cachedData.sleepScore,
-            sleep_hours: cachedData.sleepHours || 8.5,
-            strain: cachedData.strainScore / 10,
-            resting_heart_rate: cachedData.restingHeartRate,
-            hrv: cachedData.hrv || null,
-            date: todayDate,
-            user_id: userId,
-            timestamp: new Date().toISOString(),
-            source: 'database_fallback'
-          });
+        try {
+          const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
+          
+          if (cachedData) {
+            console.log(`[WHOOP TODAY] Found cached data for user: ${userId}`, {
+              recovery: cachedData.recoveryScore,
+              sleep: cachedData.sleepScore,
+              strain: cachedData.strainScore
+            });
+            return res.json({
+              recovery_score: cachedData.recoveryScore,
+              sleep_score: cachedData.sleepScore,
+              sleep_hours: cachedData.sleepHours || 8.5,
+              strain: cachedData.strainScore / 10,
+              resting_heart_rate: cachedData.restingHeartRate,
+              hrv: cachedData.hrv || null,
+              date: todayDate,
+              user_id: userId,
+              timestamp: new Date().toISOString(),
+              source: 'database_fallback'
+            });
+          } else {
+            console.log(`[WHOOP TODAY] No cached data found in database for user: ${userId} on date: ${todayDate}`);
+          }
+        } catch (dbError: any) {
+          console.error(`[WHOOP TODAY] Database query error for user: ${userId}`, dbError.message);
         }
       }
       
