@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key } from 'lucide-react';
-import { Link } from 'wouter';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
@@ -177,32 +176,13 @@ export default function Profile() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8 space-y-4 sm:space-y-0">
-          <div className="flex items-center space-x-4">
-            <div className="p-3 bg-blue-600/20 border border-blue-500/30 rounded-lg">
-              <User className="h-6 w-6 text-blue-400" />
-            </div>
-            <div>
-              <h1 className="text-3xl font-bold text-white">User Profile & Management</h1>
-              <p className="text-slate-400">Manage user accounts and WHOOP connections</p>
-            </div>
+        <div className="flex items-center space-x-4 mb-8">
+          <div className="p-3 bg-blue-600/20 border border-blue-500/30 rounded-lg">
+            <User className="h-6 w-6 text-blue-400" />
           </div>
-          
-          <div className="flex justify-center sm:justify-end">
-            <Link href="/">
-              <Button
-                variant="outline"
-                size="sm"
-                className="relative overflow-hidden border-transparent bg-gradient-to-r from-pink-500 to-rose-600 text-white hover:from-pink-600 hover:to-rose-700"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-pink-400 to-rose-500 opacity-30 animate-pulse"></div>
-                <div className="relative flex items-center space-x-2">
-                  <FitScoreLogo size={16} />
-                  <span className="hidden sm:inline">Back to Dashboard</span>
-                  <span className="sm:hidden">Dashboard</span>
-                </div>
-              </Button>
-            </Link>
+          <div>
+            <h1 className="text-3xl font-bold text-white">User Profile & Management</h1>
+            <p className="text-slate-400">Manage user accounts and WHOOP connections</p>
           </div>
         </div>
 
@@ -429,6 +409,44 @@ export default function Profile() {
           {/* Calendar Management */}
           <CalendarManagement />
         </div>
+
+        {/* Quick Actions */}
+        <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm mt-8">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-white">
+              <Calendar className="h-5 w-5" />
+              Quick Actions
+            </CardTitle>
+            <CardDescription>Common tasks and system information</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Button
+                onClick={() => window.open('/', '_blank')}
+                variant="outline"
+                className="relative overflow-hidden border-transparent bg-gradient-to-r from-pink-500 to-rose-600 text-white hover:from-pink-600 hover:to-rose-700 h-auto p-6 flex flex-col items-center space-y-3 transition-all duration-300"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-pink-400 to-rose-500 opacity-30 animate-pulse"></div>
+                <div className="relative flex flex-col items-center space-y-3">
+                  <FitScoreLogo size={32} />
+                  <span className="font-medium">Dashboard</span>
+                </div>
+              </Button>
+              
+              <Button
+                onClick={() => window.open('/calendar', '_blank')}
+                variant="outline"
+                className="relative overflow-hidden border-transparent bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 h-auto p-6 flex flex-col items-center space-y-3 transition-all duration-300"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-emerald-500 opacity-30 animate-pulse"></div>
+                <div className="relative flex flex-col items-center space-y-3">
+                  <Calendar className="h-8 w-8" />
+                  <span className="font-medium">Calendar View</span>
+                </div>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

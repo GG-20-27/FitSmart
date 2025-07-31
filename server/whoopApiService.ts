@@ -178,32 +178,8 @@ export class WhoopApiService {
       });
     }
 
-    // Check if token needs refresh (expires within 10 minutes)
-    const now = Math.floor(Date.now() / 1000);
-    const expiresAt = new Date(tokenData.expires_at).getTime() / 1000;
-    const timeUntilExpiry = expiresAt - now;
-    
-    console.log(`[TOKEN VALIDATION] Token expires in ${Math.round(timeUntilExpiry / 60)} minutes`);
-    
-    if (timeUntilExpiry < 600) { // Less than 10 minutes
-      console.log('[TOKEN VALIDATION] Token expires soon, attempting refresh...');
-      
-      if (tokenData.refresh_token) {
-        try {
-          const refreshedToken = await this.refreshToken(tokenData.refresh_token, userId);
-          await whoopTokenStorage.storeToken(refreshedToken);
-          console.log('[TOKEN VALIDATION] Token refreshed successfully');
-          return refreshedToken;
-        } catch (refreshError) {
-          console.error('[TOKEN VALIDATION] Token refresh failed:', refreshError.message);
-          // Continue with existing token if refresh fails
-        }
-      } else {
-        console.log('[TOKEN VALIDATION] No refresh token available');
-      }
-    }
-
-    console.log('[TOKEN VALIDATION] Using existing valid token for user:', userId);
+    // For now, just return the token without refresh checks to fix the issue
+    console.log('[TOKEN VALIDATION] Using existing token for user:', userId);
     return tokenData;
   }
 

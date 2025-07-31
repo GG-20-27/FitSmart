@@ -1031,14 +1031,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const todayDate = new Date().toISOString().split('T')[0];
       
-      // PRIORITY 1: Always try to fetch fresh real-time data from WHOOP API first
-      console.log(`[WHOOP TODAY] Fetching real-time WHOOP data for user: ${userId}`);
+      // Always prioritize fresh WHOOP API data for all users to ensure real-time accuracy
+      // Only fall back to cached data if API fails or user has no valid token
       
-      // Try to fetch fresh data from WHOOP API first for real-time metrics
+      console.log(`[WHOOP TODAY] Attempting to fetch fresh WHOOP data for user: ${userId}`);
+      
+      // Try to fetch fresh data from WHOOP API
       try {
         const freshData = await whoopApiService.getTodaysData(userId);
-        console.log(`[WHOOP TODAY] WHOOP API response for user ${userId}:`, freshData);
-        
         if (freshData && typeof freshData.recovery_score === 'number') {
           // Store the fresh data
           await storage.upsertWhoopData({
@@ -1075,25 +1075,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             timestamp: new Date().toISOString(),
             source: 'live_api'
           });
-        } else {
-          console.log(`[WHOOP TODAY] WHOOP API returned empty/invalid data. Falling back to cached data for user: ${userId}`);
         }
       } catch (fetchError: any) {
-        console.log(`[WHOOP TODAY] Fresh API fetch failed: ${fetchError.message}. Proceeding to cached data fallback.`);
-      }
-      
-      // If fresh API fails or returns empty data, try cached data as fallback
-      console.log(`[WHOOP TODAY] Using cached data as fallback for user: ${userId}, date: ${todayDate}`);
-      try {
+        console.log(`[WHOOP TODAY] Fresh API fetch failed, checking cached data for user: ${userId}`, fetchError.message);
+        
+        // If fresh API fails, try to return cached data as fallback
         const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
-        console.log(`[WHOOP TODAY] Database query result:`, cachedData);
         
         if (cachedData) {
-          console.log(`[WHOOP TODAY] Found cached data for user: ${userId}`, {
-            recovery: cachedData.recoveryScore,
-            sleep: cachedData.sleepScore,
-            strain: cachedData.strainScore
-          });
+          console.log(`[WHOOP TODAY] Returning cached data as fallback for user: ${userId}`);
           return res.json({
             recovery_score: cachedData.recoveryScore,
             sleep_score: cachedData.sleepScore,
@@ -1106,21 +1096,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             timestamp: new Date().toISOString(),
             source: 'database_fallback'
           });
-        } else {
-          console.log(`[WHOOP TODAY] No cached data found for user: ${userId} on date: ${todayDate}`);
         }
-      } catch (dbError: any) {
-        console.error(`[WHOOP TODAY] Database query error for user: ${userId}`, dbError.message);
       }
-
       
       console.log(`[WHOOP TODAY] No fresh or cached data available for user: ${userId}`);
-      return res.status(401).json({
+      return res.status(404).json({
         error: 'No WHOOP data available',
         message: 'Please complete WHOOP OAuth authentication to fetch today\'s data',
-        auth_url: '/api/whoop/login',
-        date: todayDate,
-        requires_authentication: true
+        date: todayDate
       });
       
     } catch (error: any) {
@@ -1525,7 +1508,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const todayEnd = zurichTime.endOf('day');
       
       const allEvents: any[] = [];
-      const failedCalendars: string[] = [];
       
       // Fetch and parse each calendar
       for (const calendarUrl of calendarUrls) {
@@ -1535,7 +1517,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (!response.ok) {
             console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
-            failedCalendars.push(calendarUrl);
             continue;
           }
           
@@ -1577,13 +1558,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const result = {
         date: zurichTime.toISODate(), // Returns YYYY-MM-DD format
-        events: allEvents,
-        ...(failedCalendars.length > 0 && {
-          warnings: [
-            `${failedCalendars.length} calendar(s) could not be accessed. Please check that your Google Calendar is set to public sharing.`,
-            "Go to Google Calendar → Settings → Your calendar → Access permissions → Make available to public"
-          ]
-        })
+        events: allEvents
       };
       
       console.log(`Found ${allEvents.length} events for today`);
@@ -1636,7 +1611,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rangeEnd = DateTime.fromISO(end).setZone('Europe/Zurich').endOf('day');
       
       const allEvents: any[] = [];
-      const failedCalendars: string[] = [];
       
       // Fetch and parse each calendar
       for (const calendarUrl of calendarUrls) {
@@ -1646,7 +1620,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           if (!response.ok) {
             console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
-            failedCalendars.push(calendarUrl);
             continue;
           }
           
@@ -1691,13 +1664,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         range: {
           start: rangeStart.toISODate(),
           end: rangeEnd.toISODate()
-        },
-        ...(failedCalendars.length > 0 && {
-          warnings: [
-            `${failedCalendars.length} calendar(s) could not be accessed. Please check that your Google Calendar is set to public sharing.`,
-            "Go to Google Calendar → Settings → Your calendar → Access permissions → Make available to public"
-          ]
-        })
+        }
       };
       
       console.log(`Found ${allEvents.length} events in date range`);
