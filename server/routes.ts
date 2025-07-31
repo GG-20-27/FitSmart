@@ -1115,10 +1115,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       
       console.log(`[WHOOP TODAY] No fresh or cached data available for user: ${userId}`);
-      return res.status(404).json({
+      return res.status(401).json({
         error: 'No WHOOP data available',
         message: 'Please complete WHOOP OAuth authentication to fetch today\'s data',
-        date: todayDate
+        auth_url: '/api/whoop/login',
+        date: todayDate,
+        requires_authentication: true
       });
       
     } catch (error: any) {
