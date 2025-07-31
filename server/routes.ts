@@ -1037,6 +1037,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Try to fetch fresh data from WHOOP API first for real-time metrics
       try {
         const freshData = await whoopApiService.getTodaysData(userId);
+        console.log(`[WHOOP TODAY] WHOOP API response for user ${userId}:`, freshData);
+        
         if (freshData && typeof freshData.recovery_score === 'number') {
           // Store the fresh data
           await storage.upsertWhoopData({
@@ -1073,40 +1075,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
             timestamp: new Date().toISOString(),
             source: 'live_api'
           });
+        } else {
+          console.log(`[WHOOP TODAY] WHOOP API returned empty/invalid data. Falling back to cached data for user: ${userId}`);
         }
       } catch (fetchError: any) {
         console.log(`[WHOOP TODAY] Fresh API fetch failed: ${fetchError.message}. Proceeding to cached data fallback.`);
+      }
+      
+      // If fresh API fails or returns empty data, try cached data as fallback
+      console.log(`[WHOOP TODAY] Using cached data as fallback for user: ${userId}, date: ${todayDate}`);
+      try {
+        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
+        console.log(`[WHOOP TODAY] Database query result:`, cachedData);
         
-        // If fresh API fails, try cached data as fallback
-        console.log(`[WHOOP TODAY] Using cached data as fallback for user: ${userId}, date: ${todayDate}`);
-        try {
-          const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
-          console.log(`[WHOOP TODAY] Database query result:`, cachedData);
-          
-          if (cachedData) {
-            console.log(`[WHOOP TODAY] Found cached data for user: ${userId}`, {
-              recovery: cachedData.recoveryScore,
-              sleep: cachedData.sleepScore,
-              strain: cachedData.strainScore
-            });
-            return res.json({
-              recovery_score: cachedData.recoveryScore,
-              sleep_score: cachedData.sleepScore,
-              sleep_hours: cachedData.sleepHours || 8.5,
-              strain: cachedData.strainScore / 10,
-              resting_heart_rate: cachedData.restingHeartRate,
-              hrv: cachedData.hrv || null,
-              date: todayDate,
-              user_id: userId,
-              timestamp: new Date().toISOString(),
-              source: 'database_fallback'
-            });
-          } else {
-            console.log(`[WHOOP TODAY] No cached data found for user: ${userId} on date: ${todayDate}`);
-          }
-        } catch (dbError: any) {
-          console.error(`[WHOOP TODAY] Database query error for user: ${userId}`, dbError.message);
+        if (cachedData) {
+          console.log(`[WHOOP TODAY] Found cached data for user: ${userId}`, {
+            recovery: cachedData.recoveryScore,
+            sleep: cachedData.sleepScore,
+            strain: cachedData.strainScore
+          });
+          return res.json({
+            recovery_score: cachedData.recoveryScore,
+            sleep_score: cachedData.sleepScore,
+            sleep_hours: cachedData.sleepHours || 8.5,
+            strain: cachedData.strainScore / 10,
+            resting_heart_rate: cachedData.restingHeartRate,
+            hrv: cachedData.hrv || null,
+            date: todayDate,
+            user_id: userId,
+            timestamp: new Date().toISOString(),
+            source: 'database_fallback'
+          });
+        } else {
+          console.log(`[WHOOP TODAY] No cached data found for user: ${userId} on date: ${todayDate}`);
         }
+      } catch (dbError: any) {
+        console.error(`[WHOOP TODAY] Database query error for user: ${userId}`, dbError.message);
       }
 
       
