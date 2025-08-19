@@ -207,6 +207,7 @@ export default function Dashboard() {
     enabled: !!user, // Enable if user is JWT authenticated
     retry: (failureCount, error: any) => {
       if (error?.response?.status === 401) {
+        console.log('[DASHBOARD] WHOOP authentication expired, user needs to reconnect');
         // Force refresh auth status when 401 error occurs
         queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
         return false;

@@ -1113,6 +1113,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[WHOOP TODAY] Fresh API fetch failed, checking cached data for user: ${userId}`, fetchError.message);
         console.log(`[WHOOP TODAY] EXECUTING FALLBACK LOGIC - This message should appear in logs`);
         
+        // Check if it's an authentication error
+        if (fetchError.message?.includes('WHOOP access token expired') || 
+            fetchError.message?.includes('Missing WHOOP access token') ||
+            fetchError.message?.includes('Failed to refresh expired WHOOP token')) {
+          console.log(`[WHOOP TODAY] Authentication error detected, user needs to re-authenticate`);
+          return res.status(401).json({
+            error: 'WHOOP authentication expired',
+            message: 'Your WHOOP access has expired. Please reconnect your WHOOP account to fetch fresh data.',
+            auth_expired: true,
+            redirect_url: '/api/whoop/login'
+          });
+        }
+        
         // If fresh API fails, try to return cached data as fallback
         console.log(`[WHOOP TODAY] Looking for cached data with userId: ${userId}, date: ${todayDate}`);
         const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);

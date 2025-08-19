@@ -30,7 +30,7 @@ export function useAuth() {
     const checkForToken = () => {
       if (window.location.hash.startsWith('#token=')) {
         const token = window.location.hash.replace('#token=', '');
-        localStorage.setItem('token', token);
+        localStorage.setItem('auth_token', token);
         window.history.replaceState({}, '', '/');
         
         // Trigger a refetch of user data
@@ -41,10 +41,10 @@ export function useAuth() {
       }
       
       // Check if current token is expired or missing
-      const currentToken = localStorage.getItem('token');
+      const currentToken = localStorage.getItem('auth_token');
       if (!currentToken || isTokenExpired(currentToken)) {
         console.log('[AUTH] No valid token found, redirecting to WHOOP OAuth');
-        localStorage.removeItem('token');
+        localStorage.removeItem('auth_token');
         window.location.href = '/api/whoop/login';
         return;
       }
@@ -62,7 +62,7 @@ export function useAuth() {
   });
 
   // Check if token exists and is valid in localStorage
-  const currentToken = localStorage.getItem('token');
+  const currentToken = localStorage.getItem('auth_token');
   const hasValidToken = currentToken && !isTokenExpired(currentToken);
 
   // Logout mutation
@@ -70,7 +70,7 @@ export function useAuth() {
     mutationFn: () => apiRequest<AuthResponse>('/api/auth/logout', { method: 'POST' }),
     onSuccess: () => {
       // Remove JWT token from localStorage
-      localStorage.removeItem('token');
+      localStorage.removeItem('auth_token');
       queryClient.clear(); // Clear all cached data
       setLocation('/');
     },

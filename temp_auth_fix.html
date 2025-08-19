@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Fix</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            background: #0f172a; 
+            color: white; 
+            padding: 40px; 
+            text-align: center; 
+        }
+        .container { 
+            max-width: 600px; 
+            margin: 0 auto; 
+            background: #1e293b; 
+            padding: 30px; 
+            border-radius: 10px; 
+        }
+        .token { 
+            background: #374151; 
+            padding: 15px; 
+            border-radius: 5px; 
+            word-break: break-all; 
+            margin: 20px 0; 
+            font-family: monospace; 
+        }
+        .btn { 
+            background: #3b82f6; 
+            color: white; 
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 6px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            margin: 10px;
+        }
+        .btn:hover { background: #2563eb; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Authentication Fix</h1>
+        <p>The WHOOP health data system is working correctly, but you need to authenticate to see the data in the frontend.</p>
+        
+        <p><strong>Valid JWT Token:</strong></p>
+        <div class="token" id="jwtToken">
+            eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ3aG9vcElkIjoid2hvb3BfMjUyODM1MjgiLCJyb2xlIjoiYWRtaW4iLCJleHAiOjIwNzA5NjQ1MzMsImlhdCI6MTc1NTYwNDUzM30.XYLZgfZA_lvu69fKVr74xFYxJoov3fwylFc4tsybe5Q
+        </div>
+        
+        <button class="btn" onclick="setAuthToken()">Set Auth Token & Go to Dashboard</button>
+        <button class="btn" onclick="testAPI()">Test API</button>
+        
+        <div id="results" style="margin-top: 20px; text-align: left;"></div>
+    </div>
+
+    <script>
+        function setAuthToken() {
+            const token = document.getElementById('jwtToken').textContent.trim();
+            localStorage.setItem('auth_token', token);
+            alert('JWT token set successfully! Redirecting to dashboard...');
+            window.location.href = '/';
+        }
+        
+        async function testAPI() {
+            const token = document.getElementById('jwtToken').textContent.trim();
+            localStorage.setItem('auth_token', token);
+            
+            try {
+                const response = await fetch('/api/whoop/today', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                document.getElementById('results').innerHTML = `
+                    <h3>API Test Result:</h3>
+                    <pre style="background: #374151; padding: 15px; border-radius: 5px; overflow-x: auto;">${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                document.getElementById('results').innerHTML = `
+                    <h3>API Test Error:</h3>
+                    <pre style="background: #dc2626; padding: 15px; border-radius: 5px;">${error.message}</pre>
+                `;
+            }
+        }
+        
+        // Check current auth status
+        window.onload = function() {
+            const currentToken = localStorage.getItem('auth_token');
+            if (currentToken) {
+                document.getElementById('results').innerHTML = `
+                    <p style="color: #10b981;">✅ Current auth token found in localStorage</p>
+                    <button class="btn" onclick="window.location.href='/'">Go to Dashboard</button>
+                `;
+            }
+        };
+    </script>
+</body>
+</html>

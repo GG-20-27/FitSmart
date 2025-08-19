@@ -11,7 +11,7 @@ export async function apiRequest<T = any>(
   url: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('auth_token');
   
   const res = await fetch(url, {
     credentials: "include", // 5. ALWAYS include credentials
@@ -34,7 +34,7 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('auth_token');
     
     const res = await fetch(queryKey[0] as string, {
       credentials: "include", // 5. ALWAYS include credentials

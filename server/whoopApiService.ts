@@ -178,8 +178,40 @@ export class WhoopApiService {
       });
     }
 
-    // For now, just return the token without refresh checks to fix the issue
-    console.log('[TOKEN VALIDATION] Using existing token for user:', userId);
+    // Check if token is expired and needs refresh
+    const currentTime = Math.floor(Date.now() / 1000);
+    if (tokenData.expires_at && tokenData.expires_at < currentTime) {
+      console.log('[TOKEN VALIDATION] Token expired for user:', userId, 'expired at:', new Date(tokenData.expires_at * 1000));
+      
+      if (!tokenData.refresh_token) {
+        console.log('[TOKEN VALIDATION] No refresh token available for user:', userId);
+        throw new WhoopApiError({
+          type: WhoopErrorType.AUTHENTICATION_ERROR,
+          message: 'WHOOP access token expired and no refresh token available',
+          retryable: false
+        });
+      }
+
+      try {
+        console.log('[TOKEN VALIDATION] Refreshing expired token for user:', userId);
+        const refreshedTokenData = await this.refreshToken(tokenData.refresh_token, userId);
+        
+        // Store the refreshed token
+        await whoopTokenStorage.setToken(userId, refreshedTokenData);
+        console.log('[TOKEN VALIDATION] Token refreshed and stored for user:', userId);
+        
+        return refreshedTokenData;
+      } catch (refreshError: any) {
+        console.error('[TOKEN VALIDATION] Token refresh failed for user:', userId, refreshError.message);
+        throw new WhoopApiError({
+          type: WhoopErrorType.AUTHENTICATION_ERROR,
+          message: 'Failed to refresh expired WHOOP token',
+          retryable: false
+        });
+      }
+    }
+
+    console.log('[TOKEN VALIDATION] Using valid existing token for user:', userId);
     return tokenData;
   }
 
