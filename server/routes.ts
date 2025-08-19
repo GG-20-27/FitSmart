@@ -1061,7 +1061,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             averageHeartRate: Math.round(freshData.average_heart_rate || 0)
           });
           
-          console.log(`[WHOOP TODAY] Fresh data fetched and stored for user: ${userId}`, {
+          console.log(`[WHOOP TODAY] Fresh data fetched and stored for user: ${userId} source=live`, {
             recovery: freshData.recovery_score,
             sleep_score: freshData.sleep_score,
             strain: freshData.strain,
@@ -1087,7 +1087,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
           
           if (cachedData) {
-            console.log(`[WHOOP TODAY] Found cached data, returning as fallback for user: ${userId}`, {
+            console.log(`[WHOOP TODAY] Found cached data, returning as fallback for user: ${userId} source=cache`, {
               recovery: cachedData.recoveryScore,
               sleep_score: cachedData.sleepScore,
               strain: cachedData.strainScore,
@@ -1131,7 +1131,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
         
         if (cachedData) {
-          console.log(`[WHOOP TODAY] Found cached data, returning as fallback for user: ${userId}`, {
+          console.log(`[WHOOP TODAY] Found cached data, returning as fallback for user: ${userId} source=cache`, {
             recovery: cachedData.recoveryScore,
             sleep_score: cachedData.sleepScore,
             strain: cachedData.strainScore,
@@ -1410,9 +1410,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!userId) {
         return res.status(401).json({ error: 'Authentication required' });
       }
-      const weeklyData = await whoopApiService.getWeeklyAverages(userId);
+      // Try WHOOP API first, fallback to cache if needed
+      let weeklyData;
+      try {
+        weeklyData = await whoopApiService.getWeeklyAverages(userId);
+        
+        // If API succeeds but returns null values, try cache fallback
+        if (!weeklyData || (weeklyData.avgRecovery === null && weeklyData.avgStrain === null && weeklyData.avgSleep === null && weeklyData.avgHRV === null)) {
+          console.log('WHOOP API returned null values, trying cache fallback');
+          throw new Error('No data from WHOOP API');
+        }
+        
+        console.log('Weekly WHOOP averages retrieved successfully from API');
+      } catch (error: any) {
+        console.log('Failed to get weekly data from WHOOP API, trying cache fallback');
+        
+        // Get 7 days of cached data as fallback
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        
+        const cachedData = [];
+        for (let i = 0; i < 7; i++) {
+          const date = new Date();
+          date.setDate(date.getDate() - i);
+          const dateStr = date.toISOString().split('T')[0];
+          const dayData = await storage.getWhoopDataByUserAndDate(userId, dateStr);
+          if (dayData) cachedData.push(dayData);
+        }
+        
+        if (cachedData && cachedData.length > 0) {
+          // Calculate averages from cached data
+          const recoverySum = cachedData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0);
+          const strainSum = cachedData.reduce((sum, d) => sum + (d.strainScore ? d.strainScore / 10 : 0), 0); // Convert back from stored ×10
+          const sleepSum = cachedData.reduce((sum, d) => sum + (d.sleepScore || 0), 0);
+          const hrvSum = cachedData.reduce((sum, d) => sum + (d.hrv || 0), 0);
+          
+          const count = cachedData.length;
+          weeklyData = {
+            avgRecovery: recoverySum > 0 ? Math.round(recoverySum / count) : null,
+            avgStrain: strainSum > 0 ? Math.round((strainSum / count) * 10) / 10 : null,
+            avgSleep: sleepSum > 0 ? Math.round(sleepSum / count) : null,
+            avgHRV: hrvSum > 0 ? Math.round(hrvSum / count) : null
+          };
+          console.log('Weekly averages calculated from cache', weeklyData);
+        } else {
+          weeklyData = { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
+        }
+      }
       
-      console.log('Weekly WHOOP averages retrieved successfully');
       res.json(weeklyData);
     } catch (error: any) {
       console.error('Error in /api/whoop/weekly:', error.message);

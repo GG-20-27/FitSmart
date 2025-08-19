@@ -755,6 +755,7 @@ export class WhoopApiService {
       // Get sleep data using sleep_id from recovery data if available
       let sleepData = null;
       let sleepHours = null;
+      let sleepScore = null;
       
       if (recovery?.sleep_id) {
         console.log(`Found sleep_id in recovery data: ${recovery.sleep_id}`);
@@ -765,14 +766,14 @@ export class WhoopApiService {
             sleepData = response.data;
             console.log('Sleep data retrieved via sleep_id:', JSON.stringify(sleepData, null, 2));
             
-            // Extract sleep hours and score from response
-            if (sleepData.score?.sleep_score) {
-              sleepHours = sleepData.score.sleep_score;
-              console.log(`Sleep score from sleep_id: ${sleepHours}`);
+            // Extract sleep_score from WHOOP's sleep.score.sleep_performance_percentage (0-100)
+            if (sleepData.score?.sleep_performance_percentage !== undefined) {
+              sleepScore = sleepData.score.sleep_performance_percentage;
+              console.log(`Sleep score from sleep_performance_percentage: ${sleepScore}`);
             }
             
-            // Try to get sleep hours from stage_summary if available
-            if (!sleepHours && sleepData.score?.stage_summary?.total_in_bed_time_milli) {
+            // Extract sleep_hours from sleep duration (convert ms to hours)
+            if (sleepData.score?.stage_summary?.total_in_bed_time_milli) {
               sleepHours = Math.round(sleepData.score.stage_summary.total_in_bed_time_milli / (1000 * 60 * 60) * 10) / 10;
               console.log(`Sleep hours calculated from stage_summary: ${sleepHours}`);
             }
@@ -825,7 +826,7 @@ export class WhoopApiService {
         cycle_id: latestCycle.id,
         strain: latestCycle.score?.strain || null,
         recovery_score: recovery?.score?.recovery_score || null,
-        sleep_score: sleepData?.score?.sleep_performance_percentage || sleepData?.score?.sleep_score || null,
+        sleep_score: sleepScore || null,
         sleep_stages: sleepStages,
         sleep_hours: sleepHours,
         hrv: recovery?.score?.hrv_rmssd_milli || null,
