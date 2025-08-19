@@ -1,0 +1,104 @@
+Fix “today” values drift, force live WHOOP fetch, repair weekly averages, add cache tools
+
+Do not rewrite files. Patch only.
+
+1) Route: /api/whoop/today
+
+Add two optional query params:
+
+source=live → bypass cache and call whoopApiService.getTodaysData(userId) directly. If success, upsert cache for that userId + date and return {..., source:"live"}.
+
+invalidate=1 → delete cached record for userId + date before proceeding (works with or without source=live).
+
+Add structured logs:
+
+[WHOOP TODAY] user=<id> date=<yyyy-mm-dd> source=<live|cache> 
+values: rec=<int%> sleepScore=<int%> hours=<float> strain=<float> hrv=<int> rhr=<int>
+
+
+Make sure the date key used for cache is computed in Europe/Zurich (or from USER_TZ env; default 'Europe/Zurich'). Implement helper:
+
+import { DateTime } from 'luxon';
+function todayKey(tz = process.env.USER_TZ || 'Europe/Zurich'){ 
+  return DateTime.now().setZone(tz).toISODate(); 
+}
+
+
+Use this for reading/writing today’s cache.
+
+2) Mapping correctness inside whoopApiService.getTodaysData(userId)
+
+Do not rewrite the whole function. Verify/patch only the field mapping:
+
+recovery_score → recovery.score.recovery_score (integer 0–100)
+
+strain → float 0–21 from latestCycle.score.strain (no ×10 in the return payload)
+
+hrv → recovery.score.hrv_rmssd_milli (ms)
+
+resting_heart_rate → recovery.score.resting_heart_rate
+
+sleep_score → sleep.score.sleep_performance_percentage (0–100). Never derive from hours.
+
+sleep_hours → duration hours. Prefer WHOOP’s sleep.sleep_hours if present; else compute:
+
+const ms = sleep.score?.stage_summary?.total_in_bed_time_milli ?? sleep.score?.stage_summary?.total_sleep_time_milli;
+sleep_hours = ms ? Math.round((ms/3600000)*10)/10 : null;
+
+
+When saving to DB, if strain is stored as int×10, keep that in storage, but divide by 10 when returning from /api/whoop/today.
+
+3) Route: /api/whoop/weekly
+
+Compute for the last 7 calendar days in user TZ (same helper) not UTC.
+
+Try live WHOOP first (your getWeeklyAverages(userId)), if any metric is missing for a day, fill from cache if present.
+
+Return null (not N/A) only when no data exists at all.
+
+Add a log:
+
+[WHOOP WEEKLY] user=<id> tz=<tz> used=<live|mixed|cache-only> avg: rec=<>, strain=<>, sleep=<>, hrv=<>
+
+4) Cache maintenance endpoints (admin only or same JWT user)
+
+DELETE /api/cache/today → deletes today’s cached record for current user; returns {deleted:true, date:<key>}.
+
+DELETE /api/cache/day/:date → deletes that day’s cache for current user; validate YYYY-MM-DD.
+
+5) Quick verification harness (keep behind JWT)
+
+Add /api/whoop/today/raw?source=live that returns:
+
+{ "raw": { "cycle": <…>, "recovery": <…>, "sleep": <…> }, "mapped": { … }, "date": "<yyyy-mm-dd>" }
+
+
+This helps confirm exact WHOOP payload vs mapped fields. Do not include secrets.
+
+6) Frontend (small)
+
+In the “Reconnect / Refresh” UI add:
+
+a “Fetch Live Now” button calling /api/whoop/today?source=live
+
+a small “Clear Today Cache” action calling DELETE /api/cache/today
+
+Show the source badge (live/cache) near “Last sync”.
+
+7) Tests (don’t hard‑code values)
+
+With my JWT in localStorage, run:
+
+GET /api/whoop/today?source=live → should print source:"live" and today’s mapped values.
+
+DELETE /api/cache/today then GET /api/whoop/today → should hit live, then cache on second call.
+
+GET /api/whoop/weekly → verify non‑nulls when any data exists, and logged used=<…>.
+
+Important guardrails
+
+Do not fabricate or “seed” values for today or tomorrow.
+
+Do not change OAuth/JWT logic.
+
+Patch only the lines mentioned; keep file layout intact.

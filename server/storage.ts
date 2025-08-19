@@ -16,6 +16,7 @@ export interface IStorage {
   getWhoopDataByUserAndDate(userId: string, date: string): Promise<WhoopData | undefined>;
   createOrUpdateWhoopData(data: InsertWhoopData): Promise<WhoopData>;
   upsertWhoopData(data: InsertWhoopData): Promise<WhoopData>;
+  deleteWhoopDataByUserAndDate(userId: string, date: string): Promise<void>;
   
   // Calendar operations
   getUserCalendars(userId: string): Promise<UserCalendar[]>;
@@ -89,6 +90,10 @@ export class DatabaseStorage implements IStorage {
 
   async upsertWhoopData(insertData: InsertWhoopData): Promise<WhoopData> {
     return this.createOrUpdateWhoopData(insertData);
+  }
+
+  async deleteWhoopDataByUserAndDate(userId: string, date: string): Promise<void> {
+    await db.delete(whoopData).where(and(eq(whoopData.userId, userId), eq(whoopData.date, date)));
   }
 
   // Calendar operations

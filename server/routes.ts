@@ -52,6 +52,11 @@ const upload = multer({
   }
 });
 
+// Helper function for timezone-aware date keys
+function todayKey(tz = process.env.USER_TZ || 'Europe/Zurich') {
+  return DateTime.now().setZone(tz).toISODate();
+}
+
 // Helper function to get default user ID for WHOOP OAuth testing
 async function getDefaultUserId(): Promise<string> {
   // For WHOOP OAuth, we don't have a default admin user anymore
@@ -1021,7 +1026,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log(`[WHOOP TODAY] *** ENDPOINT CALLED *** This should always appear in logs`);
     try {
       const userId = getCurrentUserId(req);
-      console.log(`[WHOOP TODAY] Getting today's WHOOP data for user: ${userId}`);
+      const sourceLive = req.query.source === 'live';
+      const invalidateCache = req.query.invalidate === '1';
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const todayDate = todayKey(tz);
+      
+      console.log(`[WHOOP TODAY] Getting today's WHOOP data for user: ${userId}, source: ${sourceLive ? 'live' : 'auto'}, invalidate: ${invalidateCache}`);
       
       if (!userId) {
         return res.status(401).json({ 
@@ -1030,130 +1040,86 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      const todayDate = new Date().toISOString().split('T')[0];
+      // Handle cache invalidation if requested
+      if (invalidateCache) {
+        console.log(`[WHOOP TODAY] Invalidating cache for user=${userId} date=${todayDate}`);
+        await storage.deleteWhoopDataByUserAndDate(userId, todayDate);
+      }
       
-      // Always prioritize fresh WHOOP API data for all users to ensure real-time accuracy
-      // Only fall back to cached data if API fails or user has no valid token
+      // If source=live, bypass cache and fetch directly from WHOOP
+      let shouldTryLive = sourceLive || true; // Always try live first unless only cache requested
+      let freshData = null;
+      let source = 'cache';
       
-      console.log(`[WHOOP TODAY] Attempting to fetch fresh WHOOP data for user: ${userId}`);
-      
-      // Try to fetch fresh data from WHOOP API
-      try {
-        console.log(`[WHOOP TODAY] About to call whoopApiService.getTodaysData for user: ${userId}`);
-        const freshData = await whoopApiService.getTodaysData(userId);
-        console.log(`[WHOOP TODAY] Fresh data response:`, freshData);
-        console.log(`[WHOOP TODAY] Fresh data type check - typeof recovery_score:`, typeof freshData?.recovery_score);
-        console.log(`[WHOOP TODAY] About to check if condition - freshData:`, !!freshData, `recovery_score type:`, typeof freshData?.recovery_score);
-        if (freshData && typeof freshData.recovery_score === 'number') {
-          // Store the fresh data
-          await storage.upsertWhoopData({
-            userId: userId,
-            date: todayDate,
-            recoveryScore: Math.round(freshData.recovery_score),
-            sleepScore: Math.round(freshData.sleep_score || 0), // Store sleep score as percentage
-            strainScore: Math.round((freshData.strain || 0) * 10), // Store strain * 10
-            restingHeartRate: Math.round(freshData.resting_heart_rate || 0),
-            sleepHours: freshData.sleep_hours || 0,
-            hrv: Math.round(freshData.hrv || 0),
-            respiratoryRate: freshData.respiratory_rate || 0,
-            skinTempCelsius: freshData.skin_temperature || 0,
-            spo2Percentage: Math.round(freshData.spo2_percentage || 0),
-            averageHeartRate: Math.round(freshData.average_heart_rate || 0)
-          });
+      if (shouldTryLive) {
+        console.log(`[WHOOP TODAY] Attempting to fetch fresh WHOOP data for user: ${userId}`);
+        
+        try {
+          console.log(`[WHOOP TODAY] About to call whoopApiService.getTodaysData for user: ${userId}`);
+          freshData = await whoopApiService.getTodaysData(userId);
           
-          console.log(`[WHOOP TODAY] Fresh data fetched and stored for user: ${userId} source=live`, {
-            recovery: freshData.recovery_score,
-            sleep_score: freshData.sleep_score,
-            strain: freshData.strain,
-            hrv: freshData.hrv
-          });
-          
-          return res.json({
-            recovery_score: freshData.recovery_score,
-            sleep_score: freshData.sleep_score,
-            sleep_hours: freshData.sleep_hours,
-            strain: freshData.strain,
-            resting_heart_rate: freshData.resting_heart_rate,
-            hrv: Math.round(freshData.hrv),
-            date: todayDate,
-            user_id: userId,
-            timestamp: new Date().toISOString(),
-            source: 'live_api'
-          });
-        } else {
-          // Fresh data is invalid or missing - fall back to cached data immediately
-          console.log(`[WHOOP TODAY] Fresh data invalid, falling back to cached data for user: ${userId}`);
-          console.log(`[WHOOP TODAY] Looking for cached data with userId: ${userId}, date: ${todayDate}`);
-          const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
-          
-          if (cachedData) {
-            console.log(`[WHOOP TODAY] Found cached data, returning as fallback for user: ${userId} source=cache`, {
-              recovery: cachedData.recoveryScore,
-              sleep_score: cachedData.sleepScore,
-              strain: cachedData.strainScore,
-              hrv: cachedData.hrv
+          if (freshData && typeof freshData.recovery_score === 'number') {
+            // Store the fresh data in cache
+            await storage.upsertWhoopData({
+              userId: userId,
+              date: todayDate,
+              recoveryScore: Math.round(freshData.recovery_score),
+              sleepScore: Math.round(freshData.sleep_score || 0), // Store sleep score as percentage
+              strainScore: Math.round((freshData.strain || 0) * 10), // Store strain * 10
+              restingHeartRate: Math.round(freshData.resting_heart_rate || 0),
+              sleepHours: freshData.sleep_hours || 0,
+              hrv: Math.round(freshData.hrv || 0),
+              respiratoryRate: freshData.respiratory_rate || 0,
+              skinTempCelsius: freshData.skin_temperature || 0,
+              spo2Percentage: Math.round(freshData.spo2_percentage || 0),
+              averageHeartRate: Math.round(freshData.average_heart_rate || 0)
             });
+            
+            source = 'live';
+            console.log(`[WHOOP TODAY] user=${userId} date=${todayDate} source=${source} values: rec=${Math.round(freshData.recovery_score)}% sleepScore=${Math.round(freshData.sleep_score)}% hours=${freshData.sleep_hours} strain=${freshData.strain} hrv=${Math.round(freshData.hrv)} rhr=${Math.round(freshData.resting_heart_rate)}`);
+            
             return res.json({
-              recovery_score: cachedData.recoveryScore,
-              sleep_score: cachedData.sleepScore,
-              sleep_hours: cachedData.sleepHours || 7.5,
-              strain: cachedData.strainScore / 10,
-              resting_heart_rate: cachedData.restingHeartRate,
-              hrv: cachedData.hrv || null,
+              recovery_score: freshData.recovery_score,
+              sleep_score: freshData.sleep_score,
+              sleep_hours: freshData.sleep_hours,
+              strain: freshData.strain,
+              resting_heart_rate: freshData.resting_heart_rate,
+              hrv: Math.round(freshData.hrv),
               date: todayDate,
               user_id: userId,
               timestamp: new Date().toISOString(),
-              source: 'database_fallback'
+              source: 'live'
             });
-          } else {
-            console.log(`[WHOOP TODAY] No cached data found for user: ${userId}, date: ${todayDate}`);
           }
+        } catch (fetchError: any) {
+          console.log(`[WHOOP TODAY] Live fetch failed: ${fetchError.message}`);
+          // Continue to cache fallback
         }
-      } catch (fetchError: any) {
-        console.log(`[WHOOP TODAY] Fresh API fetch failed, checking cached data for user: ${userId}`, fetchError.message);
-        console.log(`[WHOOP TODAY] EXECUTING FALLBACK LOGIC - This message should appear in logs`);
-        
-        // Check if it's an authentication error
-        if (fetchError.message?.includes('WHOOP access token expired') || 
-            fetchError.message?.includes('Missing WHOOP access token') ||
-            fetchError.message?.includes('Failed to refresh expired WHOOP token')) {
-          console.log(`[WHOOP TODAY] Authentication error detected, user needs to re-authenticate`);
-          return res.status(401).json({
-            error: 'WHOOP authentication expired',
-            message: 'Your WHOOP access has expired. Please reconnect your WHOOP account to fetch fresh data.',
-            auth_expired: true,
-            redirect_url: '/api/whoop/login'
-          });
-        }
-        
-        // If fresh API fails, try to return cached data as fallback
+      }
+      
+      // Try cached data if live failed or wasn't requested
+      if (!sourceLive || !freshData) {
         console.log(`[WHOOP TODAY] Looking for cached data with userId: ${userId}, date: ${todayDate}`);
         const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
         
         if (cachedData) {
-          console.log(`[WHOOP TODAY] Found cached data, returning as fallback for user: ${userId} source=cache`, {
-            recovery: cachedData.recoveryScore,
-            sleep_score: cachedData.sleepScore,
-            strain: cachedData.strainScore,
-            hrv: cachedData.hrv
-          });
+          source = 'cache';
+          console.log(`[WHOOP TODAY] user=${userId} date=${todayDate} source=${source} values: rec=${cachedData.recoveryScore}% sleepScore=${cachedData.sleepScore}% hours=${cachedData.sleepHours} strain=${cachedData.strainScore / 10} hrv=${cachedData.hrv} rhr=${cachedData.restingHeartRate}`);
+          
           return res.json({
             recovery_score: cachedData.recoveryScore,
             sleep_score: cachedData.sleepScore,
-            sleep_hours: cachedData.sleepHours || 7.5,
-            strain: cachedData.strainScore / 10,
+            sleep_hours: cachedData.sleepHours || null,
+            strain: cachedData.strainScore / 10, // Convert back from stored int×10
             resting_heart_rate: cachedData.restingHeartRate,
             hrv: cachedData.hrv || null,
             date: todayDate,
             user_id: userId,
             timestamp: new Date().toISOString(),
-            source: 'database_fallback'
+            source: 'cache'
           });
-        } else {
-          console.log(`[WHOOP TODAY] No cached data found for user: ${userId}, date: ${todayDate}`);
         }
       }
-      
       console.log(`[WHOOP TODAY] No fresh or cached data available for user: ${userId}`);
       return res.status(404).json({
         error: 'No WHOOP data available',
@@ -1425,16 +1391,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (error: any) {
         console.log('Failed to get weekly data from WHOOP API, trying cache fallback');
         
-        // Get 7 days of cached data as fallback
-        const sevenDaysAgo = new Date();
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        
+        // Get 7 days of cached data as fallback using timezone-aware dates
+        const tz = process.env.USER_TZ || 'Europe/Zurich';
         const cachedData = [];
         for (let i = 0; i < 7; i++) {
-          const date = new Date();
-          date.setDate(date.getDate() - i);
-          const dateStr = date.toISOString().split('T')[0];
-          const dayData = await storage.getWhoopDataByUserAndDate(userId, dateStr);
+          const date = DateTime.now().setZone(tz).minus({ days: i }).toISODate();
+          const dayData = await storage.getWhoopDataByUserAndDate(userId, date);
           if (dayData) cachedData.push(dayData);
         }
         
@@ -1452,7 +1414,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             avgSleep: sleepSum > 0 ? Math.round(sleepSum / count) : null,
             avgHRV: hrvSum > 0 ? Math.round(hrvSum / count) : null
           };
-          console.log('Weekly averages calculated from cache', weeklyData);
+          const used = 'cache-only';
+          console.log(`[WHOOP WEEKLY] user=${userId} tz=${tz} used=${used} avg: rec=${weeklyData.avgRecovery}, strain=${weeklyData.avgStrain}, sleep=${weeklyData.avgSleep}, hrv=${weeklyData.avgHRV}`);
         } else {
           weeklyData = { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
         }
@@ -1474,6 +1437,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Failed to fetch weekly WHOOP averages',
         details: error.message
       });
+    }
+  });
+
+  // Cache management endpoints
+  app.delete('/api/cache/today', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const todayDate = todayKey(tz);
+      
+      await storage.deleteWhoopDataByUserAndDate(userId, todayDate);
+      
+      res.json({
+        deleted: true,
+        date: todayDate
+      });
+    } catch (error: any) {
+      console.error('Error deleting today cache:', error.message);
+      res.status(500).json({ error: 'Failed to delete cache' });
+    }
+  });
+
+  app.delete('/api/cache/day/:date', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      const date = req.params.date;
+      
+      // Validate YYYY-MM-DD format
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+      }
+      
+      await storage.deleteWhoopDataByUserAndDate(userId, date);
+      
+      res.json({
+        deleted: true,
+        date: date
+      });
+    } catch (error: any) {
+      console.error('Error deleting day cache:', error.message);
+      res.status(500).json({ error: 'Failed to delete cache' });
+    }
+  });
+
+  // Raw WHOOP data endpoint for verification
+  app.get('/api/whoop/today/raw', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const sourceLive = req.query.source === 'live';
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      if (sourceLive) {
+        const tz = process.env.USER_TZ || 'Europe/Zurich';
+        const todayDate = todayKey(tz);
+        
+        // Get raw WHOOP data
+        const rawData = await whoopApiService.getTodaysData(userId);
+        
+        // Extract and structure the response
+        const result = {
+          raw: {
+            cycle: rawData.raw_data?.cycle || null,
+            recovery: rawData.raw_data?.recovery || null,
+            sleep: rawData.raw_data?.sleep || null
+          },
+          mapped: {
+            recovery_score: rawData.recovery_score,
+            sleep_score: rawData.sleep_score,
+            sleep_hours: rawData.sleep_hours,
+            strain: rawData.strain,
+            hrv: rawData.hrv,
+            resting_heart_rate: rawData.resting_heart_rate
+          },
+          date: todayDate
+        };
+        
+        res.json(result);
+      } else {
+        res.status(400).json({ error: 'source=live parameter required for raw endpoint' });
+      }
+    } catch (error: any) {
+      console.error('Error fetching raw WHOOP data:', error.message);
+      res.status(500).json({ error: 'Failed to fetch raw data', details: error.message });
     }
   });
 

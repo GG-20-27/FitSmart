@@ -772,10 +772,14 @@ export class WhoopApiService {
               console.log(`Sleep score from sleep_performance_percentage: ${sleepScore}`);
             }
             
-            // Extract sleep_hours from sleep duration (convert ms to hours)
-            if (sleepData.score?.stage_summary?.total_in_bed_time_milli) {
-              sleepHours = Math.round(sleepData.score.stage_summary.total_in_bed_time_milli / (1000 * 60 * 60) * 10) / 10;
-              console.log(`Sleep hours calculated from stage_summary: ${sleepHours}`);
+            // Extract sleep_hours - prefer WHOOP's sleep_hours if present, else compute from ms
+            if (sleepData.sleep_hours !== undefined && sleepData.sleep_hours !== null) {
+              sleepHours = sleepData.sleep_hours;
+              console.log(`Sleep hours from WHOOP's sleep_hours field: ${sleepHours}`);
+            } else {
+              const ms = sleepData.score?.stage_summary?.total_in_bed_time_milli ?? sleepData.score?.stage_summary?.total_sleep_time_milli;
+              sleepHours = ms ? Math.round((ms/3600000)*10)/10 : null;
+              console.log(`Sleep hours calculated from duration: ${sleepHours}`);
             }
           }
         } catch (sleepError: any) {
