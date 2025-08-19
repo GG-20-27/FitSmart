@@ -1065,13 +1065,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
               date: todayDate,
               recoveryScore: Math.round(freshData.recovery_score),
               sleepScore: Math.round(freshData.sleep_score || 0), // Store sleep score as percentage
-              strainScore: Math.round((freshData.strain || 0) * 10), // Store strain * 10
+              strainScore: freshData.strain || 0, // Store strain as decimal for precision
               restingHeartRate: Math.round(freshData.resting_heart_rate || 0),
               sleepHours: freshData.sleep_hours || 0,
-              hrv: Math.round(freshData.hrv || 0),
+              hrv: freshData.hrv || 0, // Store HRV as decimal for precision
               respiratoryRate: freshData.respiratory_rate || 0,
               skinTempCelsius: freshData.skin_temperature || 0,
-              spo2Percentage: Math.round(freshData.spo2_percentage || 0),
+              spo2Percentage: freshData.spo2_percentage || 0,
               averageHeartRate: Math.round(freshData.average_heart_rate || 0)
             });
             

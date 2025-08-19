@@ -38,13 +38,13 @@ export const whoopData = pgTable("whoop_data", {
   date: text("date").notNull(), // YYYY-MM-DD format
   recoveryScore: integer("recovery_score").notNull(),
   sleepScore: integer("sleep_score").notNull(),
-  strainScore: integer("strain_score").notNull(), // stored as integer * 10 for precision
+  strainScore: real("strain_score").notNull(), // Store as decimal for precision
   restingHeartRate: integer("resting_heart_rate").notNull(),
   sleepHours: real("sleep_hours"),
-  hrv: integer("hrv"),
-  respiratoryRate: integer("respiratory_rate"),
-  skinTempCelsius: integer("skin_temp_celsius"),
-  spo2Percentage: integer("spo2_percentage"),
+  hrv: real("hrv"), // HRV can be decimal like 93.759125
+  respiratoryRate: real("respiratory_rate"), // Can be decimal like 17.285156
+  skinTempCelsius: real("skin_temp_celsius"),
+  spo2Percentage: real("spo2_percentage"), // Can be decimal like 96.375
   averageHeartRate: integer("average_heart_rate"),
   lastSync: timestamp("last_sync").defaultNow().notNull(),
 }, (table) => ({
