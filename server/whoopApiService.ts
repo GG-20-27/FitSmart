@@ -768,8 +768,8 @@ export class WhoopApiService {
             
             // Extract sleep_score from WHOOP's sleep.score.sleep_performance_percentage (0-100)
             if (sleepData.score?.sleep_performance_percentage !== undefined) {
-              sleepScore = sleepData.score.sleep_performance_percentage;
-              console.log(`Sleep score from sleep_performance_percentage: ${sleepScore}`);
+              sleepScore = Math.min(Math.max(sleepData.score.sleep_performance_percentage, 0), 100);
+              console.log(`Sleep score from sleep_performance_percentage (capped): ${sleepScore}`);
             }
             
             // Extract sleep_hours - prefer WHOOP's sleep_hours if present, else compute from ms

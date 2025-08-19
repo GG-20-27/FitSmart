@@ -1,7 +1,8 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { HealthIcon } from '@/components/HealthIcon';
-import { Activity } from 'lucide-react';
+import { Activity, ChevronLeft } from 'lucide-react';
+import { Link } from 'wouter';
 
 export default function LoginPage() {
   const handleWhoopLogin = () => {
@@ -10,6 +11,16 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+      {/* Back to Dashboard button */}
+      <div className="fixed top-4 left-4">
+        <Link href="/dashboard">
+          <Button variant="ghost" size="sm" className="bg-red-600/20 hover:bg-red-600/30 text-red-300 hover:text-white transition-all duration-200 border border-red-500/30">
+            <ChevronLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Button>
+        </Link>
+      </div>
+      
       <Card className="w-full max-w-md bg-slate-800/50 border-slate-700 backdrop-blur-sm">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">

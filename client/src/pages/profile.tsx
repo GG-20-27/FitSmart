@@ -5,13 +5,14 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key } from 'lucide-react';
+import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key, ChevronLeft } from 'lucide-react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import SocialAuth from '@/components/social-auth';
 import { CalendarManagement } from '@/components/calendar-management';
 import { useAuth } from '@/hooks/useAuth';
+import { Link } from 'wouter';
 
 function FitScoreLogo({ size = 64 }: { size?: number }) {
   return (
@@ -176,14 +177,22 @@ export default function Profile() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="flex items-center space-x-4 mb-8">
-          <div className="p-3 bg-blue-600/20 border border-blue-500/30 rounded-lg">
-            <User className="h-6 w-6 text-blue-400" />
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center space-x-4">
+            <div className="p-3 bg-blue-600/20 border border-blue-500/30 rounded-lg">
+              <User className="h-6 w-6 text-blue-400" />
+            </div>
+            <div>
+              <h1 className="text-3xl font-bold text-white">User Profile & Management</h1>
+              <p className="text-slate-400">Manage user accounts and WHOOP connections</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-3xl font-bold text-white">User Profile & Management</h1>
-            <p className="text-slate-400">Manage user accounts and WHOOP connections</p>
-          </div>
+          <Link href="/dashboard">
+            <Button variant="ghost" size="sm" className="bg-red-600/20 hover:bg-red-600/30 text-red-300 hover:text-white transition-all duration-200 border border-red-500/30">
+              <ChevronLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
+          </Link>
         </div>
 
         <div className="grid grid-cols-1 gap-8">
