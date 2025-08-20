@@ -7,12 +7,13 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key, ChevronLeft } from 'lucide-react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
+import { fetchJSON } from '@/lib/fetchJSON';
 import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import SocialAuth from '@/components/social-auth';
 import { CalendarManagement } from '@/components/calendar-management';
 import { useAuth } from '@/hooks/useAuth';
-import { Link } from 'wouter';
+import { Link, useLocation } from 'wouter';
 
 function FitScoreLogo({ size = 64 }: { size?: number }) {
   return (
@@ -88,10 +89,27 @@ export default function Profile() {
   const [newUserEmail, setNewUserEmail] = useState('');
   const { user } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
 
   const { data: userProfile } = useQuery({
     queryKey: ['/api/users/me'],
     enabled: !!user,
+    queryFn: async () => {
+      try {
+        return await fetchJSON('/api/users/me');
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Authentication required') {
+          toast({
+            title: "Authentication required",
+            description: "Please log in with WHOOP to view profile",
+            variant: "destructive",
+          });
+          setLocation('/api/whoop/login');
+          throw error;
+        }
+        throw error;
+      }
+    },
   });
 
   const { data: authStatus, isLoading: authLoading } = useQuery<WhoopAuthStatus>({
@@ -109,6 +127,22 @@ export default function Profile() {
     queryKey: ['/api/auth/static-jwt'],
     enabled: !!user,
     retry: 3,
+    queryFn: async () => {
+      try {
+        return await fetchJSON('/api/auth/static-jwt');
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Authentication required') {
+          toast({
+            title: "Authentication required",
+            description: "Please log in with WHOOP to access token",
+            variant: "destructive",
+          });
+          setLocation('/api/whoop/login');
+          throw error;
+        }
+        throw error;
+      }
+    },
   });
 
   const createUserMutation = useMutation({
