@@ -1669,22 +1669,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch and parse each calendar
       for (const calendarUrl of calendarUrls) {
         try {
-          const calendarHost = new URL(calendarUrl).hostname;
-          console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=fetching`);
+          console.log(`Fetching calendar from: ${calendarUrl}`);
           const response = await fetch(calendarUrl);
           
           if (!response.ok) {
-            if (response.status === 403 || response.status === 404) {
-              console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=HTTP_${response.status}`);
-              return res.status(400).json({ 
-                error: "Your ICS link looks private. Publish your Google Calendar and use the 'Public address in iCal format'." 
-              });
-            }
-            console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=HTTP_${response.status}`);
+            console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
             continue;
           }
           
-          console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=ok`);
           const icsData = await response.text();
           const parsedCal = ical.parseICS(icsData);
           
@@ -1714,8 +1706,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           });
         } catch (error) {
-          const calendarHost = new URL(calendarUrl).hostname;
-          console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=parse_err`);
+          console.error(`Error parsing calendar ${calendarUrl}:`, error);
         }
       }
       
@@ -1724,7 +1715,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const result = {
         date: zurichTime.toISODate(), // Returns YYYY-MM-DD format
-        timezone: 'Europe/Zurich',
         events: allEvents
       };
       
@@ -1782,22 +1772,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Fetch and parse each calendar
       for (const calendarUrl of calendarUrls) {
         try {
-          const calendarHost = new URL(calendarUrl).hostname;
-          console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=fetching`);
+          console.log(`Fetching calendar from: ${calendarUrl}`);
           const response = await fetch(calendarUrl);
           
           if (!response.ok) {
-            if (response.status === 403 || response.status === 404) {
-              console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=HTTP_${response.status}`);
-              return res.status(400).json({ 
-                error: "Your ICS link looks private. Publish your Google Calendar and use the 'Public address in iCal format'." 
-              });
-            }
-            console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=HTTP_${response.status}`);
+            console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
             continue;
           }
           
-          console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=ok`);
           const icsData = await response.text();
           const parsedCal = ical.parseICS(icsData);
           
@@ -1827,8 +1809,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           });
         } catch (error) {
-          const calendarHost = new URL(calendarUrl).hostname;
-          console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=parse_err`);
+          console.error(`Error parsing calendar ${calendarUrl}:`, error);
         }
       }
       
@@ -1836,10 +1817,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       allEvents.sort((a, b) => DateTime.fromISO(a.start).toMillis() - DateTime.fromISO(b.start).toMillis());
       
       const result = {
-        start: rangeStart.toISODate(),
-        end: rangeEnd.toISODate(),
-        timezone: 'Europe/Zurich',
-        events: allEvents
+        events: allEvents,
+        range: {
+          start: rangeStart.toISODate(),
+          end: rangeEnd.toISODate()
+        }
       };
       
       console.log(`Found ${allEvents.length} events in date range`);
@@ -1864,14 +1846,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: 'Authentication required' });
       }
       const calendars = await storage.getUserCalendars(userId);
-      const formattedCalendars = calendars.map(cal => ({
-        id: cal.id,
-        name: cal.calendarName,
-        url: cal.calendarUrl,
-        active: cal.isActive,
-        created_at: cal.createdAt
-      }));
-      res.json(formattedCalendars);
+      res.json(calendars);
     } catch (error) {
       console.error('Error fetching calendars:', error);
       res.status(500).json({ error: 'Failed to fetch calendars' });
@@ -1902,29 +1877,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Please provide a valid Google Calendar ICS URL' });
       }
       
-      // Test fetching the ICS to provide better error messages
-      try {
-        const calendarHost = new URL(calendarUrl).hostname;
-        console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=validating`);
-        const testResponse = await fetch(calendarUrl);
-        
-        if (!testResponse.ok) {
-          if (testResponse.status === 403 || testResponse.status === 404) {
-            console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=HTTP_${testResponse.status}`);
-            return res.status(400).json({ 
-              error: "Your ICS link looks private. Publish your Google Calendar and use the 'Public address in iCal format'." 
-            });
-          }
-          console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=HTTP_${testResponse.status}`);
-          return res.status(400).json({ error: 'Unable to access the calendar URL. Please check the URL is correct and public.' });
-        }
-        console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=ok`);
-      } catch (error) {
-        const calendarHost = new URL(calendarUrl).hostname;
-        console.log(`[CAL ICS] user=${userId} host=${calendarHost} status=parse_err`);
-        return res.status(400).json({ error: 'Invalid calendar URL format' });
-      }
-      
       const calendar = await storage.createUserCalendar({
         userId: userId,
         calendarUrl,
@@ -1944,20 +1896,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete('/api/calendars/:id', requireJWTAuth, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
-      const userId = getCurrentUserId(req);
-      
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
-      }
-
-      // Check ownership before deletion
-      const userCalendars = await storage.getUserCalendars(userId);
-      const calendarToDelete = userCalendars.find(cal => cal.id === id);
-      
-      if (!calendarToDelete) {
-        return res.status(404).json({ error: 'Not found' });
-      }
-      
       await storage.deleteUserCalendar(id);
       res.json({ message: 'Calendar deleted successfully' });
     } catch (error) {
@@ -1971,19 +1909,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       const updates = req.body;
-      const userId = getCurrentUserId(req);
-      
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
-      }
-
-      // Check ownership before update
-      const userCalendars = await storage.getUserCalendars(userId);
-      const calendarToUpdate = userCalendars.find(cal => cal.id === id);
-      
-      if (!calendarToUpdate) {
-        return res.status(404).json({ error: 'Not found' });
-      }
       
       const calendar = await storage.updateUserCalendar(id, updates);
       res.json(calendar);

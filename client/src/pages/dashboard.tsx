@@ -550,7 +550,116 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Weekly Averages Section */}
+        {isWhoopConnected && whoopSummary && (
+          <div className="mt-16">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
+                <TrendingUp className="h-8 w-8 mr-3 text-cyan-400" />
+                Weekly Averages
+              </h2>
+              <p className="text-slate-400">7-day trends and performance insights</p>
+            </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+              {/* Weekly Recovery Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Heart className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-blue-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgRecovery !== null && whoopSummary?.avgRecovery !== undefined ? (
+                        <><CountUp end={whoopSummary.avgRecovery} decimals={1} duration={1200} />%</>
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Heart className="h-5 w-5 text-blue-400" />
+                    <span className="text-slate-300 font-medium">Avg Recovery</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Weekly Strain Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-orange-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Zap className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-orange-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgStrain !== null && whoopSummary?.avgStrain !== undefined ? (
+                        <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1200} />
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Zap className="h-5 w-5 text-orange-400" />
+                    <span className="text-slate-300 font-medium">Avg Strain</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Weekly Sleep Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Moon className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-purple-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
+                        <><CountUp end={whoopSummary.avgSleep} decimals={1} duration={1200} />%</>
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Moon className="h-5 w-5 text-purple-400" />
+                    <span className="text-slate-300 font-medium">Avg Sleep</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Weekly HRV Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Activity className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-red-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgHRV !== null && whoopSummary?.avgHRV !== undefined ? (
+                        <><CountUp end={whoopSummary.avgHRV} decimals={1} duration={1200} /> ms</>
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Activity className="h-5 w-5 text-red-400" />
+                    <span className="text-slate-300 font-medium">Avg HRV</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
 
         {/* Additional Health Insights */}
         {isWhoopConnected && whoopData && (
@@ -773,110 +882,6 @@ export default function Dashboard() {
             )}
           </div>
         )}
-
-        {/* Weekly Averages Section - Moved to bottom with horizontal layout */}
-        {isWhoopConnected && whoopSummary && (
-          <div className="mt-16">
-            <div className="text-center mb-8">
-              <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
-                <TrendingUp className="h-8 w-8 mr-3 text-cyan-400" />
-                Weekly Averages
-              </h2>
-              <p className="text-slate-400">7-day trends and performance insights</p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
-              {/* Weekly Recovery Average */}
-              <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 text-center backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Heart className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
-                </div>
-                <div className="text-2xl font-bold text-blue-400 mb-2">
-                  {summaryLoading ? (
-                    <span className="text-slate-400">Loading...</span>
-                  ) : whoopSummary?.avgRecovery !== null && whoopSummary?.avgRecovery !== undefined ? (
-                    <><CountUp end={whoopSummary.avgRecovery} decimals={1} duration={1200} />%</>
-                  ) : (
-                    <span className="text-slate-500">N/A</span>
-                  )}
-                </div>
-                <div className="flex items-center justify-center space-x-2">
-                  <Heart className="h-4 w-4 text-blue-400" />
-                  <span className="text-slate-300 font-medium text-sm">Avg Recovery</span>
-                </div>
-              </div>
-
-              {/* Weekly Strain Average */}
-              <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 text-center backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-orange-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Zap className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
-                </div>
-                <div className="text-2xl font-bold text-orange-400 mb-2">
-                  {summaryLoading ? (
-                    <span className="text-slate-400">Loading...</span>
-                  ) : whoopSummary?.avgStrain !== null && whoopSummary?.avgStrain !== undefined ? (
-                    <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1200} />
-                  ) : (
-                    <span className="text-slate-500">N/A</span>
-                  )}
-                </div>
-                <div className="flex items-center justify-center space-x-2">
-                  <Zap className="h-4 w-4 text-orange-400" />
-                  <span className="text-slate-300 font-medium text-sm">Avg Strain</span>
-                </div>
-              </div>
-
-              {/* Weekly Sleep Average */}
-              <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 text-center backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Moon className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
-                </div>
-                <div className="text-2xl font-bold text-purple-400 mb-2">
-                  {summaryLoading ? (
-                    <span className="text-slate-400">Loading...</span>
-                  ) : whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
-                    <><CountUp end={whoopSummary.avgSleep} decimals={1} duration={1200} />%</>
-                  ) : (
-                    <span className="text-slate-500">N/A</span>
-                  )}
-                </div>
-                <div className="flex items-center justify-center space-x-2">
-                  <Moon className="h-4 w-4 text-purple-400" />
-                  <span className="text-slate-300 font-medium text-sm">Avg Sleep</span>
-                </div>
-              </div>
-
-              {/* Weekly HRV Average */}
-              <div className="bg-slate-800/50 border border-slate-700/50 rounded-lg p-4 text-center backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Activity className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
-                </div>
-                <div className="text-2xl font-bold text-red-400 mb-2">
-                  {summaryLoading ? (
-                    <span className="text-slate-400">Loading...</span>
-                  ) : whoopSummary?.avgHRV !== null && whoopSummary?.avgHRV !== undefined ? (
-                    <><CountUp end={whoopSummary.avgHRV} decimals={1} duration={1200} /> ms</>
-                  ) : (
-                    <span className="text-slate-500">N/A</span>
-                  )}
-                </div>
-                <div className="flex items-center justify-center space-x-2">
-                  <Activity className="h-4 w-4 text-red-400" />
-                  <span className="text-slate-300 font-medium text-sm">Avg HRV</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Meal Upload Section */}
-        <MealUpload />
-
-        {/* Today's Meals */}
-        <TodaysMeals />
-
-        {/* Calendar Today */}
-        <CalendarToday />
       </div>
     </div>
   );

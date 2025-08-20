@@ -1,13 +1,11 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { apiRequest, queryClient } from '@/lib/queryClient';
-import { fetchJSON } from '@/lib/fetchJSON';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Trash2, Plus, ExternalLink, ToggleLeft, ToggleRight, CalendarDays, Copy, Check, Edit3 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useLocation } from 'wouter';
 
 interface UserCalendar {
   id: number;
@@ -21,7 +19,6 @@ interface UserCalendar {
 
 export function CalendarManagement() {
   const { toast } = useToast();
-  const [, setLocation] = useLocation();
   const [calendarUrl, setCalendarUrl] = useState('');
   const [calendarName, setCalendarName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
@@ -51,42 +48,38 @@ export function CalendarManagement() {
     queryKey: ['/api/calendars'],
     retry: false,
     queryFn: async () => {
-      try {
-        return await fetchJSON('/api/calendars');
-      } catch (error) {
-        if (error instanceof Error && error.message === 'Authentication required') {
-          toast({
-            title: "Authentication required",
-            description: "Please log in with WHOOP to manage calendars",
-            variant: "destructive",
-          });
-          setLocation('/api/whoop/login');
-          throw error;
-        }
-        throw error;
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('/api/calendars', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch calendars');
       }
+      return response.json();
     },
   });
 
   // Add calendar mutation
   const addCalendarMutation = useMutation({
     mutationFn: async ({ calendarUrl, calendarName }: { calendarUrl: string; calendarName: string }) => {
-      try {
-        return await fetchJSON('/api/calendars', {
-          method: 'POST',
-          body: JSON.stringify({ calendarUrl, calendarName })
-        });
-      } catch (error) {
-        if (error instanceof Error && error.message === 'Authentication required') {
-          toast({
-            title: "Authentication required",
-            description: "Please log in with WHOOP to manage calendars",
-            variant: "destructive",
-          });
-          setLocation('/api/whoop/login');
-        }
-        throw error;
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch('/api/calendars', {
+        method: 'POST',
+        body: JSON.stringify({ calendarUrl, calendarName }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to add calendar');
       }
+      
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/calendars'] });
@@ -110,21 +103,16 @@ export function CalendarManagement() {
   // Delete calendar mutation
   const deleteCalendarMutation = useMutation({
     mutationFn: async (id: number) => {
-      try {
-        return await fetchJSON(`/api/calendars/${id}`, {
-          method: 'DELETE'
-        });
-      } catch (error) {
-        if (error instanceof Error && error.message === 'Authentication required') {
-          toast({
-            title: "Authentication required",
-            description: "Please log in with WHOOP to manage calendars",
-            variant: "destructive",
-          });
-          setLocation('/api/whoop/login');
-        }
-        throw error;
+      const response = await fetch(`/api/calendars/${id}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete calendar');
       }
+      
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/calendars'] });
@@ -145,22 +133,20 @@ export function CalendarManagement() {
   // Update calendar mutation
   const updateCalendarMutation = useMutation({
     mutationFn: async ({ id, calendarUrl, calendarName }: { id: number; calendarUrl: string; calendarName: string }) => {
-      try {
-        return await fetchJSON(`/api/calendars/${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ calendarUrl, calendarName })
-        });
-      } catch (error) {
-        if (error instanceof Error && error.message === 'Authentication required') {
-          toast({
-            title: "Authentication required",
-            description: "Please log in with WHOOP to manage calendars",
-            variant: "destructive",
-          });
-          setLocation('/api/whoop/login');
-        }
-        throw error;
+      const response = await fetch(`/api/calendars/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ calendarUrl, calendarName }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update calendar');
       }
+      
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/calendars'] });
@@ -184,22 +170,20 @@ export function CalendarManagement() {
   // Toggle calendar active status
   const toggleCalendarMutation = useMutation({
     mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
-      try {
-        return await fetchJSON(`/api/calendars/${id}`, {
-          method: 'PATCH',
-          body: JSON.stringify({ isActive })
-        });
-      } catch (error) {
-        if (error instanceof Error && error.message === 'Authentication required') {
-          toast({
-            title: "Authentication required",
-            description: "Please log in with WHOOP to manage calendars",
-            variant: "destructive",
-          });
-          setLocation('/api/whoop/login');
-        }
-        throw error;
+      const response = await fetch(`/api/calendars/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ isActive }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to update calendar');
       }
+      
+      return response.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/calendars'] });

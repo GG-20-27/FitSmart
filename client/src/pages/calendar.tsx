@@ -6,9 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { CalendarIcon, MapPin, Clock, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
-import { Link, useLocation } from 'wouter';
-import { useToast } from '@/hooks/use-toast';
-import { fetchJSON } from '@/lib/fetchJSON';
+import { Link } from 'wouter';
 import moment from 'moment-timezone';
 import 'react-big-calendar/lib/css/react-big-calendar.css';
 import '../styles/calendar.css';
@@ -38,8 +36,6 @@ interface CalendarEventsResponse {
 }
 
 export default function CalendarPage() {
-  const { toast } = useToast();
-  const [, setLocation] = useLocation();
   const [currentDate, setCurrentDate] = useState(new Date());
   const [view, setView] = useState<'month' | 'week' | 'day'>('month');
   const [selectedEvent, setSelectedEvent] = useState<any>(null);
@@ -77,22 +73,11 @@ export default function CalendarPage() {
   const { data: calendarData, isLoading, error, refetch } = useQuery<CalendarEventsResponse>({
     queryKey: ['/api/calendar/events', startDate, endDate],
     queryFn: async () => {
-      try {
-        const data = await fetchJSON(`/api/calendar/events?start=${startDate}&end=${endDate}`);
-        const events = Array.isArray(data?.events) ? data.events : Array.isArray(data) ? data : [];
-        return { events, range: { start: startDate, end: endDate } };
-      } catch (error) {
-        if (error instanceof Error && error.message === 'Authentication required') {
-          toast({
-            title: "Authentication required",
-            description: "Please log in with WHOOP to view calendar events",
-            variant: "destructive",
-          });
-          setLocation('/api/whoop/login');
-          throw error;
-        }
-        throw error;
+      const response = await fetch(`/api/calendar/events?start=${startDate}&end=${endDate}`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch calendar events');
       }
+      return response.json();
     },
     refetchInterval: 5 * 60 * 1000, // Refresh every 5 minutes
   });
