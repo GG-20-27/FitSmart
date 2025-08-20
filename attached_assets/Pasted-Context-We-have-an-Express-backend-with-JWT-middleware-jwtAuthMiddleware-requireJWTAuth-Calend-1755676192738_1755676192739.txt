@@ -1,0 +1,79 @@
+Context: We have an Express backend with JWT middleware (jwtAuthMiddleware / requireJWTAuth). Calendars are stored per user. Current bugs:
+
+Frontend sees “Authentication required” when adding/editing calendars (route missing requireJWTAuth).
+
+/api/calendar/today and /api/calendar/events often return nothing or fail due to timezone window issues and missing ownership filters.
+
+PATCH/DELETE lack strict user_id filters (multi‑tenant hole).
+
+Need structured errors and logs.
+
+Make the following changes:
+
+Protect all calendar routes. In the calendar router (e.g., routes/calendarRoutes.ts or similar), ensure every route uses requireJWTAuth:
+
+GET /api/calendars
+
+POST /api/calendars
+
+PATCH /api/calendars/:id
+
+DELETE /api/calendars/:id
+
+GET /api/calendar/today
+
+GET /api/calendar/events
+
+Enforce per‑user ownership on mutations. For PATCH /:id and DELETE /:id, update the DB calls to include WHERE id = :id AND user_id = :req.userId. If the affected row count is 0, return 404 (not 403) with { error: "Not found" }. Never allow access by ID alone.
+
+Scope reads to the requester.
+
+GET /api/calendars must only return rows where user_id = req.userId.
+
+GET /api/calendar/events and GET /api/calendar/today must aggregate events only from calendars owned by req.userId (join or filter in code).
+
+Timezone‑correct “today” window. Use Europe/Zurich for the calendar “today” filter:
+
+Compute startLocal = startOfDay(tz=Europe/Zurich) and endLocal = endOfDay(tz=Europe/Zurich).
+
+Convert both to UTC (startUtc, endUtc) before comparing to event start/end.
+
+Include events that are ongoing or upcoming today (event overlaps with the [startUtc, endUtc] window).
+
+Use a reliable tz lib already in the project; if none, add luxon and implement with DateTime.now().setZone('Europe/Zurich').
+
+ICS fetch + parse.
+
+When adding/updating a calendar, store user_id = req.userId.
+
+If we fetch an ICS and get HTTP 403/404, return 400 with a helpful message: "Your ICS link looks private. Publish your Google Calendar and use the 'Public address in iCal format'."
+
+Log succinctly: [CAL ICS] user=<id> host=<host> status=<ok|HTTP_403|HTTP_404|parse_err>.
+
+Consistent response shapes.
+
+/api/calendars: [{ id, name, url, active, created_at }].
+
+/api/calendar/today: { date, timezone: 'Europe/Zurich', events: Event[] }.
+
+/api/calendar/events: { start, end, timezone: 'Europe/Zurich', events: Event[] }.
+
+Event shape: { id, calendar_id, title, start_utc, end_utc, location, description }.
+
+Security headers & logging.
+
+Do not log whole ICS URLs; log only hostname.
+
+Add a small helper: enforceOwner(table, id) if helpful to reduce repetition.
+
+Acceptance:
+
+Unauthenticated request to any calendar route returns 401 { error: "Authentication required" }.
+
+Cross‑user PATCH/DELETE of a calendar ID returns 404.
+
+After adding a published Google ICS, GET /api/calendar/today returns today’s overlapping events (Zurich time).
+
+[CAL ICS] logs reflect host + status.
+
+Do not change any other part of the code that does not need to be changed.
