@@ -678,7 +678,7 @@ export default function Dashboard() {
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-4">
                     <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
-                      <Moon className="h-6 w-6 text-white" />
+                      <Clock className="h-6 w-6 text-white" />
                     </div>
                     <div>
                       <p className="text-slate-400 text-sm">Sleep Hours</p>

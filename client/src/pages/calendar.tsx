@@ -231,17 +231,9 @@ export default function CalendarPage() {
       <div className="container mx-auto px-2 sm:px-4 py-4 sm:py-8">
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
-            <Link href="/dashboard">
-              <Button variant="ghost" size="sm" className="bg-transparent text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200">
-                <ChevronLeft className="h-4 w-4 mr-2" />
-                Back to Dashboard
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-bold text-white">Calendar</h1>
-              <p className="text-slate-400 text-sm sm:text-base">Your schedule in Europe/Zurich time</p>
-            </div>
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-bold text-white">Calendar</h1>
+            <p className="text-slate-400 text-sm sm:text-base">Your schedule in Europe/Zurich time</p>
           </div>
           
           <div className="flex items-center space-x-2">
@@ -258,6 +250,13 @@ export default function CalendarPage() {
               <CalendarIcon className="h-4 w-4 mr-2" />
               Refresh
             </Button>
+
+            <Link href="/dashboard">
+              <Button variant="outline" size="sm" className="bg-transparent border-white/20 text-white hover:bg-white/10 hover:border-white/40 transition-all duration-200">
+                <ChevronLeft className="h-4 w-4 mr-2" />
+                Back to Dashboard
+              </Button>
+            </Link>
           </div>
         </div>
 

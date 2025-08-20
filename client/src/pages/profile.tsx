@@ -188,7 +188,7 @@ export default function Profile() {
             </div>
           </div>
           <Link href="/dashboard">
-            <Button variant="ghost" size="sm" className="bg-red-600/20 hover:bg-red-600/30 text-red-300 hover:text-white transition-all duration-200 border border-red-500/30">
+            <Button variant="outline" size="sm" className="bg-transparent border-white/20 text-white hover:bg-white/10 hover:border-white/40 transition-all duration-200">
               <ChevronLeft className="h-4 w-4 mr-2" />
               Back to Dashboard
             </Button>
