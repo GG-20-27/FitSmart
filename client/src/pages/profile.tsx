@@ -419,43 +419,7 @@ export default function Profile() {
           <CalendarManagement />
         </div>
 
-        {/* Quick Actions */}
-        <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm mt-8">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-white">
-              <Calendar className="h-5 w-5" />
-              Quick Actions
-            </CardTitle>
-            <CardDescription>Common tasks and system information</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Button
-                onClick={() => window.open('/', '_blank')}
-                variant="outline"
-                className="relative overflow-hidden border-transparent bg-gradient-to-r from-pink-500 to-rose-600 text-white hover:from-pink-600 hover:to-rose-700 h-auto p-6 flex flex-col items-center space-y-3 transition-all duration-300"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-pink-400 to-rose-500 opacity-30 animate-pulse"></div>
-                <div className="relative flex flex-col items-center space-y-3">
-                  <FitScoreLogo size={32} />
-                  <span className="font-medium">Dashboard</span>
-                </div>
-              </Button>
-              
-              <Button
-                onClick={() => window.open('/calendar', '_blank')}
-                variant="outline"
-                className="relative overflow-hidden border-transparent bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 h-auto p-6 flex flex-col items-center space-y-3 transition-all duration-300"
-              >
-                <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-emerald-500 opacity-30 animate-pulse"></div>
-                <div className="relative flex flex-col items-center space-y-3">
-                  <Calendar className="h-8 w-8" />
-                  <span className="font-medium">Calendar View</span>
-                </div>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+
       </div>
     </div>
   );

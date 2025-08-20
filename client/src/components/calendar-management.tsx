@@ -103,8 +103,12 @@ export function CalendarManagement() {
   // Delete calendar mutation
   const deleteCalendarMutation = useMutation({
     mutationFn: async (id: number) => {
+      const token = localStorage.getItem('auth_token');
       const response = await fetch(`/api/calendars/${id}`, {
         method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
       });
       
       if (!response.ok) {
@@ -133,11 +137,13 @@ export function CalendarManagement() {
   // Update calendar mutation
   const updateCalendarMutation = useMutation({
     mutationFn: async ({ id, calendarUrl, calendarName }: { id: number; calendarUrl: string; calendarName: string }) => {
+      const token = localStorage.getItem('auth_token');
       const response = await fetch(`/api/calendars/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({ calendarUrl, calendarName }),
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
       });
       
@@ -170,11 +176,13 @@ export function CalendarManagement() {
   // Toggle calendar active status
   const toggleCalendarMutation = useMutation({
     mutationFn: async ({ id, isActive }: { id: number; isActive: boolean }) => {
+      const token = localStorage.getItem('auth_token');
       const response = await fetch(`/api/calendars/${id}`, {
         method: 'PATCH',
         body: JSON.stringify({ isActive }),
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
         },
       });
       

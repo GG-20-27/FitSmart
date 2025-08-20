@@ -73,7 +73,12 @@ export default function CalendarPage() {
   const { data: calendarData, isLoading, error, refetch } = useQuery<CalendarEventsResponse>({
     queryKey: ['/api/calendar/events', startDate, endDate],
     queryFn: async () => {
-      const response = await fetch(`/api/calendar/events?start=${startDate}&end=${endDate}`);
+      const token = localStorage.getItem('auth_token');
+      const response = await fetch(`/api/calendar/events?start=${startDate}&end=${endDate}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
       if (!response.ok) {
         throw new Error('Failed to fetch calendar events');
       }
