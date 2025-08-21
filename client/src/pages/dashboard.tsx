@@ -562,6 +562,30 @@ export default function Dashboard() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+              {/* Weekly Sleep Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Moon className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-purple-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
+                        <><CountUp end={whoopSummary.avgSleep} decimals={1} duration={1200} />%</>
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Moon className="h-5 w-5 text-purple-400" />
+                    <span className="text-slate-300 font-medium">Avg Sleep</span>
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Weekly Recovery Average */}
               <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                 <CardContent className="p-6 text-center">
@@ -606,30 +630,6 @@ export default function Dashboard() {
                   <div className="flex items-center justify-center space-x-2">
                     <Zap className="h-5 w-5 text-orange-400" />
                     <span className="text-slate-300 font-medium">Avg Strain</span>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Weekly Sleep Average */}
-              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-                <CardContent className="p-6 text-center">
-                  <div className="mb-4">
-                    <div className="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
-                      <Moon className="h-8 w-8 text-white" />
-                    </div>
-                    <div className="text-2xl font-bold text-purple-400">
-                      {summaryLoading ? (
-                        <span className="text-slate-400">Loading...</span>
-                      ) : whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
-                        <><CountUp end={whoopSummary.avgSleep} decimals={1} duration={1200} />%</>
-                      ) : (
-                        <span className="text-slate-500">N/A</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-center space-x-2">
-                    <Moon className="h-5 w-5 text-purple-400" />
-                    <span className="text-slate-300 font-medium">Avg Sleep</span>
                   </div>
                 </CardContent>
               </Card>
