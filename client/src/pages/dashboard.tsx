@@ -452,6 +452,30 @@ export default function Dashboard() {
         {/* Main Metrics Cards */}
         {isWhoopConnected && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-12 lg:mb-16">
+          {/* Sleep Score Card */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-4 sm:p-6 text-center">
+              <div className="mb-3 sm:mb-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
+                  <Moon className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-purple-400">
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
+                    <><CountUp end={Math.min(whoopData.sleep_score, 100)} duration={1200} />%</>
+                  ) : (
+                    <span className="text-slate-500">N/A</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Moon className="h-4 w-4 sm:h-5 sm:w-5 text-purple-400" />
+                <span className="text-slate-300 font-medium text-sm sm:text-base">Sleep Score</span>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Recovery Card */}
           <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
             <CardContent className="p-4 sm:p-6 text-center">
@@ -496,30 +520,6 @@ export default function Dashboard() {
               <div className="flex items-center justify-center space-x-2">
                 <Zap className="h-5 w-5 text-orange-400" />
                 <span className="text-slate-300 font-medium">Strain</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Sleep Score Card */}
-          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
-            <CardContent className="p-4 sm:p-6 text-center">
-              <div className="mb-3 sm:mb-4">
-                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
-                  <Moon className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
-                </div>
-                <div className="text-2xl font-bold text-purple-400">
-                  {whoopLoading ? (
-                    <span className="text-slate-400">Syncing...</span>
-                  ) : whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
-                    <><CountUp end={Math.min(whoopData.sleep_score, 100)} duration={1200} />%</>
-                  ) : (
-                    <span className="text-slate-500">N/A</span>
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center justify-center space-x-2">
-                <Moon className="h-4 w-4 sm:h-5 sm:w-5 text-purple-400" />
-                <span className="text-slate-300 font-medium text-sm sm:text-base">Sleep Score</span>
               </div>
             </CardContent>
           </Card>
