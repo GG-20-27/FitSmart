@@ -297,20 +297,7 @@ export function CalendarManagement() {
               <Plus className="h-4 w-4 mr-1 sm:mr-2" />
               <span className="hidden sm:inline">Add</span>
             </Button>
-            {calendars.length > 0 && !editingCalendar && (
-              <Button
-                onClick={() => {
-                  const firstCalendar = calendars[0];
-                  startEditing(firstCalendar);
-                }}
-                size="sm"
-                variant="outline"
-                className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
-              >
-                <Edit3 className="h-4 w-4 mr-1 sm:mr-2" />
-                <span className="hidden sm:inline">Edit</span>
-              </Button>
-            )}
+
           </div>
         </div>
       </CardHeader>
@@ -452,7 +439,7 @@ export function CalendarManagement() {
                     variant="outline"
                     size="sm"
                     onClick={() => window.open(calendar.calendarUrl, '_blank')}
-                    className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
+                    className="hidden sm:flex bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
                   >
                     <ExternalLink className="h-4 w-4" />
                   </Button>

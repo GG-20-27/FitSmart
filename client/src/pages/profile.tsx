@@ -72,6 +72,7 @@ interface UserProfile {
   id: string;
   email: string;
   displayName?: string;
+  role?: string;
   created_at: string;
   updated_at: string;
   hasWhoopToken: boolean;
@@ -186,7 +187,7 @@ export default function Profile() {
   });
 
   const currentUser = users?.find(user => user.hasWhoopToken) || users?.[0];
-  const isAdminUser = currentUser?.email === 'admin@fitscore.local';
+  const isAdminUser = userProfile?.role === 'admin';
 
   // Copy JWT token to clipboard
   const copyJwtToken = () => {
