@@ -2,11 +2,10 @@ import { useQuery, useMutation } from '@tanstack/react-query';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key, ChevronLeft, Edit3 } from 'lucide-react';
-import { apiRequest, queryClient } from '@/lib/queryClient';
+import { User, Calendar, Activity, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key, ChevronLeft } from 'lucide-react';
+import { apiRequest } from '@/lib/queryClient';
 import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import SocialAuth from '@/components/social-auth';
@@ -87,9 +86,6 @@ interface WhoopAuthStatus {
 }
 
 export default function Profile() {
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editingUserName, setEditingUserName] = useState('');
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -103,63 +99,11 @@ export default function Profile() {
     refetchInterval: 30000,
   });
 
-  const { data: users, isLoading: usersLoading, refetch: refetchUsers } = useQuery<UserProfile[]>({
-    queryKey: ['/api/admin/users'],
-    retry: 3,
-  });
-
   // Fetch static JWT token for Custom GPT integration
   const { data: staticJwtData } = useQuery({
     queryKey: ['/api/auth/static-jwt'],
     enabled: !!user,
     retry: 3,
-  });
-
-  const createUserMutation = useMutation({
-    mutationFn: async (email: string) => {
-      const response = await apiRequest('POST', '/api/admin/users', { email });
-      return response.json();
-    },
-    onSuccess: () => {
-      setNewUserEmail('');
-      refetchUsers();
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
-    },
-  });
-
-  const deleteUserMutation = useMutation({
-    mutationFn: async (userId: string) => {
-      const response = await apiRequest('DELETE', `/api/admin/users/${userId}`);
-      return response.json();
-    },
-    onSuccess: () => {
-      refetchUsers();
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
-    },
-  });
-
-  const renameUserMutation = useMutation({
-    mutationFn: async ({ userId, displayName }: { userId: string, displayName: string }) => {
-      const response = await apiRequest('PATCH', `/api/admin/users/${userId}`, { displayName });
-      return response.json();
-    },
-    onSuccess: () => {
-      setEditingUserId(null);
-      setEditingUserName('');
-      refetchUsers();
-      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
-      toast({
-        title: "User Renamed",
-        description: "User display name has been updated successfully.",
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: `Failed to rename user: ${error.message}`,
-        variant: "destructive",
-      });
-    },
   });
 
   const addTokenMutation = useMutation({
@@ -186,8 +130,7 @@ export default function Profile() {
     },
   });
 
-  const currentUser = users?.find(user => user.hasWhoopToken) || users?.[0];
-  const isAdminUser = userProfile?.role === 'admin';
+
 
   // Copy JWT token to clipboard
   const copyJwtToken = () => {
@@ -349,155 +292,7 @@ export default function Profile() {
             </Card>
           )}
 
-          {/* User Management - Only show for admin users */}
-          {isAdminUser && (
-            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-white">
-                  <Activity className="h-5 w-5" />
-                  User Management
-                </CardTitle>
-                <CardDescription>Admin functions for managing user accounts</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {/* Create New User */}
-                <div className="space-y-3">
-                  <Label className="text-slate-300">Create New User</Label>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <Input
-                      type="email"
-                      placeholder="user@example.com"
-                      value={newUserEmail}
-                      onChange={(e) => setNewUserEmail(e.target.value)}
-                      className="bg-slate-700 border-slate-600 text-white flex-1"
-                    />
-                    <Button
-                      onClick={() => createUserMutation.mutate(newUserEmail)}
-                      disabled={!newUserEmail || createUserMutation.isPending}
-                      size="sm"
-                      className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white border-0 transition-all duration-200"
-                    >
-                      {createUserMutation.isPending ? (
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                      ) : (
-                        'Create'
-                      )}
-                    </Button>
-                  </div>
-                </div>
 
-                {/* Users List */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-slate-300">All Users</Label>
-                    <Button
-                      onClick={() => refetchUsers()}
-                      variant="outline"
-                      size="sm"
-                      disabled={usersLoading}
-                      className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${usersLoading ? 'animate-spin' : ''}`} />
-                    </Button>
-                  </div>
-                  
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {users?.map((user) => (
-                      <div
-                        key={user.id}
-                        className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-slate-700/50 rounded-lg border border-slate-600 space-y-2 sm:space-y-0"
-                      >
-                        <div className="flex-1 min-w-0">
-                          {editingUserId === user.id ? (
-                            <div className="space-y-2">
-                              <Input
-                                type="text"
-                                placeholder="Display name"
-                                value={editingUserName}
-                                onChange={(e) => setEditingUserName(e.target.value)}
-                                className="bg-slate-600 border-slate-500 text-white text-sm"
-                              />
-                              <div className="flex gap-2">
-                                <Button
-                                  onClick={() => renameUserMutation.mutate({ userId: user.id, displayName: editingUserName })}
-                                  disabled={!editingUserName.trim() || renameUserMutation.isPending}
-                                  size="sm"
-                                  className="bg-green-600 hover:bg-green-700 text-white"
-                                >
-                                  Save
-                                </Button>
-                                <Button
-                                  onClick={() => {
-                                    setEditingUserId(null);
-                                    setEditingUserName('');
-                                  }}
-                                  variant="outline"
-                                  size="sm"
-                                  className="bg-transparent border-slate-600 text-slate-300"
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-white text-sm font-medium truncate">
-                                {user.displayName || user.email}
-                              </span>
-                              {user.displayName && (
-                                <span className="text-slate-400 text-xs truncate">
-                                  ({user.email})
-                                </span>
-                              )}
-                              {user.hasWhoopToken && (
-                                <Badge variant="default" className="text-xs">
-                                  WHOOP
-                                </Badge>
-                              )}
-                            </div>
-                          )}
-                          {editingUserId !== user.id && (
-                            <div className="text-slate-400 text-xs">
-                              {new Date(user.created_at).toLocaleDateString()}
-                            </div>
-                          )}
-                        </div>
-                        {editingUserId !== user.id && (
-                          <div className="flex gap-2">
-                            <Button
-                              onClick={() => {
-                                setEditingUserId(user.id);
-                                setEditingUserName(user.displayName || '');
-                              }}
-                              variant="outline"
-                              size="sm"
-                              className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
-                            >
-                              <Edit3 className="h-3 w-3 mr-1" />
-                              Rename
-                            </Button>
-                            <Button
-                              onClick={() => deleteUserMutation.mutate(user.id)}
-                              variant="destructive"
-                              size="sm"
-                              disabled={deleteUserMutation.isPending}
-                              className="bg-red-600/20 border-red-600/50 text-red-400 hover:bg-red-600/30 hover:text-red-300 transition-all duration-200"
-                            >
-                              Delete
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    )) || (
-                      <div className="text-center py-4 text-slate-400">
-                        {usersLoading ? 'Loading users...' : 'No users found'}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
           
           {/* Calendar Management */}
           <CalendarManagement />
