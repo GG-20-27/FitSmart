@@ -681,7 +681,7 @@ export default function Dashboard() {
                       <Clock className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-slate-400 text-sm">Sleep Hours</p>
+                      <p className="text-slate-400 text-sm">Time in Bed</p>
                       <p className="text-2xl font-bold text-purple-400">
                         {whoopData.sleep_hours ? (
                           <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1000} /> hrs</>
@@ -692,7 +692,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Total sleep duration
+                    Total time spent in bed
                   </div>
                 </CardContent>
               </Card>

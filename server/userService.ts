@@ -109,6 +109,18 @@ export class UserService {
       throw new Error(`Failed to delete user: ${error}`);
     }
   }
+
+  async updateUserDisplayName(userId: string, displayName: string): Promise<void> {
+    try {
+      await db.update(users)
+        .set({ displayName })
+        .where(eq(users.id, userId));
+      console.log(`Updated display name for user: ${userId}`);
+    } catch (error) {
+      console.error('Failed to update user display name:', error);
+      throw new Error(`Failed to update user display name: ${error}`);
+    }
+  }
 }
 
 export const userService = new UserService();

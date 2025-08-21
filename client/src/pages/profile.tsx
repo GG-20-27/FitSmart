@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key, ChevronLeft } from 'lucide-react';
+import { User, Calendar, Activity, RefreshCw, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key, ChevronLeft, Edit3 } from 'lucide-react';
 import { apiRequest, queryClient } from '@/lib/queryClient';
 import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
@@ -71,6 +71,7 @@ function FitScoreLogo({ size = 64 }: { size?: number }) {
 interface UserProfile {
   id: string;
   email: string;
+  displayName?: string;
   created_at: string;
   updated_at: string;
   hasWhoopToken: boolean;
@@ -86,6 +87,8 @@ interface WhoopAuthStatus {
 
 export default function Profile() {
   const [newUserEmail, setNewUserEmail] = useState('');
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editingUserName, setEditingUserName] = useState('');
   const { user } = useAuth();
   const { toast } = useToast();
 
@@ -134,6 +137,30 @@ export default function Profile() {
     },
   });
 
+  const renameUserMutation = useMutation({
+    mutationFn: async ({ userId, displayName }: { userId: string, displayName: string }) => {
+      const response = await apiRequest('PATCH', `/api/admin/users/${userId}`, { displayName });
+      return response.json();
+    },
+    onSuccess: () => {
+      setEditingUserId(null);
+      setEditingUserName('');
+      refetchUsers();
+      queryClient.invalidateQueries({ queryKey: ['/api/admin/users'] });
+      toast({
+        title: "User Renamed",
+        description: "User display name has been updated successfully.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: `Failed to rename user: ${error.message}`,
+        variant: "destructive",
+      });
+    },
+  });
+
   const addTokenMutation = useMutation({
     mutationFn: async ({ userId, accessToken, refreshToken }: { userId: string, accessToken: string, refreshToken: string }) => {
       const response = await apiRequest('POST', `/api/admin/users/${userId}/whoop-token`, {
@@ -177,14 +204,14 @@ export default function Profile() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center space-x-4">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 gap-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center space-y-2 sm:space-y-0 sm:space-x-4">
             <div className="p-3 bg-blue-600/20 border border-blue-500/30 rounded-lg">
               <User className="h-6 w-6 text-blue-400" />
             </div>
             <div>
-              <h1 className="text-3xl font-bold text-white">User Profile & Management</h1>
-              <p className="text-slate-400">Manage user accounts and WHOOP connections</p>
+              <h1 className="text-2xl sm:text-3xl font-bold text-white">User Profile & Management</h1>
+              <p className="text-slate-400 text-sm sm:text-base">Manage user accounts and WHOOP connections</p>
             </div>
           </div>
           <Link href="/dashboard">
@@ -380,29 +407,85 @@ export default function Profile() {
                         className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-slate-700/50 rounded-lg border border-slate-600 space-y-2 sm:space-y-0"
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-white text-sm font-medium truncate">
-                              {user.email}
-                            </span>
-                            {user.hasWhoopToken && (
-                              <Badge variant="default" className="text-xs">
-                                WHOOP
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="text-slate-400 text-xs">
-                            {new Date(user.created_at).toLocaleDateString()}
-                          </div>
+                          {editingUserId === user.id ? (
+                            <div className="space-y-2">
+                              <Input
+                                type="text"
+                                placeholder="Display name"
+                                value={editingUserName}
+                                onChange={(e) => setEditingUserName(e.target.value)}
+                                className="bg-slate-600 border-slate-500 text-white text-sm"
+                              />
+                              <div className="flex gap-2">
+                                <Button
+                                  onClick={() => renameUserMutation.mutate({ userId: user.id, displayName: editingUserName })}
+                                  disabled={!editingUserName.trim() || renameUserMutation.isPending}
+                                  size="sm"
+                                  className="bg-green-600 hover:bg-green-700 text-white"
+                                >
+                                  Save
+                                </Button>
+                                <Button
+                                  onClick={() => {
+                                    setEditingUserId(null);
+                                    setEditingUserName('');
+                                  }}
+                                  variant="outline"
+                                  size="sm"
+                                  className="bg-transparent border-slate-600 text-slate-300"
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-white text-sm font-medium truncate">
+                                {user.displayName || user.email}
+                              </span>
+                              {user.displayName && (
+                                <span className="text-slate-400 text-xs truncate">
+                                  ({user.email})
+                                </span>
+                              )}
+                              {user.hasWhoopToken && (
+                                <Badge variant="default" className="text-xs">
+                                  WHOOP
+                                </Badge>
+                              )}
+                            </div>
+                          )}
+                          {editingUserId !== user.id && (
+                            <div className="text-slate-400 text-xs">
+                              {new Date(user.created_at).toLocaleDateString()}
+                            </div>
+                          )}
                         </div>
-                        <Button
-                          onClick={() => deleteUserMutation.mutate(user.id)}
-                          variant="destructive"
-                          size="sm"
-                          disabled={deleteUserMutation.isPending}
-                          className="w-full sm:w-auto bg-red-600/20 border-red-600/50 text-red-400 hover:bg-red-600/30 hover:text-red-300 transition-all duration-200"
-                        >
-                          Delete
-                        </Button>
+                        {editingUserId !== user.id && (
+                          <div className="flex gap-2">
+                            <Button
+                              onClick={() => {
+                                setEditingUserId(user.id);
+                                setEditingUserName(user.displayName || '');
+                              }}
+                              variant="outline"
+                              size="sm"
+                              className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white"
+                            >
+                              <Edit3 className="h-3 w-3 mr-1" />
+                              Rename
+                            </Button>
+                            <Button
+                              onClick={() => deleteUserMutation.mutate(user.id)}
+                              variant="destructive"
+                              size="sm"
+                              disabled={deleteUserMutation.isPending}
+                              className="bg-red-600/20 border-red-600/50 text-red-400 hover:bg-red-600/30 hover:text-red-300 transition-all duration-200"
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )) || (
                       <div className="text-center py-4 text-slate-400">

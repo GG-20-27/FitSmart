@@ -390,6 +390,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  console.log('[ROUTE] PATCH /api/admin/users/:userId');
+  app.patch('/api/admin/users/:userId', requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { displayName } = req.body;
+      
+      const user = await userService.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      await userService.updateUserDisplayName(userId, displayName);
+      res.json({ message: 'User display name updated successfully' });
+    } catch (error) {
+      console.error('Error updating user display name:', error);
+      res.status(500).json({ error: 'Failed to update user display name' });
+    }
+  });
+
   // Health check endpoint (moved from root to avoid conflicts with frontend)
   app.get('/api/health', async (req, res) => {
     try {

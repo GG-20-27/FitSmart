@@ -294,10 +294,10 @@ export function CalendarManagement() {
               size="sm"
               className="bg-blue-600 hover:bg-blue-700 text-white border-0"
             >
-              <Plus className="h-4 w-4 mr-1" />
-              Add
+              <Plus className="h-4 w-4 mr-1 sm:mr-2" />
+              <span className="hidden sm:inline">Add</span>
             </Button>
-            {calendars.length > 0 && (
+            {calendars.length > 0 && !editingCalendar && (
               <Button
                 onClick={() => {
                   const firstCalendar = calendars[0];
@@ -307,8 +307,8 @@ export function CalendarManagement() {
                 variant="outline"
                 className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
               >
-                <Edit3 className="h-4 w-4 mr-1" />
-                Edit
+                <Edit3 className="h-4 w-4 mr-1 sm:mr-2" />
+                <span className="hidden sm:inline">Edit</span>
               </Button>
             )}
           </div>
@@ -437,6 +437,15 @@ export function CalendarManagement() {
                     ) : (
                       <ToggleLeft className="h-4 w-4" />
                     )}
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => startEditing(calendar)}
+                    className="bg-transparent border-slate-600 text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200"
+                  >
+                    <Edit3 className="h-4 w-4" />
                   </Button>
 
                   <Button
