@@ -261,9 +261,9 @@ export default function Profile() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-white">
                   <Key className="h-5 w-5" />
-                  Bearer Token for Custom GPT
+                  🔑 Bearer Token for Your FitScore AI Assistant
                 </CardTitle>
-                <CardDescription>Your personal JWT token for ChatGPT integration</CardDescription>
+                <CardDescription>This token makes your FitScore AI personalized only to you.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-3">
@@ -283,9 +283,8 @@ export default function Profile() {
                     </Button>
                   </div>
                   <div className="text-sm text-slate-400 space-y-1">
-                    <p>• Send this to Gustavs if he hasn't added this to your personal ChatGPT assistant.</p>
-                    <p>• This token expires in 10 years and provides secure API access.</p>
-                    <p>• Keep this token private - it grants access to your health data.</p>
+                    <p>Simply copy it and send it to the Admin. You only need to do this once.</p>
+                    <p className="mt-2">Only share this token with the Admin — it's your secure key to connect your data.</p>
                   </div>
                 </div>
               </CardContent>
