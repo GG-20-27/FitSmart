@@ -267,11 +267,10 @@ export default function Profile() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-3">
-                  <Label className="text-slate-300">JWT Bearer Token</Label>
                   <div className="text-sm text-slate-400 space-y-1 mb-3">
                     <p>Simply copy it and send it to the Admin. You only need to do this once.</p>
-                    <p className="mt-2">Only share this token with the Admin — it's your secure key to connect your data.</p>
                   </div>
+                  <Label className="text-slate-300">JWT Bearer Token</Label>
                   <div className="flex flex-col sm:flex-row gap-2">
                     <div className="flex-1 bg-slate-700/50 border border-slate-600 rounded-md p-3 font-mono text-xs text-slate-300 break-all overflow-hidden">
                       {staticJwtData.static_jwt}
@@ -285,6 +284,9 @@ export default function Profile() {
                       <Copy className="h-4 w-4 mr-2" />
                       Copy
                     </Button>
+                  </div>
+                  <div className="text-sm text-slate-400 mt-3">
+                    <p>Only share this token with the Admin — it's your secure key to connect your data.</p>
                   </div>
                 </div>
               </CardContent>
