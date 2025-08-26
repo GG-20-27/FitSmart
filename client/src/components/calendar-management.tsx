@@ -285,7 +285,7 @@ export function CalendarManagement() {
               Calendar Management
             </CardTitle>
             <CardDescription className="text-slate-400">
-              Manage your personal calendars. Add Google Calendar ICS links to see your events in the dashboard.
+              By adding your calendars (Google Calendar ICS links), FitScore AI will be able to read your scheduled trainings and other events that may affect performance and recovery to personalize your daily insights.
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
