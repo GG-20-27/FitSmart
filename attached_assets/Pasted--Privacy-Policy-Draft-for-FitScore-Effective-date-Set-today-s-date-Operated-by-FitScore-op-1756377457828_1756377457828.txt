@@ -1,0 +1,96 @@
+📄 Privacy Policy (Draft for FitScore)
+
+Effective date: [Set today’s date]
+Operated by: FitScore (operated by Gustav Griezitis, Switzerland)
+Contact: privacy@fitscore.app
+
+1. Introduction
+
+FitScore is a personal performance and wellness assistant that integrates WHOOP recovery data, training calendars, meal tracking, and AI-powered insights.
+We respect your privacy and are committed to protecting your personal information. This Policy explains what data we collect, how we use it, and your rights.
+
+By using FitScore, you agree to this Privacy Policy.
+
+2. Data We Collect
+
+We may collect the following types of data when you use FitScore:
+
+WHOOP Data: sleep, recovery, strain, HRV, and related health metrics (via WHOOP API).
+
+Calendar Data: training events and schedules from Google Calendar ICS links you provide.
+
+Meal Data: meal photos and descriptions you upload.
+
+AI Insights: text you provide for analysis by OpenAI models (used only to generate insights, not stored by OpenAI).
+
+Account Information: your login credentials and email address.
+
+App Logs: basic usage and error logs, for debugging and improving services.
+
+We do not sell your data to third parties.
+
+3. How We Use Your Data
+
+We use your data to:
+
+Provide and improve FitScore’s services.
+
+Generate personalized insights about recovery, training, and nutrition.
+
+Synchronize data from WHOOP, Google Calendar, and your meal entries.
+
+Respond to support requests.
+
+Ensure the security and stability of the service.
+
+4. Data Sharing with Third Parties
+
+To provide services, we share data only with trusted providers:
+
+WHOOP – to fetch your fitness and recovery data.
+
+Google (Calendar ICS) – to sync your training schedule.
+
+OpenAI – to generate AI-based insights (your data is sent for processing but not stored long-term by OpenAI).
+
+Cloud Hosting Providers – FitScore runs on secure cloud infrastructure (currently Replit; may change in the future).
+
+We do not sell or rent your personal data.
+
+5. Data Retention
+
+We retain your data until you request deletion or close your account.
+You may request deletion at any time by contacting us at privacy@fitscore.app
+.
+
+6. Your Rights
+
+Depending on where you live, you may have the following rights:
+
+EU/UK/Swiss users (GDPR, UK GDPR, FADP): right to access, correct, delete, restrict, or transfer your data, and to object to processing.
+
+US users (California CCPA/CPRA): right to know what data we collect, request deletion, and opt out of data sale (FitScore does not sell personal data).
+
+To exercise these rights, email us at privacy@fitscore.app
+.
+
+7. Age Restriction
+
+FitScore is intended for users 16 years or older.
+We do not knowingly collect data from children under 16.
+
+8. Security
+
+We use industry-standard measures (encryption, secure storage, limited access) to protect your personal data. However, no method of transmission or storage is 100% secure.
+
+9. Changes to This Policy
+
+We may update this Privacy Policy from time to time. If we make material changes, we will notify you in the app or by email. The updated version will always be available at fitscore.app/privacy.
+
+10. Contact Us
+
+For privacy-related questions or data requests:
+📧 privacy@fitscore.app
+
+For user support:
+📧 support@fitscore.app

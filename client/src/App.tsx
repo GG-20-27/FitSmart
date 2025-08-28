@@ -9,6 +9,8 @@ import CalendarPage from "@/pages/calendar";
 import Profile from "@/pages/profile";
 import AdminPage from "@/pages/admin";
 import LoginPage from "@/pages/login";
+import PrivacyPolicy from "@/pages/PrivacyPolicy";
+import Disclaimer from "@/pages/Disclaimer";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -20,6 +22,8 @@ function Router() {
       <Route path="/calendar" component={CalendarPage} />
       <Route path="/profile" component={Profile} />
       <Route path="/admin" component={AdminPage} />
+      <Route path="/privacy" component={PrivacyPolicy} />
+      <Route path="/disclaimer" component={Disclaimer} />
       <Route component={NotFound} />
     </Switch>
   );

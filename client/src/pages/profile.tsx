@@ -293,7 +293,30 @@ export default function Profile() {
             </Card>
           )}
 
-
+          {/* Legal Section */}
+          <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-white">
+                <Activity className="h-5 w-5" />
+                Legal
+              </CardTitle>
+              <CardDescription>Privacy and legal information</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-col space-y-2">
+                <Link href="/privacy">
+                  <button className="text-blue-400 hover:text-blue-300 underline text-left transition-colors duration-200">
+                    Privacy Policy
+                  </button>
+                </Link>
+                <Link href="/disclaimer">
+                  <button className="text-blue-400 hover:text-blue-300 underline text-left transition-colors duration-200">
+                    Disclaimer
+                  </button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
           
           {/* Calendar Management */}
           <CalendarManagement />
