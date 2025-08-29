@@ -252,7 +252,11 @@ export default function CalendarPage() {
             </Button>
 
             <Link href="/dashboard">
-              <Button variant="outline" size="sm" className="bg-transparent border-white/20 text-white hover:bg-white/10 hover:border-white/40 transition-all duration-200">
+              <Button
+                variant="outline"
+                size="sm"
+                className="bg-transparent border-2 border-[#00D4FF] text-[#00D4FF] hover:bg-gradient-to-r hover:from-[#00D4FF] hover:to-[#0099FF] hover:text-white hover:border-transparent transition-all duration-200 hover:shadow-[0_0_20px_rgba(0,212,255,0.3)]"
+              >
                 <ChevronLeft className="h-4 w-4 mr-2" />
                 Back to Dashboard
               </Button>

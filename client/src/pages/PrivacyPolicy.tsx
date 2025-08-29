@@ -24,7 +24,7 @@ export default function PrivacyPolicy() {
         <div className="max-w-3xl mx-auto">
           <div className="bg-slate-800/50 border border-slate-700 rounded-lg backdrop-blur-sm p-8">
             <h1 className="text-3xl font-bold text-white mb-2">Privacy Policy</h1>
-            <p className="text-slate-400 mb-2">Effective Date: February 28, 2025</p>
+            <p className="text-slate-400 mb-2">Effective Date: August 27, 2025</p>
             <p className="text-slate-400 mb-8">FitScore (operated by Gustav Griezitis, Switzerland)</p>
 
             <div className="space-y-8 text-slate-300 leading-relaxed">

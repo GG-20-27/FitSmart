@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { User, Calendar, Activity, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key, ChevronLeft } from 'lucide-react';
+import { User, Calendar, Activity, CheckCircle, AlertCircle, ExternalLink, Crown, Copy, Key, ChevronLeft, Shield, Info } from 'lucide-react';
 import { apiRequest } from '@/lib/queryClient';
 import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
@@ -159,7 +159,11 @@ export default function Profile() {
             </div>
           </div>
           <Link href="/dashboard">
-            <Button variant="outline" size="sm" className="bg-transparent border-white/20 text-white hover:bg-white/10 hover:border-white/40 transition-all duration-200">
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-transparent border-2 border-[#00D4FF] text-[#00D4FF] hover:bg-gradient-to-r hover:from-[#00D4FF] hover:to-[#0099FF] hover:text-white hover:border-transparent transition-all duration-200 hover:shadow-[0_0_20px_rgba(0,212,255,0.3)]"
+            >
               <ChevronLeft className="h-4 w-4 mr-2" />
               Back to Dashboard
             </Button>
@@ -293,33 +297,48 @@ export default function Profile() {
             </Card>
           )}
 
+          {/* Calendar Management */}
+          <CalendarManagement />
+
           {/* Legal Section */}
           <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-white">
-                <Activity className="h-5 w-5" />
                 Legal
               </CardTitle>
               <CardDescription>Privacy and legal information</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="flex flex-col space-y-2">
+              <div className="space-y-3">
                 <Link href="/privacy">
-                  <button className="text-blue-400 hover:text-blue-300 underline text-left transition-colors duration-200">
-                    Privacy Policy
-                  </button>
+                  <div className="group flex items-start gap-3 p-4 rounded-lg bg-slate-700/30 border border-slate-600/50 hover:bg-slate-700/50 hover:border-slate-500 transition-all duration-200 cursor-pointer">
+                    <Shield className="h-5 w-5 text-slate-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-white group-hover:text-cyan-400 transition-colors duration-200">
+                        Privacy Policy
+                      </div>
+                      <div className="text-sm text-slate-400 mt-1">
+                        Last updated: Aug 27, 2025
+                      </div>
+                    </div>
+                  </div>
                 </Link>
                 <Link href="/disclaimer">
-                  <button className="text-blue-400 hover:text-blue-300 underline text-left transition-colors duration-200">
-                    Disclaimer
-                  </button>
+                  <div className="group flex items-start gap-3 p-4 rounded-lg bg-slate-700/30 border border-slate-600/50 hover:bg-slate-700/50 hover:border-slate-500 transition-all duration-200 cursor-pointer">
+                    <Info className="h-5 w-5 text-slate-400 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-white group-hover:text-cyan-400 transition-colors duration-200">
+                        Disclaimer
+                      </div>
+                      <div className="text-sm text-slate-400 mt-1">
+                        Important usage notice
+                      </div>
+                    </div>
+                  </div>
                 </Link>
               </div>
             </CardContent>
           </Card>
-          
-          {/* Calendar Management */}
-          <CalendarManagement />
         </div>
 
 
