@@ -681,10 +681,14 @@ export default function Dashboard() {
                       <Clock className="h-6 w-6 text-white" />
                     </div>
                     <div>
-                      <p className="text-slate-400 text-sm">Time in Bed</p>
+                      <p className="text-slate-400 text-sm">
+                        {whoopData.sleep_hours ? "Sleep Hours" : "Time in Bed"}
+                      </p>
                       <p className="text-2xl font-bold text-purple-400">
                         {whoopData.sleep_hours ? (
                           <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1000} /> hrs</>
+                        ) : whoopData.time_in_bed_hours ? (
+                          <><CountUp end={whoopData.time_in_bed_hours} decimals={1} duration={1000} /> hrs</>
                         ) : (
                           <span className="text-slate-500">N/A</span>
                         )}
@@ -692,7 +696,7 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-xs text-slate-500">
-                    Total time spent in bed
+                    {whoopData.sleep_hours ? "Time actually asleep" : whoopData.time_in_bed_hours ? "Total time spent in bed" : "Sleep data not available"}
                   </div>
                 </CardContent>
               </Card>
@@ -722,7 +726,7 @@ export default function Dashboard() {
 
 
               {/* Sleep Efficiency */}
-              {whoopData.raw?.sleep?.score?.sleep_efficiency_percentage && (
+              {whoopData.sleep_efficiency_pct && (
                 <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
                   <CardContent className="p-6">
                     <div className="flex items-center space-x-3 mb-4">
@@ -732,7 +736,7 @@ export default function Dashboard() {
                       <div>
                         <p className="text-slate-400 text-sm">Sleep Efficiency</p>
                         <p className="text-2xl font-bold text-teal-400">
-                          <CountUp end={whoopData.raw.sleep.score.sleep_efficiency_percentage} decimals={1} duration={1000} />%
+                          <CountUp end={whoopData.sleep_efficiency_pct} duration={1000} />%
                         </p>
                       </div>
                     </div>
@@ -815,7 +819,7 @@ export default function Dashboard() {
             </div>
 
             {/* Sleep Stages Breakdown */}
-            {whoopData.raw?.sleep?.score?.stage_summary && (
+            {whoopData.sleep_stages && (
               <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm">
                 <CardContent className="p-6">
                   <div className="flex items-center space-x-3 mb-6">
@@ -833,7 +837,7 @@ export default function Dashboard() {
                     <div className="text-center p-4 bg-slate-700/30 rounded-lg">
                       <div className="text-2xl font-bold text-blue-400 mb-2">
                         <CountUp 
-                          end={Math.round(whoopData.raw.sleep.score.stage_summary.total_light_sleep_time_milli / (1000 * 60))} 
+                          end={whoopData.sleep_stages.light_sleep_minutes || 0} 
                           duration={1000} 
                         /> min
                       </div>
@@ -845,7 +849,7 @@ export default function Dashboard() {
                     <div className="text-center p-4 bg-slate-700/30 rounded-lg">
                       <div className="text-2xl font-bold text-purple-400 mb-2">
                         <CountUp 
-                          end={Math.round(whoopData.raw.sleep.score.stage_summary.total_slow_wave_sleep_time_milli / (1000 * 60))} 
+                          end={whoopData.sleep_stages.deep_sleep_minutes || 0} 
                           duration={1000} 
                         /> min
                       </div>
@@ -857,7 +861,7 @@ export default function Dashboard() {
                     <div className="text-center p-4 bg-slate-700/30 rounded-lg">
                       <div className="text-2xl font-bold text-green-400 mb-2">
                         <CountUp 
-                          end={Math.round(whoopData.raw.sleep.score.stage_summary.total_rem_sleep_time_milli / (1000 * 60))} 
+                          end={whoopData.sleep_stages.rem_sleep_minutes || 0} 
                           duration={1000} 
                         /> min
                       </div>
@@ -869,7 +873,7 @@ export default function Dashboard() {
                     <div className="text-center p-4 bg-slate-700/30 rounded-lg">
                       <div className="text-2xl font-bold text-orange-400 mb-2">
                         <CountUp 
-                          end={Math.round(whoopData.raw.sleep.score.stage_summary.total_awake_time_milli / (1000 * 60))} 
+                          end={whoopData.sleep_stages.awake_minutes || 0} 
                           duration={1000} 
                         /> min
                       </div>

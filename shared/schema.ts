@@ -111,13 +111,16 @@ export interface WhoopTodayResponse {
   strain?: number;
   recovery_score?: number;
   sleep_score?: number; // Primary sleep metric
-  sleep_hours?: number; // Secondary sleep metric  
+  sleep_hours?: number; // Time actually asleep (null if stages not scored yet)
+  sleepHours?: number; // temporary camelCase alias for frontend compatibility
   sleep_stages?: {
     light_sleep_minutes?: number;
     deep_sleep_minutes?: number;
     rem_sleep_minutes?: number;
     awake_minutes?: number;
   };
+  time_in_bed_hours?: number; // Time spent in bed - fallback metric
+  sleep_efficiency_pct?: number; // Sleep efficiency percentage
   hrv?: number;
   resting_heart_rate?: number;
   average_heart_rate?: number;
@@ -129,6 +132,13 @@ export interface WhoopTodayResponse {
   activity_log?: any[];
   date?: string;
   last_sync?: string;
+  raw?: {
+    cycle?: any;
+    recovery?: any;
+    sleep?: any;
+    workout?: any;
+    body_measurements?: any;
+  };
   raw_data?: {
     cycle?: any;
     recovery?: any;
