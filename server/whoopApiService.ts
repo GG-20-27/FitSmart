@@ -72,6 +72,7 @@ export interface WhoopTodayData {
   recovery_score?: number;
   sleep_score?: number;
   sleep_hours?: number;
+  sleepHours?: number; // temporary camelCase alias for frontend compatibility
   sleep_stages?: {
     light_sleep_minutes?: number;
     deep_sleep_minutes?: number;
@@ -484,15 +485,35 @@ export class WhoopApiService {
         });
         
         if (response.data && response.data.records && response.data.records.length > 0) {
-          // Find the most recent non-nap sleep session
-          const sleepSessions = response.data.records
-            .filter((sleep: any) => sleep.nap === false && sleep.sleep_hours != null && sleep.sleep_hours > 0)
-            .sort((a: any, b: any) => new Date(b.start).getTime() - new Date(a.start).getTime()); // Sort by most recent
-          
-          if (sleepSessions.length > 0) {
-            const mostRecentSleep = sleepSessions[0];
-            console.log(`Found valid sleep session: ${mostRecentSleep.sleep_hours} hours (${mostRecentSleep.start})`);
-            return Math.round(mostRecentSleep.sleep_hours * 10) / 10;
+          // Derive "time asleep" from stages when available; otherwise, try time-in-bed; skip naps.
+          const toHours = (ms: number) => Math.round((ms / 3600000) * 10) / 10;
+
+          const sessions = response.data.records
+            .filter((s: any) => s.nap === false)
+            .map((s: any) => {
+              const ss = s?.score?.stage_summary;
+              // Prefer true time asleep from stages
+              const asleepMs = (ss?.total_light_sleep_time_milli ?? 0)
+                             + (ss?.total_slow_wave_sleep_time_milli ?? 0)
+                             + (ss?.total_rem_sleep_time_milli ?? 0);
+              let asleepHours: number | null = null;
+              if (ss && (ss.total_light_sleep_time_milli != null
+                      || ss.total_slow_wave_sleep_time_milli != null
+                      || ss.total_rem_sleep_time_milli != null)) {
+                asleepHours = toHours(asleepMs);
+              } else if (s.start && s.end) {
+                // fallback to time in bed if stages are missing
+                const tibMs = new Date(s.end).getTime() - new Date(s.start).getTime();
+                asleepHours = toHours(tibMs);
+              }
+              return { start: s.start, asleepHours };
+            })
+            .filter((x: any) => x.asleepHours != null)
+            .sort((a: any, b: any) => new Date(b.start).getTime() - new Date(a.start).getTime());
+
+          if (sessions.length > 0) {
+            console.log(`Derived latest sleep hours from list: ${sessions[0].asleepHours} h`);
+            return sessions[0].asleepHours;
           }
         }
         
@@ -774,6 +795,9 @@ export class WhoopApiService {
             const scoreState = sleepData?.score_state || sleepData?.score?.score_state; // tolerate different shapes
             stageSummary = sleepData?.score?.stage_summary;
 
+            console.log("[SLEEP] stageSummary present:", !!stageSummary,
+              "| keys:", stageSummary ? Object.keys(stageSummary) : "none");
+
             // Extract sleep score (0–100) from performance percentage if present
             if (sleepData?.score?.sleep_performance_percentage !== undefined && sleepData?.score?.sleep_performance_percentage !== null) {
               sleepScore = Math.min(Math.max(sleepData.score.sleep_performance_percentage, 0), 100);
@@ -860,11 +884,19 @@ export class WhoopApiService {
         cycle_id: latestCycle.id,
         strain: latestCycle.score?.strain || null,
         recovery_score: recovery?.score?.recovery_score || null,
-        sleep_score: sleepScore || undefined,
-        sleep_stages: sleepStages,
-        sleep_hours: sleepHours || undefined,                  // time asleep (can be null if not scored yet)
-        time_in_bed_hours: timeInBedHours || undefined, // NEW: always try to include this
-        sleep_efficiency_pct: sleepEfficiencyPct || undefined, // NEW
+        // sleep fields
+        sleep_score: sleepScore ?? null,
+        sleep_stages: sleepStages ?? null,
+
+        // primary "time asleep" (null if stages not scored yet)
+        sleep_hours: sleepHours ?? null,
+
+        // NEW: temporary camelCase alias for frontend compatibility (remove later if not needed)
+        sleepHours: sleepHours ?? null as any,
+
+        // fallback & context
+        time_in_bed_hours: timeInBedHours ?? null,
+        sleep_efficiency_pct: sleepEfficiencyPct ?? null,
         hrv: recovery?.score?.hrv_rmssd_milli || null,
         resting_heart_rate: recovery?.score?.resting_heart_rate || null,
         average_heart_rate: workoutData?.avgHeartRate || latestCycle.score?.average_heart_rate || null,

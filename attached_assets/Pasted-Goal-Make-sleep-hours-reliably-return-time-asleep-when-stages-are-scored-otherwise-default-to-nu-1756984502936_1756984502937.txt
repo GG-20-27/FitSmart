@@ -1,0 +1,101 @@
+Goal: Make sleep_hours reliably return “time asleep” when stages are scored; otherwise default to null. Also return time_in_bed_hours so the UI can show a fallback. Make the fallback list query derive sleep hours from stages instead of filtering by sleep_hours. Add a temporary alias sleepHours for front-end compatibility.
+
+Scope constraints
+
+Only edit the shown parts of whoopApiService.ts.
+
+Do not change auth/refresh, OAuth, or other endpoints.
+
+No renames/removals—additive only, except where noted for the specific replacements below.
+
+1) In getTodaysData, use nullish coalescing and add a camelCase alias
+
+Find the result: WhoopTodayData = { ... } block and replace the sleep-related assignments with this:
+
+// sleep fields
+sleep_score: sleepScore ?? null,
+sleep_stages: sleepStages ?? null,
+
+// primary "time asleep" (null if stages not scored yet)
+sleep_hours: sleepHours ?? null,
+
+// NEW: temporary camelCase alias for frontend compatibility (remove later if not needed)
+sleepHours: sleepHours ?? null as any,
+
+// fallback & context
+time_in_bed_hours: timeInBedHours ?? null,
+sleep_efficiency_pct: sleepEfficiencyPct ?? null,
+
+
+Note: We’re returning both sleep_hours and sleepHours for now. If your UI already uses sleep_hours, you can drop the alias later.
+
+2) In getLatestSleepSession, derive from stages (don’t filter by sleep_hours)
+
+Replace the first filter/sort block inside the list query with this more robust derivation:
+
+if (response.data && response.data.records && response.data.records.length > 0) {
+  // Derive "time asleep" from stages when available; otherwise, try time-in-bed; skip naps.
+  const toHours = (ms: number) => Math.round((ms / 3600000) * 10) / 10;
+
+  const sessions = response.data.records
+    .filter((s: any) => s.nap === false)
+    .map((s: any) => {
+      const ss = s?.score?.stage_summary;
+      // Prefer true time asleep from stages
+      const asleepMs = (ss?.total_light_sleep_time_milli ?? 0)
+                     + (ss?.total_slow_wave_sleep_time_milli ?? 0)
+                     + (ss?.total_rem_sleep_time_milli ?? 0);
+      let asleepHours: number | null = null;
+      if (ss && (ss.total_light_sleep_time_milli != null
+              || ss.total_slow_wave_sleep_time_milli != null
+              || ss.total_rem_sleep_time_milli != null)) {
+        asleepHours = toHours(asleepMs);
+      } else if (s.start && s.end) {
+        // fallback to time in bed if stages are missing
+        const tibMs = new Date(s.end).getTime() - new Date(s.start).getTime();
+        asleepHours = toHours(tibMs);
+      }
+      return { start: s.start, asleepHours };
+    })
+    .filter((x: any) => x.asleepHours != null)
+    .sort((a: any, b: any) => new Date(b.start).getTime() - new Date(a.start).getTime());
+
+  if (sessions.length > 0) {
+    console.log(`Derived latest sleep hours from list: ${sessions[0].asleepHours} h`);
+    return sessions[0].asleepHours;
+  }
+}
+
+3) Add a quick debug log to confirm stage presence
+
+Right after you set stageSummary in getTodaysData:
+
+console.log("[SLEEP] stageSummary present:", !!stageSummary,
+  "| keys:", stageSummary ? Object.keys(stageSummary) : "none");
+
+
+This will tell you in logs whether scoring arrived. If it’s false in early morning, that’s normal.
+
+4) (Optional but recommended) Front-end fallback
+
+Until your UI renders time_in_bed_hours, ensure it shows something when sleep_hours is null:
+
+If your tile currently reads data.sleepHours only, switch it to:
+
+Primary: sleep_hours ?? time_in_bed_hours
+
+Label: sleep_hours !== null ? "Sleep Hours" : "Time in Bed (scoring pending)"
+
+Subline: show sleep_efficiency_pct when available.
+
+If you prefer, I can write this exact JSX snippet once you share the tile component.
+
+Quick sanity checklist
+
+After a fully scored night, sleep_hours should be > 0 (sum of light + deep/SWS + REM).
+
+If scoring is pending, sleep_hours will be null and time_in_bed_hours should be present.
+
+getLatestSleepSession should now derive values even from list responses (no reliance on sleep_hours in the API payload).
+
+If your UI used camelCase, it will temporarily work via sleepHours alias.
