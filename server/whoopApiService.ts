@@ -77,7 +77,9 @@ export interface WhoopTodayData {
     deep_sleep_minutes?: number;
     rem_sleep_minutes?: number;
     awake_minutes?: number;
-  };
+  } | null;
+  time_in_bed_hours?: number | null;
+  sleep_efficiency_pct?: number | null;
   hrv?: number;
   resting_heart_rate?: number;
   average_heart_rate?: number;
@@ -88,10 +90,6 @@ export interface WhoopTodayData {
   calories_burned?: number;
   activity_log?: any[];
   raw_data?: any;
-  sleep_hours?: number;
-  skin_temp_celsius?: number;
-  spo2_percentage?: number;
-  average_heart_rate?: number;
   raw?: {
     cycle?: any;
     recovery?: any;
@@ -756,6 +754,9 @@ export class WhoopApiService {
       let sleepData = null;
       let sleepHours = null;
       let sleepScore = null;
+      let sleepEfficiencyPct: number | null = null;
+      let timeInBedHours: number | null = null;
+      let stageSummary: any = null;
       
       if (recovery?.sleep_id) {
         console.log(`Found sleep_id in recovery data: ${recovery.sleep_id}`);
@@ -766,20 +767,48 @@ export class WhoopApiService {
             sleepData = response.data;
             console.log('Sleep data retrieved via sleep_id:', JSON.stringify(sleepData, null, 2));
             
-            // Extract sleep_score from WHOOP's sleep.score.sleep_performance_percentage (0-100)
-            if (sleepData.score?.sleep_performance_percentage !== undefined) {
+            // After `sleepData = response.data;` and before building `result`, derive sleep hours properly.
+            // Prefer time asleep (sum of light + slow wave + REM) when scored; otherwise fall back to time in bed.
+
+            // Extract score and stage summary safely
+            const scoreState = sleepData?.score_state || sleepData?.score?.score_state; // tolerate different shapes
+            stageSummary = sleepData?.score?.stage_summary;
+
+            // Extract sleep score (0–100) from performance percentage if present
+            if (sleepData?.score?.sleep_performance_percentage !== undefined && sleepData?.score?.sleep_performance_percentage !== null) {
               sleepScore = Math.min(Math.max(sleepData.score.sleep_performance_percentage, 0), 100);
-              console.log(`Sleep score from sleep_performance_percentage (capped): ${sleepScore}`);
+              console.log(`[SLEEP] Sleep score (performance %): ${sleepScore}`);
             }
-            
-            // Extract sleep_hours - prefer WHOOP's sleep_hours if present, else compute from ms
-            if (sleepData.sleep_hours !== undefined && sleepData.sleep_hours !== null) {
-              sleepHours = sleepData.sleep_hours;
-              console.log(`Sleep hours from WHOOP's sleep_hours field: ${sleepHours}`);
+
+            // Extract efficiency if present
+            if (typeof sleepData?.score?.sleep_efficiency_percentage === "number") {
+              sleepEfficiencyPct = Math.round(sleepData.score.sleep_efficiency_percentage);
+            }
+
+            // Compute time in bed (hours)
+            if (typeof stageSummary?.total_in_bed_time_milli === "number") {
+              timeInBedHours = Math.round((stageSummary.total_in_bed_time_milli / 3600000) * 10) / 10;
+            } else if (sleepData?.start && sleepData?.end) {
+              const tibMs = new Date(sleepData.end).getTime() - new Date(sleepData.start).getTime();
+              timeInBedHours = Math.round((tibMs / 3600000) * 10) / 10;
+            }
+
+            // Compute time asleep (Sleep Hours) when we have scored stages
+            if (stageSummary &&
+                typeof stageSummary.total_light_sleep_time_milli === "number" &&
+                typeof stageSummary.total_slow_wave_sleep_time_milli === "number" &&
+                typeof stageSummary.total_rem_sleep_time_milli === "number") {
+              const asleepMs =
+                (stageSummary.total_light_sleep_time_milli || 0) +
+                (stageSummary.total_slow_wave_sleep_time_milli || 0) +
+                (stageSummary.total_rem_sleep_time_milli || 0);
+
+              sleepHours = Math.round((asleepMs / 3600000) * 10) / 10;
+              console.log(`[SLEEP] Time asleep (derived from stages): ${sleepHours} h`);
             } else {
-              const ms = sleepData.score?.stage_summary?.total_in_bed_time_milli ?? sleepData.score?.stage_summary?.total_sleep_time_milli;
-              sleepHours = ms ? Math.round((ms/3600000)*10)/10 : null;
-              console.log(`Sleep hours calculated from duration: ${sleepHours}`);
+              // No stage data yet → fallback to time in bed
+              sleepHours = null; // keep null to avoid mislabeling as "sleep hours"
+              console.log("[SLEEP] Stage summary missing → using Time in Bed fallback, scoring may be pending");
             }
           }
         } catch (sleepError: any) {
@@ -819,28 +848,31 @@ export class WhoopApiService {
       }
 
       // Calculate sleep stages in minutes if available
-      const sleepStages = sleepData?.score?.stage_summary ? {
-        light_sleep_minutes: Math.round((sleepData.score.stage_summary.total_light_sleep_time_milli || 0) / (1000 * 60)),
-        deep_sleep_minutes: Math.round((sleepData.score.stage_summary.total_slow_wave_sleep_time_milli || 0) / (1000 * 60)),
-        rem_sleep_minutes: Math.round((sleepData.score.stage_summary.total_rem_sleep_time_milli || 0) / (1000 * 60)),
-        awake_minutes: Math.round((sleepData.score.stage_summary.total_awake_time_milli || 0) / (1000 * 60))
+      // Note: stageSummary already extracted earlier in the sleep processing
+      const sleepStages = stageSummary ? {
+        light_sleep_minutes: Math.round((stageSummary.total_light_sleep_time_milli || 0) / 60000),
+        deep_sleep_minutes: Math.round((stageSummary.total_slow_wave_sleep_time_milli || 0) / 60000),
+        rem_sleep_minutes: Math.round((stageSummary.total_rem_sleep_time_milli || 0) / 60000),
+        awake_minutes: Math.round((stageSummary.total_awake_time_milli || 0) / 60000),
       } : null;
 
       const result: WhoopTodayData = {
         cycle_id: latestCycle.id,
         strain: latestCycle.score?.strain || null,
         recovery_score: recovery?.score?.recovery_score || null,
-        sleep_score: sleepScore || null,
+        sleep_score: sleepScore || undefined,
         sleep_stages: sleepStages,
-        sleep_hours: sleepHours,
+        sleep_hours: sleepHours || undefined,                  // time asleep (can be null if not scored yet)
+        time_in_bed_hours: timeInBedHours || undefined, // NEW: always try to include this
+        sleep_efficiency_pct: sleepEfficiencyPct || undefined, // NEW
         hrv: recovery?.score?.hrv_rmssd_milli || null,
         resting_heart_rate: recovery?.score?.resting_heart_rate || null,
         average_heart_rate: workoutData?.avgHeartRate || latestCycle.score?.average_heart_rate || null,
-        stress_score: null, // WHOOP doesn't provide stress score in current API
-        skin_temperature: recovery?.score?.skin_temp_celsius || null,
+        stress_score: undefined, // WHOOP doesn't provide stress score in current API
+        skin_temperature: recovery?.score?.skin_temp_celsius || undefined,
         spo2_percentage: recovery?.score?.spo2_percentage || null,
         respiratory_rate: recovery?.score?.respiratory_rate || null,
-        calories_burned: workoutData?.kilojoule ? Math.round(workoutData.kilojoule * 0.239) : null, // Convert kJ to calories
+        calories_burned: workoutData?.kilojoule ? Math.round(workoutData.kilojoule * 0.239) : undefined, // Convert kJ to calories
         activity_log: workoutData?.activities || [],
         raw_data: {
           cycle: latestCycle,

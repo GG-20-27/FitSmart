@@ -1,0 +1,149 @@
+TASK TITLE: Derive “Sleep Hours” (time asleep) from WHOOP stages; add “Time in Bed” + sleep stages to payload (non-breaking, minimal changes)
+
+SCOPE & CONSTRAINTS
+
+Only edit whoopApiService.ts (the file I pasted below).
+
+Do not modify auth/refresh/token logic, OAuth URLs, or other endpoints.
+
+Do not rename or remove existing fields; only add fields and adjust sleep-hours calculation.
+
+Keep current fallbacks and logs.
+
+If stage data is missing/null, fallback to time in bed and clearly compute it.
+
+Add two new, optional fields to the response: time_in_bed_hours and sleep_efficiency_pct (non-breaking).
+
+Keep sleep_stages structure as minutes; if you improve it, keep current names.
+
+FILE: whoopApiService.ts (the provided code)
+
+CHANGES
+
+Extend the shape (additive only). In the WhoopTodayData interface, add:
+
+  time_in_bed_hours?: number;
+  sleep_efficiency_pct?: number;
+
+
+Note: Do not remove or rename any existing keys (even if duplicated). Only add these two.
+
+Adjust sleep-hours derivation inside getTodaysData.
+Find the block where sleepData, sleepHours, and sleepScore are computed (after fetching sleepData via recovery.sleep_id). Replace only the calculation logic for sleep hours with the following, keeping the surrounding logs:
+
+// After `sleepData = response.data;` and before building `result`, derive sleep hours properly.
+// Prefer time asleep (sum of light + slow wave + REM) when scored; otherwise fall back to time in bed.
+
+let sleepEfficiencyPct: number | null = null;
+let timeInBedHours: number | null = null;
+
+// Extract score and stage summary safely
+const scoreState = sleepData?.score_state || sleepData?.score?.score_state; // tolerate different shapes
+const stageSummary = sleepData?.score?.stage_summary;
+
+// Extract sleep score (0–100) from performance percentage if present
+if (sleepData?.score?.sleep_performance_percentage !== undefined && sleepData?.score?.sleep_performance_percentage !== null) {
+  sleepScore = Math.min(Math.max(sleepData.score.sleep_performance_percentage, 0), 100);
+  console.log(`[SLEEP] Sleep score (performance %): ${sleepScore}`);
+}
+
+// Extract efficiency if present
+if (typeof sleepData?.score?.sleep_efficiency_percentage === "number") {
+  sleepEfficiencyPct = Math.round(sleepData.score.sleep_efficiency_percentage);
+}
+
+// Compute time in bed (hours)
+if (typeof stageSummary?.total_in_bed_time_milli === "number") {
+  timeInBedHours = Math.round((stageSummary.total_in_bed_time_milli / 3600000) * 10) / 10;
+} else if (sleepData?.start && sleepData?.end) {
+  const tibMs = new Date(sleepData.end).getTime() - new Date(sleepData.start).getTime();
+  timeInBedHours = Math.round((tibMs / 3600000) * 10) / 10;
+}
+
+// Compute time asleep (Sleep Hours) when we have scored stages
+if (stageSummary &&
+    typeof stageSummary.total_light_sleep_time_milli === "number" &&
+    typeof stageSummary.total_slow_wave_sleep_time_milli === "number" &&
+    typeof stageSummary.total_rem_sleep_time_milli === "number") {
+  const asleepMs =
+    (stageSummary.total_light_sleep_time_milli || 0) +
+    (stageSummary.total_slow_wave_sleep_time_milli || 0) +
+    (stageSummary.total_rem_sleep_time_milli || 0);
+
+  sleepHours = Math.round((asleepMs / 3600000) * 10) / 10;
+  console.log(`[SLEEP] Time asleep (derived from stages): ${sleepHours} h`);
+} else {
+  // No stage data yet → fallback to time in bed
+  sleepHours = null; // keep null to avoid mislabeling as "sleep hours"
+  console.log("[SLEEP] Stage summary missing → using Time in Bed fallback, scoring may be pending");
+}
+
+
+Keep/augment sleep stages (minutes) block.
+You already compute sleepStages. Keep it, but ensure it’s not null when stages are present, and include ‘awake’ (you already do). Replace your current block with this equivalent (same keys), only if needed:
+
+const sleepStages = stageSummary ? {
+  light_sleep_minutes: Math.round((stageSummary.total_light_sleep_time_milli || 0) / 60000),
+  deep_sleep_minutes: Math.round((stageSummary.total_slow_wave_sleep_time_milli || 0) / 60000),
+  rem_sleep_minutes: Math.round((stageSummary.total_rem_sleep_time_milli || 0) / 60000),
+  awake_minutes: Math.round((stageSummary.total_awake_time_milli || 0) / 60000),
+} : null;
+
+
+Populate the new fields in the result (additive).
+In the result: WhoopTodayData = { ... } object:
+
+Ensure sleep_hours uses the derived “time asleep” if present; if not, it can stay null (and UI should label “Time in Bed” elsewhere).
+
+Add time_in_bed_hours: timeInBedHours ?? null
+
+Add sleep_efficiency_pct: sleepEfficiencyPct ?? null
+
+Keep your existing sleep_score and sleep_stages logic intact.
+
+Result block (only show the relevant additions/lines):
+
+const result: WhoopTodayData = {
+  cycle_id: latestCycle.id,
+  strain: latestCycle.score?.strain || null,
+  recovery_score: recovery?.score?.recovery_score || null,
+  sleep_score: sleepScore || null,
+  sleep_stages: sleepStages,
+  sleep_hours: sleepHours,                  // time asleep (can be null if not scored yet)
+  time_in_bed_hours: timeInBedHours ?? null, // NEW: always try to include this
+  sleep_efficiency_pct: sleepEfficiencyPct ?? null, // NEW
+  hrv: recovery?.score?.hrv_rmssd_milli || null,
+  resting_heart_rate: recovery?.score?.resting_heart_rate || null,
+  average_heart_rate: workoutData?.avgHeartRate || latestCycle.score?.average_heart_rate || null,
+  stress_score: null,
+  skin_temperature: recovery?.score?.skin_temp_celsius || null,
+  spo2_percentage: recovery?.score?.spo2_percentage || null,
+  respiratory_rate: recovery?.score?.respiratory_rate || null,
+  calories_burned: workoutData?.kilojoule ? Math.round(workoutData.kilojoule * 0.239) : null,
+  activity_log: workoutData?.activities || [],
+  raw_data: {
+    cycle: latestCycle,
+    recovery: recovery,
+    sleep: sleepData,
+    workout: workoutData,
+    body_measurements: bodyMeasurements
+  }
+};
+
+
+Do not touch anything else.
+No changes to:
+
+getLatestSleepSession (leave as-is, even if it looks for sleep_hours on list endpoints)
+
+token/refresh/auth
+
+weekly averages or other metrics
+
+Post-change sanity checks
+
+If last night’s sleep is scored, sleep_hours should be a positive number (sum of Light + SWS + REM).
+
+time_in_bed_hours should always be present when we have start/end or stage summary.
+
+If scoring is pending (null stages), sleep_hours should be null, and only time_in_bed_hours will show—your UI can label that “Time in Bed”.
