@@ -1,0 +1,15 @@
+node_modules
+.expo
+.expo-shared
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+.DS_Store
+*.log
+package-lock 2.json
+package-lock 3.json

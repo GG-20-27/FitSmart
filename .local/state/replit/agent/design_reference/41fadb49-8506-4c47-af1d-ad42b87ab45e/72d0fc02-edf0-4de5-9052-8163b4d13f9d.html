@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FitScore GPT API Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        'inter': ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'dashboard-bg': '#F8FAFC',
+                        'card-bg': '#FFFFFF',
+                        'primary-blue': '#3B82F6',
+                        'success-green': '#10B981',
+                        'warning-amber': '#F59E0B',
+                        'error-red': '#EF4444',
+                        'text-primary': '#1E293B',
+                        'text-secondary': '#64748B',
+                    }
+                }
+            }
+        };
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-dashboard-bg font-inter text-text-primary">
+    <!-- @COMPONENT: Header -->
+    <header class="bg-card-bg shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <div class="flex items-center space-x-3">
+                    <div class="w-8 h-8 bg-primary-blue rounded-lg flex items-center justify-center">
+                        <i class="fas fa-heartbeat text-white text-sm"></i>
+                    </div>
+                    <h1 class="text-xl font-semibold text-text-primary">FitScore GPT API</h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center space-x-2 bg-success-green/10 px-3 py-1 rounded-full">
+                        <div class="w-2 h-2 bg-success-green rounded-full animate-pulse"></div>
+                        <span class="text-sm text-success-green font-medium">API Running</span>
+                    </div>
+                    <div class="text-sm text-text-secondary">
+                        Last updated: <span data-bind="lastUpdated">2 min ago</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+    <!-- @END_COMPONENT: Header -->
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- @COMPONENT: API Status Overview -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+            <div class="bg-card-bg rounded-xl shadow-sm p-6 border border-gray-100">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-text-secondary text-sm font-medium">API Status</p>
+                        <p class="text-2xl font-bold text-success-green">✅ Online</p>
+                    </div>
+                    <div class="w-12 h-12 bg-success-green/10 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-server text-success-green text-lg"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-card-bg rounded-xl shadow-sm p-6 border border-gray-100">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-text-secondary text-sm font-medium">WHOOP Status</p>
+                        <p class="text-2xl font-bold text-primary-blue">Connected</p>
+                    </div>
+                    <div class="w-12 h-12 bg-primary-blue/10 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-link text-primary-blue text-lg"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-card-bg rounded-xl shadow-sm p-6 border border-gray-100">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-text-secondary text-sm font-medium">Meals Today</p>
+                        <p class="text-2xl font-bold text-warning-amber" data-bind="mealsCount">3</p>
+                    </div>
+                    <div class="w-12 h-12 bg-warning-amber/10 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-utensils text-warning-amber text-lg"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-card-bg rounded-xl shadow-sm p-6 border border-gray-100">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-text-secondary text-sm font-medium">Storage Used</p>
+                        <p class="text-2xl font-bold text-text-primary">12.4 MB</p>
+                    </div>
+                    <div class="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                        <i class="fas fa-database text-gray-600 text-lg"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- @END_COMPONENT: API Status Overview -->
+
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+            <!-- @COMPONENT: WHOOP Health Data -->
+            <div class="bg-card-bg rounded-xl shadow-sm border border-gray-100">
+                <div class="p-6 border-b border-gray-100">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-lg font-semibold text-text-primary">Today's Health Metrics</h2>
+                        <div class="flex items-center space-x-2 text-sm text-text-secondary">
+                            <i class="fas fa-sync-alt"></i>
+                            <span>Auto-refresh: 5min</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-6">
+                    <div class="grid grid-cols-2 gap-6">
+                        <div class="text-center">
+                            <div class="relative w-20 h-20 mx-auto mb-3">
+                                <div class="w-20 h-20 rounded-full border-4 border-gray-200"></div>
+                                <div class="absolute inset-0 w-20 h-20 rounded-full border-4 border-success-green border-t-transparent transform rotate-45" style="clip-path: polygon(0 0, 75% 0, 75% 100%, 0 100%)"></div>
+                                <div class="absolute inset-0 flex items-center justify-center">
+                                    <span class="text-lg font-bold text-text-primary" data-bind="recoveryScore">78</span>
+                                </div>
+                            </div>
+                            <p class="text-sm font-medium text-text-primary">Recovery Score</p>
+                            <p class="text-xs text-text-secondary">Good Recovery</p>
+                        </div>
+
+                        <div class="text-center">
+                            <div class="relative w-20 h-20 mx-auto mb-3">
+                                <div class="w-20 h-20 rounded-full border-4 border-gray-200"></div>
+                                <div class="absolute inset-0 w-20 h-20 rounded-full border-4 border-primary-blue border-t-transparent transform rotate-90" style="clip-path: polygon(0 0, 85% 0, 85% 100%, 0 100%)"></div>
+                                <div class="absolute inset-0 flex items-center justify-center">
+                                    <span class="text-lg font-bold text-text-primary" data-bind="sleepScore">85</span>
+                                </div>
+                            </div>
+                            <p class="text-sm font-medium text-text-primary">Sleep Score</p>
+                            <p class="text-xs text-text-secondary">Excellent Sleep</p>
+                        </div>
+
+                        <div class="text-center">
+                            <div class="bg-warning-amber/10 rounded-lg p-4 mb-2">
+                                <div class="text-2xl font-bold text-warning-amber" data-bind="strainScore">12.4</div>
+                            </div>
+                            <p class="text-sm font-medium text-text-primary">Strain Score</p>
+                            <p class="text-xs text-text-secondary">Moderate Activity</p>
+                        </div>
+
+                        <div class="text-center">
+                            <div class="bg-error-red/10 rounded-lg p-4 mb-2">
+                                <div class="text-2xl font-bold text-error-red" data-bind="restingHeartRate">65</div>
+                                <div class="text-xs text-text-secondary mt-1">BPM</div>
+                            </div>
+                            <p class="text-sm font-medium text-text-primary">Resting HR</p>
+                            <p class="text-xs text-text-secondary">Normal Range</p>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 p-4 bg-gray-50 rounded-lg">
+                        <div class="flex items-center justify-between text-sm">
+                            <span class="text-text-secondary">Last sync:</span>
+                            <span class="font-medium text-text-primary" data-bind="lastSync">Today, 9:45 AM</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- @END_COMPONENT: WHOOP Health Data -->
+
+            <!-- @COMPONENT: Meal Management -->
+            <div class="space-y-8">
+                <!-- Meal Upload Section -->
+                <div class="bg-card-bg rounded-xl shadow-sm border border-gray-100">
+                    <div class="p-6 border-b border-gray-100">
+                        <h2 class="text-lg font-semibold text-text-primary">Upload Meals</h2>
+                        <p class="text-sm text-text-secondary mt-1">Add meal images for today's nutrition tracking</p>
+                    </div>
+                    <div class="p-6">
+                        <div class="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-primary-blue transition-colors cursor-pointer" data-event="click:handleFileUpload">
+                            <div class="w-12 h-12 bg-primary-blue/10 rounded-lg flex items-center justify-center mx-auto mb-4">
+                                <i class="fas fa-cloud-upload-alt text-primary-blue text-xl"></i>
+                            </div>
+                            <p class="text-text-primary font-medium mb-2">Click to upload meal images</p>
+                            <p class="text-sm text-text-secondary">PNG, JPG up to 10MB each</p>
+                            <input type="file" multiple accept="image/*" class="hidden" data-implementation="Use multer middleware for handling uploads">
+                        </div>
+                        
+                        <div class="mt-4">
+                            <button class="w-full bg-primary-blue text-white py-2 px-4 rounded-lg font-medium hover:bg-blue-600 transition-colors" data-event="click:handleUpload">
+                                <i class="fas fa-upload mr-2"></i>
+                                Upload Selected Images
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Today's Meals Section -->
+                <div class="bg-card-bg rounded-xl shadow-sm border border-gray-100">
+                    <div class="p-6 border-b border-gray-100">
+                        <div class="flex items-center justify-between">
+                            <h2 class="text-lg font-semibold text-text-primary">Today's Meals</h2>
+                            <button class="text-primary-blue text-sm font-medium hover:text-blue-600" data-event="click:refreshMeals">
+                                <i class="fas fa-refresh mr-1"></i>
+                                Refresh
+                            </button>
+                        </div>
+                    </div>
+                    <div class="p-6">
+                        <!-- @MAP: todaysMeals.map(meal => ( -->
+                        <div class="grid grid-cols-2 gap-4" data-mock="true">
+                            <!-- Morning meal - avocado toast with eggs -->
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <img src="https://images.unsplash.com/photo-1541519227354-08fa5d50c44d?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&h=200" alt="Avocado toast with eggs" class="w-full h-32 object-cover rounded-lg mb-3" data-mock-image="true">
+                                <div class="text-sm">
+                                    <p class="font-medium text-text-primary" data-bind="meal.filename">breakfast_0845.jpg</p>
+                                    <p class="text-text-secondary" data-bind="meal.timestamp">8:45 AM</p>
+                                </div>
+                            </div>
+
+                            <!-- Lunch meal - healthy salad bowl -->
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <img src="https://images.unsplash.com/photo-1512621776951-a57141f2eefd?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&h=200" alt="Healthy salad bowl with vegetables" class="w-full h-32 object-cover rounded-lg mb-3" data-mock-image="true">
+                                <div class="text-sm">
+                                    <p class="font-medium text-text-primary" data-bind="meal.filename">lunch_1230.jpg</p>
+                                    <p class="text-text-secondary" data-bind="meal.timestamp">12:30 PM</p>
+                                </div>
+                            </div>
+
+                            <!-- Dinner meal - grilled salmon with vegetables -->
+                            <div class="bg-gray-50 rounded-lg p-4">
+                                <img src="https://images.unsplash.com/photo-1467003909585-2f8a72700288?ixlib=rb-4.0.3&auto=format&fit=crop&w=300&h=200" alt="Grilled salmon with roasted vegetables" class="w-full h-32 object-cover rounded-lg mb-3" data-mock-image="true">
+                                <div class="text-sm">
+                                    <p class="font-medium text-text-primary" data-bind="meal.filename">dinner_1900.jpg</p>
+                                    <p class="text-text-secondary" data-bind="meal.timestamp">7:00 PM</p>
+                                </div>
+                            </div>
+
+                            <div class="bg-gray-50 rounded-lg p-4 border-2 border-dashed border-gray-300 flex items-center justify-center">
+                                <div class="text-center">
+                                    <i class="fas fa-plus text-gray-400 text-2xl mb-2"></i>
+                                    <p class="text-sm text-text-secondary">Add more meals</p>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- @END_MAP )) -->
+
+                        <div class="mt-4 p-3 bg-blue-50 rounded-lg">
+                            <div class="flex items-center text-sm text-primary-blue">
+                                <i class="fas fa-info-circle mr-2"></i>
+                                <span>Images are served from <code class="bg-white px-1 rounded">/uploads/</code> directory</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <!-- @END_COMPONENT: Meal Management -->
+        </div>
+
+        <!-- @COMPONENT: API Endpoints Documentation -->
+        <div class="mt-8 bg-card-bg rounded-xl shadow-sm border border-gray-100">
+            <div class="p-6 border-b border-gray-100">
+                <h2 class="text-lg font-semibold text-text-primary">API Endpoints</h2>
+                <p class="text-sm text-text-secondary mt-1">Available endpoints for Custom GPT integration</p>
+            </div>
+            <div class="p-6">
+                <div class="space-y-6">
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center space-x-3">
+                                <span class="bg-success-green text-white px-2 py-1 rounded text-xs font-mono">GET</span>
+                                <code class="text-sm font-mono text-text-primary">/</code>
+                            </div>
+                            <span class="text-xs text-text-secondary bg-gray-100 px-2 py-1 rounded">Health Check</span>
+                        </div>
+                        <p class="text-sm text-text-secondary mb-2">Returns API status confirmation</p>
+                        <div class="bg-gray-50 rounded p-3">
+                            <code class="text-xs text-success-green">"✅ FitScore GPT API is running"</code>
+                        </div>
+                    </div>
+
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center space-x-3">
+                                <span class="bg-success-green text-white px-2 py-1 rounded text-xs font-mono">GET</span>
+                                <code class="text-sm font-mono text-text-primary">/api/whoop/today</code>
+                            </div>
+                            <span class="text-xs text-text-secondary bg-blue-100 px-2 py-1 rounded">WHOOP Data</span>
+                        </div>
+                        <p class="text-sm text-text-secondary mb-2">Retrieves today's health metrics from WHOOP API</p>
+                        <div class="bg-gray-50 rounded p-3">
+                            <code class="text-xs text-text-primary">
+{<br>
+&nbsp;&nbsp;"recovery_score": 78,<br>
+&nbsp;&nbsp;"sleep_score": 85,<br>
+&nbsp;&nbsp;"strain_score": 12.4,<br>
+&nbsp;&nbsp;"resting_heart_rate": 65<br>
+}
+                            </code>
+                        </div>
+                    </div>
+
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center space-x-3">
+                                <span class="bg-warning-amber text-white px-2 py-1 rounded text-xs font-mono">POST</span>
+                                <code class="text-sm font-mono text-text-primary">/api/meals</code>
+                            </div>
+                            <span class="text-xs text-text-secondary bg-amber-100 px-2 py-1 rounded">Upload</span>
+                        </div>
+                        <p class="text-sm text-text-secondary mb-2">Upload multiple meal images with multer middleware</p>
+                        <div class="bg-gray-50 rounded p-3">
+                            <code class="text-xs text-text-primary">Content-Type: multipart/form-data</code>
+                        </div>
+                    </div>
+
+                    <div class="border border-gray-200 rounded-lg p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <div class="flex items-center space-x-3">
+                                <span class="bg-success-green text-white px-2 py-1 rounded text-xs font-mono">GET</span>
+                                <code class="text-sm font-mono text-text-primary">/api/meals/today</code>
+                            </div>
+                            <span class="text-xs text-text-secondary bg-green-100 px-2 py-1 rounded">Meals List</span>
+                        </div>
+                        <p class="text-sm text-text-secondary mb-2">Returns list of today's uploaded meal image URLs</p>
+                        <div class="bg-gray-50 rounded p-3">
+                            <code class="text-xs text-text-primary">
+{<br>
+&nbsp;&nbsp;"meals": [<br>
+&nbsp;&nbsp;&nbsp;&nbsp;"/uploads/breakfast_0845.jpg",<br>
+&nbsp;&nbsp;&nbsp;&nbsp;"/uploads/lunch_1230.jpg"<br>
+&nbsp;&nbsp;]<br>
+}
+                            </code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div class="flex items-start space-x-3">
+                        <i class="fas fa-exclamation-triangle text-warning-amber mt-0.5"></i>
+                        <div>
+                            <p class="text-sm font-medium text-amber-800">Implementation Notes</p>
+                            <ul class="text-sm text-amber-700 mt-2 space-y-1">
+                                <li>• WHOOP API integration uses placeholder logic with stored access token</li>
+                                <li>• File uploads saved to <code>/uploads/</code> with timestamp naming</li>
+                                <li>• Meal metadata stored in server memory (JSON object)</li>
+                                <li>• Static files served from <code>/uploads/</code> for Custom GPT access</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- @END_COMPONENT: API Endpoints Documentation -->
+    </main>
+
+    <script>
+        // TODO: Implement business logic, API calls, and state management
+        
+        (function() {
+            // Mock data for demonstration
+            const mockData = {
+                lastUpdated: '2 min ago',
+                mealsCount: 3,
+                recoveryScore: 78,
+                sleepScore: 85,
+                strainScore: 12.4,
+                restingHeartRate: 65,
+                lastSync: 'Today, 9:45 AM'
+            };
+
+            // Update data-bind elements with mock data
+            function updateDataBindings() {
+                document.querySelectorAll('[data-bind]').forEach(element => {
+                    const binding = element.getAttribute('data-bind');
+                    const value = mockData[binding] || mockData[binding.split('.')[1]];
+                    if (value !== undefined) {
+                        element.textContent = value;
+                    }
+                });
+            }
+
+            // Initialize on page load
+            document.addEventListener('DOMContentLoaded', updateDataBindings);
+
+            // Mock file upload functionality
+            document.addEventListener('click', function(e) {
+                if (e.target.closest('[data-event*="handleFileUpload"]')) {
+                    const input = document.querySelector('input[type="file"]');
+                    if (input) input.click();
+                }
+                
+                if (e.target.closest('[data-event*="handleUpload"]')) {
+                    console.log('Mock: Upload triggered');
+                    // TODO: Implement actual file upload to /api/meals
+                }
+                
+                if (e.target.closest('[data-event*="refreshMeals"]')) {
+                    console.log('Mock: Refresh meals triggered');
+                    // TODO: Fetch from /api/meals/today
+                }
+            });
+
+            // Auto-refresh simulation
+            setInterval(() => {
+                const timeElements = document.querySelectorAll('[data-bind="lastUpdated"]');
+                timeElements.forEach(el => {
+                    const minutes = Math.floor(Math.random() * 5) + 1;
+                    el.textContent = `${minutes} min ago`;
+                });
+            }, 30000);
+        })();
+    </script>
+</body>
+</html>
