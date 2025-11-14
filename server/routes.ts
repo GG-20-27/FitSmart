@@ -7,18 +7,22 @@ import path from "path";
 import fs from "fs";
 import cors from "cors";
 import { z } from "zod";
-import type { WhoopTodayResponse, MealResponse, ApiStatusResponse } from "@shared/schema";
+import type { WhoopTodayResponse, MealResponse, ApiStatusResponse, ChatRequest, ChatResponse } from "@shared/schema";
 import { whoopApiService } from "./whoopApiService";
 import { whoopTokenStorage } from "./whoopTokenStorage";
 import { userService } from "./userService";
+import { chatService, ChatErrorType } from "./chatService";
+import { chatSummarizationService } from "./chatSummarizationService";
+import { whisperService } from "./whisperService";
 import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
 import { getCurrentUserId, requireAdmin } from './authMiddleware';
 import { requireJWTAuth } from './jwtAuth';
 import { db } from './db';
-import { users } from '@shared/schema';
-import { eq } from 'drizzle-orm';
+import { users, fitScores, userGoals } from '@shared/schema';
+import type { UserGoal, FitScore } from '@shared/schema';
+import { eq, desc } from 'drizzle-orm';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -52,9 +56,29 @@ const upload = multer({
   }
 });
 
+// Configure multer for audio file uploads (voice messages)
+const audioUpload = multer({
+  storage: multer.memoryStorage(), // Store in memory for immediate processing
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25MB limit for audio files
+  },
+  fileFilter: (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+    const audioMimeTypes = [
+      'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a',
+      'audio/wav', 'audio/webm', 'audio/ogg', 'audio/flac'
+    ];
+    if (audioMimeTypes.includes(file.mimetype) || file.mimetype.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only audio files are allowed'));
+    }
+  }
+});
+
 // Helper function for timezone-aware date keys
-function todayKey(tz = process.env.USER_TZ || 'Europe/Zurich') {
-  return DateTime.now().setZone(tz).toISODate();
+function todayKey(tz = process.env.USER_TZ || 'Europe/Zurich'): string {
+  const isoDate = DateTime.now().setZone(tz).toISODate();
+  return isoDate ?? new Date().toISOString().split('T')[0];
 }
 
 // Helper function to get default user ID for WHOOP OAuth testing
@@ -173,13 +197,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('📸 Upload Meals: POST /api/meals (field: mealPhotos)');
   console.log('🍽️ Today\'s Meals: GET /api/meals/today');
   console.log('📅 Calendar Today: GET /api/calendar/today');
+  console.log('🤖 Chat Coach: POST /api/chat (requires JWT)');
+  console.log('🧪 Chat Test: GET /api/chat/test (requires JWT)');
   console.log('\n📝 Test with curl:');
-  console.log('curl http://localhost:5000/api/health');
-  console.log('curl http://localhost:5000/api/whoop/login');
-  console.log('curl http://localhost:5000/api/whoop/today');
-  console.log('curl http://localhost:5000/api/meals/today');
-  console.log('curl http://localhost:5000/api/calendar/today');
-  console.log('curl -F "mealPhotos=@image.jpg" http://localhost:5000/api/meals');
+  console.log('curl http://localhost:3001/api/health');
+  console.log('curl http://localhost:3001/api/whoop/login');
+  console.log('curl http://localhost:3001/api/whoop/today');
+  console.log('curl http://localhost:3001/api/meals/today');
+  console.log('curl http://localhost:3001/api/calendar/today');
+  console.log('curl -F "mealPhotos=@image.jpg" http://localhost:3001/api/meals');
+  console.log('curl -H "Authorization: Bearer <jwt>" http://localhost:3001/api/chat/test');
+  console.log('curl -X POST -H "Authorization: Bearer <jwt>" -H "Content-Type: application/json" -d \'{"messages":[{"role":"user","content":"Hello"}]}\' http://localhost:3001/api/chat');
   console.log('');
 
   // Remove email/password authentication - redirect to WHOOP OAuth
@@ -225,9 +253,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const token = authHeader.split(' ')[1];
           const { verifyJWT } = await import('./jwtAuth');
           const payload = verifyJWT(token);
+
+          if (payload) {
           userRole = payload.role || 'user';
+          }
         } catch (jwtError) {
-          console.log(`[AUTH ME] JWT verification failed:`, jwtError.message);
+          const message = jwtError instanceof Error ? jwtError.message : String(jwtError);
+          console.log(`[AUTH ME] JWT verification failed:`, message);
         }
       }
       
@@ -244,29 +276,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/users/me', requireJWTAuth, async (req, res) => {
     try {
       const whoopUserId = getCurrentUserId(req);
-      
+
       // Get user role from JWT token
       const authHeader = req.headers.authorization;
       let userRole = 'user';
-      
+
       if (authHeader && authHeader.startsWith('Bearer ')) {
         try {
           const token = authHeader.split(' ')[1];
           const { verifyJWT } = await import('./jwtAuth');
           const payload = verifyJWT(token);
+
+          if (payload) {
           userRole = payload.role || 'user';
+          }
         } catch (jwtError) {
-          console.log(`[USERS ME] JWT verification failed:`, jwtError.message);
+          const message = jwtError instanceof Error ? jwtError.message : String(jwtError);
+          console.log(`[USERS ME] JWT verification failed:`, message);
         }
       }
-      
-      res.json({ 
-        whoopId: whoopUserId, 
-        role: userRole 
+
+      res.json({
+        whoopId: whoopUserId,
+        role: userRole
       });
     } catch (error) {
       console.error('Get user profile error:', error);
       res.status(500).json({ error: 'Failed to get user profile' });
+    }
+  });
+
+  // User settings endpoints
+  console.log('[ROUTE] GET /api/users/settings');
+  app.get('/api/users/settings', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const user = await userService.getUserById(userId!);
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.json({
+        estimate_macros_enabled: user.estimateMacrosEnabled ?? false,
+        morning_outlook_enabled: user.morningOutlookEnabled ?? false,
+        comedy_roast_enabled: user.comedyRoastEnabled ?? false,
+        meal_reminders_enabled: user.mealRemindersEnabled ?? false,
+      });
+    } catch (error) {
+      console.error('Get user settings error:', error);
+      res.status(500).json({ error: 'Failed to get user settings' });
+    }
+  });
+
+  console.log('[ROUTE] PATCH /api/users/settings');
+  app.patch('/api/users/settings', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const {
+        estimate_macros_enabled,
+        morning_outlook_enabled,
+        outlook_time,
+        comedy_roast_enabled,
+        meal_reminders_enabled
+      } = req.body;
+
+      const updates: any = {};
+      if (estimate_macros_enabled !== undefined) updates.estimateMacrosEnabled = estimate_macros_enabled;
+      if (morning_outlook_enabled !== undefined) updates.morningOutlookEnabled = morning_outlook_enabled;
+      if (outlook_time !== undefined) updates.outlookTime = outlook_time;
+      if (comedy_roast_enabled !== undefined) updates.comedyRoastEnabled = comedy_roast_enabled;
+      if (meal_reminders_enabled !== undefined) updates.mealRemindersEnabled = meal_reminders_enabled;
+
+      await userService.updateUser(userId, updates);
+
+      res.json({
+        message: 'Settings updated successfully',
+        settings: updates
+      });
+    } catch (error) {
+      console.error('Update user settings error:', error);
+      res.status(500).json({ error: 'Failed to update user settings' });
     }
   });
 
@@ -409,6 +499,376 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Voice transcription endpoint (base64 JSON approach)
+  console.log('[ROUTE] POST /api/chat/transcribe');
+  app.post('/api/chat/transcribe', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[TRANSCRIBE] Voice transcription request from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to use transcription service'
+        });
+      }
+
+      // Extract base64 audio and filename from JSON body
+      const { audioBase64, filename } = req.body;
+
+      if (!audioBase64 || typeof audioBase64 !== 'string') {
+        console.error('[TRANSCRIBE] No audioBase64 in request body');
+        return res.status(400).json({
+          error: 'Invalid request',
+          message: 'audioBase64 (string) is required in request body'
+        });
+      }
+
+      if (!whisperService.isConfigured()) {
+        return res.status(500).json({
+          error: 'Transcription service not configured',
+          message: 'OpenAI API key is not configured'
+        });
+      }
+
+      // Decode base64 to buffer
+      const audioBuffer = Buffer.from(audioBase64, 'base64');
+      console.log(`[TRANSCRIBE] Decoded ${audioBuffer.length} bytes from base64`);
+      console.log(`[TRANSCRIBE] Filename: ${filename || 'audio.m4a'}`);
+
+      const transcription = await whisperService.transcribeAudio(
+        audioBuffer,
+        filename || 'audio.m4a'
+      );
+
+      console.log(`[TRANSCRIBE] Successfully transcribed audio for user ${userId}`);
+      res.json({ transcription });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred while transcribing audio';
+      console.error('[TRANSCRIBE] Error:', message);
+      res.status(500).json({
+        error: 'Transcription failed',
+        message
+      });
+    }
+  });
+
+  // Image upload endpoint - uploads base64 images to ImgBB and returns URLs
+  console.log('[ROUTE] POST /api/images/upload');
+  app.post('/api/images/upload', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[IMAGE UPLOAD] Image upload request from user: ${userId}`);
+      console.log(`[IMAGE UPLOAD] Request body keys:`, Object.keys(req.body));
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to upload images'
+        });
+      }
+
+      const { images } = req.body;
+
+      console.log(`[IMAGE UPLOAD] images present: ${!!images}, is array: ${Array.isArray(images)}, length: ${images?.length || 0}`);
+
+      if (!images || !Array.isArray(images) || images.length === 0) {
+        console.error('[IMAGE UPLOAD] Invalid images array! Body keys:', Object.keys(req.body));
+        return res.status(400).json({
+          error: 'Invalid request',
+          message: 'images array is required'
+        });
+      }
+
+      console.log(`[IMAGE UPLOAD] Processing ${images.length} images`);
+
+      // Upload images to ImgBB
+      const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '84c0b2a7c88733fb5ad2ad1f8c5eef2e'; // Free API key
+      const uploadedUrls: string[] = [];
+
+      for (let i = 0; i < images.length; i++) {
+        const base64Image = images[i];
+
+        // Remove data URL prefix if present
+        const base64Data = base64Image.includes(',')
+          ? base64Image.split(',')[1]
+          : base64Image;
+
+        console.log(`[IMAGE UPLOAD] Uploading image ${i + 1}/${images.length}, base64 size: ${base64Data.length} chars`);
+
+        try {
+          const formData = new URLSearchParams();
+          formData.append('image', base64Data);
+
+          console.log(`[IMAGE UPLOAD] Sending request to ImgBB...`);
+
+          const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData,
+          });
+
+          console.log(`[IMAGE UPLOAD] ImgBB response status: ${response.status}`);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[IMAGE UPLOAD] ImgBB HTTP ${response.status} error for image ${i + 1}:`, errorText);
+            throw new Error(`ImgBB upload failed: HTTP ${response.status} - ${errorText.substring(0, 200)}`);
+          }
+
+          const data = await response.json();
+          console.log(`[IMAGE UPLOAD] ImgBB response data:`, JSON.stringify(data).substring(0, 300));
+
+          if (!data.success || !data.data || !data.data.url) {
+            console.error(`[IMAGE UPLOAD] ImgBB response missing URL:`, data);
+            throw new Error('ImgBB response missing image URL');
+          }
+
+          const imageUrl = data.data.url;
+          uploadedUrls.push(imageUrl);
+          console.log(`[IMAGE UPLOAD] ✅ Image ${i + 1} uploaded successfully: ${imageUrl}`);
+        } catch (uploadError) {
+          const errorMsg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          console.error(`[IMAGE UPLOAD] ❌ Failed to upload image ${i + 1} to ImgBB:`, errorMsg);
+
+          // Fallback: Use base64 data URI instead of failing
+          console.log(`[IMAGE UPLOAD] Using base64 data URI fallback for image ${i + 1}`);
+          const dataUri = base64Image.includes('data:')
+            ? base64Image
+            : `data:image/jpeg;base64,${base64Data}`;
+          uploadedUrls.push(dataUri);
+          console.log(`[IMAGE UPLOAD] ✅ Image ${i + 1} using base64 fallback (${dataUri.length} chars)`);
+        }
+      }
+
+      // All images processed (either uploaded or using base64 fallback)
+      if (uploadedUrls.length === 0) {
+        return res.status(500).json({
+          error: 'Upload failed',
+          message: 'Failed to process any images'
+        });
+      }
+
+      console.log(`[IMAGE UPLOAD] Successfully uploaded ${uploadedUrls.length}/${images.length} images`);
+      res.json({ urls: uploadedUrls });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred while uploading images';
+      console.error('[IMAGE UPLOAD] Error:', message);
+      res.status(500).json({
+        error: 'Upload failed',
+        message
+      });
+    }
+  });
+
+  // Chat endpoints
+  console.log('[ROUTE] GET /api/chat/test');
+  app.get('/api/chat/test', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('[CHAT TEST] Testing chat service connection');
+      const response = await chatService.testConnection();
+      res.json(response);
+    } catch (error) {
+      console.error('[CHAT TEST] Error:', error);
+      res.status(500).json({ error: 'Chat service test failed' });
+    }
+  });
+
+  console.log('[ROUTE] POST /api/chat');
+  app.post('/api/chat', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[CHAT] Chat request from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate to use chat service'
+        });
+      }
+
+      // Validate request body
+      const { message, image, images, goalsContext }: ChatRequest = req.body;
+
+      const hasImages = (images && images.length > 0) || image;
+      if ((!message || typeof message !== 'string' || !message.trim()) && !hasImages) {
+        return res.status(400).json({
+          error: 'Invalid request',
+          message: 'A message string or image is required'
+        });
+      }
+
+      // Check if chat service is configured
+      if (!chatService.isConfigured()) {
+        return res.status(500).json({
+          error: 'Chat service not configured',
+          message: 'OpenAI API key is not configured'
+        });
+      }
+
+      const imageCount = images?.length || (image ? 1 : 0);
+      console.log(`[CHAT] Processing message for user ${userId}: "${message?.substring(0, 50) || `${imageCount} image(s)`}..."`);
+
+      const response: ChatResponse = await chatService.sendChat({
+        userId,
+        message: message || 'Analyze these images',
+        image,
+        images,
+        goalsContext
+      });
+      
+      console.log(`[CHAT] Successfully processed chat request for user ${userId}`);
+      res.json(response);
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred while processing your request';
+      console.error('[CHAT] Error processing chat request:', message);
+
+      const chatError = error as { type?: ChatErrorType; message?: string } | null;
+
+      // Handle chat service errors
+      if (chatError?.type === ChatErrorType.CONFIGURATION_ERROR) {
+        return res.status(500).json({ error: chatError.message ?? message });
+      }
+      
+      if (chatError?.type === ChatErrorType.VALIDATION_ERROR) {
+        return res.status(400).json({ error: chatError.message ?? message });
+      }
+      
+      if (chatError?.type === ChatErrorType.RATE_LIMIT_ERROR) {
+        return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
+      }
+      
+      if (chatError?.type === ChatErrorType.NETWORK_ERROR) {
+        return res.status(503).json({ error: 'Chat service temporarily unavailable' });
+      }
+      
+      // Generic error
+      res.status(500).json({ 
+        error: 'Failed to process chat request',
+        message
+      });
+    }
+  });
+
+  // Persona test endpoint - test FitSmart persona responses with current WHOOP data
+  console.log('[ROUTE] POST /api/chat/persona-test');
+  app.post('/api/chat/persona-test', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[PERSONA-TEST] Persona test request from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to use persona test'
+        });
+      }
+
+      // Use default test message if none provided
+      const testMessage = req.body.message || "How's my recovery today?";
+
+      console.log(`[PERSONA-TEST] Testing with message: "${testMessage}"`);
+
+      // Call chat service (which now uses persona pipeline)
+      const response: ChatResponse = await chatService.sendChat({
+        userId,
+        message: testMessage
+      });
+
+      // Return response with debug info
+      res.json({
+        message: testMessage,
+        reply: response.reply,
+        timestamp: new Date().toISOString(),
+        debug: {
+          personaPipelineUsed: true,
+          flowSteps: ['[CTX] Build context pack', '[PERSONA] Compose prompt', '[REFLECT] Add reflection', '[FINAL] Deliver reply']
+        }
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred during persona test';
+      console.error('[PERSONA-TEST] Error:', message);
+      res.status(500).json({
+        error: 'Persona test failed',
+        message
+      });
+    }
+  });
+
+  // Morning Outlook Test Endpoint
+  console.log('[ROUTE] POST /api/chat/outlook-test');
+  app.post('/api/chat/outlook-test', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[OUTLOOK-TEST] Manual outlook test from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to test morning outlook'
+        });
+      }
+
+      // TODO: Create morning outlook persona/prompt
+      // For now, use a placeholder message
+      const outlookMessage = "Good morning! Here's your daily outlook based on your recovery metrics...";
+
+      res.json({
+        message: outlookMessage,
+        timestamp: new Date().toISOString(),
+        note: 'Morning outlook feature - prompt to be implemented'
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred during outlook test';
+      console.error('[OUTLOOK-TEST] Error:', message);
+      res.status(500).json({
+        error: 'Outlook test failed',
+        message
+      });
+    }
+  });
+
+  // Comedy Roast Test Endpoint
+  console.log('[ROUTE] POST /api/chat/roast-test');
+  app.post('/api/chat/roast-test', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[ROAST-TEST] Manual roast test from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to test comedy roast'
+        });
+      }
+
+      // TODO: Create comedy roast persona/prompt
+      // For now, use a placeholder message
+      const roastMessage = "Weekly roast coming soon! We'll have some fun with your training data...";
+
+      res.json({
+        message: roastMessage,
+        timestamp: new Date().toISOString(),
+        note: 'Comedy roast feature - prompt to be implemented'
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred during roast test';
+      console.error('[ROAST-TEST] Error:', message);
+      res.status(500).json({
+        error: 'Roast test failed',
+        message
+      });
+    }
+  });
+
   // Health check endpoint (moved from root to avoid conflicts with frontend)
   app.get('/api/health', async (req, res) => {
     try {
@@ -418,7 +878,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       let expiryInfo = '';
       if (tokenData?.expires_at) {
-        const expiryTime = new Date(tokenData.expires_at * 1000);
+        const expiresAtSeconds = typeof tokenData.expires_at === 'number'
+          ? tokenData.expires_at
+          : tokenData.expires_at instanceof Date
+            ? Math.floor(tokenData.expires_at.getTime() / 1000)
+            : null;
+
+        if (expiresAtSeconds) {
+          const expiryTime = new Date(expiresAtSeconds * 1000);
         const now = new Date();
         const timeUntilExpiry = expiryTime.getTime() - now.getTime();
         const hoursUntilExpiry = Math.round(timeUntilExpiry / (1000 * 60 * 60));
@@ -427,6 +894,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           expiryInfo = ` (expires in ${hoursUntilExpiry} hours)`;
         } else {
           expiryInfo = ' (expired, auto-refresh active)';
+        }
         }
       }
       
@@ -441,6 +909,421 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: "✅ FitScore GPT API is running - WHOOP: not connected - Auto-refresh: enabled"
       };
       res.json(response);
+    }
+  });
+
+  // ============================================
+  // AI INSIGHTS ENDPOINTS
+  // ============================================
+
+  // POST /api/ai/fitscore - Calculate and return daily FitScore
+  app.post('/api/ai/fitscore', requireJWTAuth, async (req, res) => {
+    const buildFallback = () => ({
+      title: "✨ Strong Performance",
+      summary: "Your daily performance is balanced. Sleep and recovery are solid, while nutrition and strain show room for optimization.",
+      components: {
+        sleep: 7.5,
+        recovery: 8.2,
+        nutrition: 6.8,
+        strain: 7.0
+      },
+      finalScore: 7.4,
+      timestamp: new Date().toISOString()
+    });
+
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // If no database URL, return mock data immediately
+      if (!process.env.DATABASE_URL) {
+        return res.json(buildFallback());
+      }
+
+      const latestScore = await db
+        .select()
+        .from(fitScores)
+        .where(eq(fitScores.userId, userId))
+        .orderBy(desc(fitScores.calculatedAt), desc(fitScores.date))
+        .limit(1);
+
+      if (latestScore.length === 0) {
+        return res.json({
+          title: "No Data Available",
+          summary: "Start logging your meals and syncing WHOOP data to calculate your FitScore.",
+          components: {
+            sleep: 0,
+            recovery: 0,
+            nutrition: 0,
+            strain: 0
+          },
+          finalScore: 0,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const score = latestScore[0];
+      const componentsData = (score.components || {}) as Record<string, any>;
+
+      const parseNumeric = (value: unknown): number => {
+        if (typeof value === 'number') return value;
+        if (typeof value === 'string') {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+        return 0;
+      };
+
+      const normalize = (value: number): number =>
+        Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
+
+      const getMetric = (key: string) => {
+        const metric = componentsData?.[key];
+        if (!metric) {
+          return { score: 0, comment: undefined as string | undefined };
+        }
+
+        if (typeof metric === 'number') {
+          return { score: metric, comment: undefined as string | undefined };
+        }
+
+        return {
+          score: normalize(parseNumeric(metric.score)),
+          comment: typeof metric.comment === 'string' ? metric.comment : undefined
+        };
+      };
+
+      const sleepMetric = getMetric('sleep');
+      const recoveryMetric = getMetric('recovery');
+      const nutritionMetric = getMetric('nutrition');
+      const cardioMetric = getMetric('cardioBalance');
+      const trainingMetric = getMetric('trainingAlignment');
+
+      const finalScoreRaw = normalize(parseNumeric(score.score));
+      const strainMetric = trainingMetric.score > 0 ? trainingMetric : cardioMetric;
+      const title =
+        (typeof score.tagline === 'string' && score.tagline.trim().length > 0)
+          ? score.tagline
+          : finalScoreRaw >= 8 ? "⚡ Exceptional Performance"
+          : finalScoreRaw >= 7 ? "✨ Strong Performance"
+          : finalScoreRaw >= 6 ? "💪 Good Balance"
+          : finalScoreRaw >= 5 ? "⚖️ Room for Improvement"
+          : "🔄 Recovery Focus Needed";
+
+      const summaryCandidates = [
+        typeof score.motivation === 'string' ? score.motivation : undefined,
+        sleepMetric.comment,
+        recoveryMetric.comment,
+        nutritionMetric.comment,
+        strainMetric.comment
+      ].filter((text): text is string => !!text && text.trim().length > 0);
+
+      const summary = summaryCandidates.length > 0
+        ? summaryCandidates.slice(0, 2).map(text => text.trim()).join(' • ')
+        : "Your daily performance summary based on sleep, recovery, nutrition, and training alignment.";
+
+      const toIsoDate = (): string => {
+        if (score.calculatedAt instanceof Date) {
+          return score.calculatedAt.toISOString();
+        }
+
+        if (typeof score.calculatedAt === 'string') {
+          const parsed = new Date(score.calculatedAt);
+          if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toISOString();
+          }
+        }
+
+        if (typeof score.date === 'string' && score.date.length > 0) {
+          const parsed = new Date(`${score.date}T00:00:00Z`);
+          if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toISOString();
+          }
+        }
+
+        return new Date().toISOString();
+      };
+
+      res.json({
+        title,
+        summary,
+        components: {
+          sleep: sleepMetric.score,
+          recovery: recoveryMetric.score,
+          nutrition: nutritionMetric.score,
+          strain: strainMetric.score
+        },
+        finalScore: finalScoreRaw,
+        timestamp: toIsoDate()
+      });
+    } catch (error) {
+      console.error('[AI FitScore] Error:', error);
+      if (!isProduction) {
+        return res.json(buildFallback());
+      }
+      res.status(500).json({ error: 'Failed to calculate FitScore' });
+    }
+  });
+
+  // POST /api/ai/outlook - Generate morning outlook
+  app.post('/api/ai/outlook', requireJWTAuth, async (req, res) => {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const buildMockOutlook = () => {
+      const mockReadiness = 8.1;
+      return {
+        title: "🌅 Ready to Perform",
+        summary: "Your recovery looks strong today. You're primed for challenging workouts and high performance tasks.",
+        readiness: mockReadiness,
+        focusAreas: [
+          "High-intensity training is favorable today",
+          "Maintain consistent meal timing",
+          "Focus on achieving your strength goals"
+        ],
+        timestamp: new Date().toISOString()
+      };
+    };
+
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // If no database URL, return mock data
+      if (!process.env.DATABASE_URL) {
+        return res.json(buildMockOutlook());
+      }
+
+      // Fetch latest WHOOP data
+      const whoopData = await whoopApiService.getTodaysData(userId);
+
+      // Calculate readiness score (simple average of recovery and sleep)
+      const readiness = whoopData?.recovery_score
+        ? (whoopData.recovery_score * 10) / 100
+        : 7.0;
+
+      // Get today's goals
+      const goals: UserGoal[] = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.userId, userId))
+        .limit(3);
+
+      const focusAreas = goals.map((goal) => goal.title);
+
+      res.json({
+        title: readiness >= 8 ? "🌅 Ready to Perform" :
+               readiness >= 6 ? "☀️ Moderate Energy" :
+               "🌤️ Recovery Priority",
+        summary: readiness >= 8
+          ? "Your recovery looks strong today. You're primed for challenging workouts and high performance tasks."
+          : readiness >= 6
+          ? "You're moderately recovered. Consider scaling intensity based on how you feel throughout the day."
+          : "Your body needs recovery today. Focus on low-intensity activities, good nutrition, and rest.",
+        readiness: readiness,
+        focusAreas: focusAreas.length > 0 ? focusAreas : [
+          "Prioritize sleep quality tonight",
+          "Stay hydrated throughout the day",
+          "Listen to your body's signals"
+        ],
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('[AI Outlook] Error:', error);
+      if (!isProduction) {
+        return res.json(buildMockOutlook());
+      }
+      res.status(500).json({ error: 'Failed to generate morning outlook' });
+    }
+  });
+
+  // POST /api/ai/roast - Generate weekly performance roast
+  app.post('/api/ai/roast', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // If no database URL, return mock data
+      if (!process.env.DATABASE_URL) {
+        const mockAvgScore = 7.2;
+        return res.json({
+          title: "💪 Solid Performance",
+          roast: "Solid week! You're performing well, though there's definitely room to push harder. You're like a sports car stuck in second gear - powerful, but not quite unleashed.",
+          highlights: [
+            "Consistent training schedule maintained",
+            "Strong recovery metrics on most days"
+          ],
+          lowlights: [
+            "Nutrition consistency could be improved",
+            "Two days showed suboptimal sleep duration"
+          ],
+          weekScore: mockAvgScore,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Get past week's FitScores
+      const weekScores: FitScore[] = await db
+        .select()
+        .from(fitScores)
+        .where(eq(fitScores.userId, userId))
+        .orderBy(desc(fitScores.calculatedAt), desc(fitScores.date))
+        .limit(7);
+
+      if (weekScores.length === 0) {
+        return res.json({
+          title: "📊 Not Enough Data",
+          roast: "I'd love to roast your performance, but you haven't given me much to work with yet! Start tracking your metrics consistently.",
+          highlights: [],
+          lowlights: ["Need more data to generate insights"],
+          weekScore: 0,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const parseNumeric = (value: unknown): number => {
+        if (typeof value === 'number') return value;
+        if (typeof value === 'string') {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+        return 0;
+      };
+
+      const normalize = (value: number): number =>
+        Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
+
+      const getComponentScore = (components: FitScore['components'], key: string): number => {
+        const data = (components || {}) as Record<string, any>;
+        const metric = data?.[key];
+        if (!metric) return 0;
+        if (typeof metric === 'number') {
+          return normalize(metric);
+        }
+        return normalize(parseNumeric(metric.score));
+      };
+
+      const getComponentComment = (components: FitScore['components'], key: string): string | undefined => {
+        const data = (components || {}) as Record<string, any>;
+        const metric = data?.[key];
+        if (metric && typeof metric === 'object' && typeof metric.comment === 'string') {
+          return metric.comment;
+        }
+        return undefined;
+      };
+
+      const formatDateLabel = (record: FitScore): string => {
+        if (record.calculatedAt instanceof Date) {
+          return record.calculatedAt.toLocaleDateString();
+        }
+
+        if (typeof record.calculatedAt === 'string') {
+          const parsed = new Date(record.calculatedAt);
+          if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toLocaleDateString();
+          }
+        }
+
+        if (typeof record.date === 'string') {
+          const parsed = new Date(`${record.date}T00:00:00Z`);
+          if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toLocaleDateString();
+          }
+        }
+
+        return 'recent day';
+      };
+
+      // Calculate average score
+      const avgScore = weekScores.reduce((sum: number, record: FitScore) => sum + parseNumeric(record.score), 0) / weekScores.length;
+      const avgScoreRounded = normalize(avgScore);
+
+      // Find best and worst days
+      const sortedScores = [...weekScores].sort((a, b) => parseNumeric(b.score) - parseNumeric(a.score));
+      const bestDay = sortedScores[0];
+      const worstDay = sortedScores[sortedScores.length - 1];
+
+      const highlights = [];
+      const lowlights = [];
+
+      if (bestDay) {
+        const bestScore = normalize(parseNumeric(bestDay.score));
+        if (bestScore >= 8) {
+          highlights.push(`Peak performance on ${formatDateLabel(bestDay)} with a ${bestScore.toFixed(1)} score`);
+        }
+
+        const bestComment = getComponentComment(bestDay.components, 'trainingAlignment')
+          || getComponentComment(bestDay.components, 'recovery')
+          || getComponentComment(bestDay.components, 'sleep');
+        if (bestComment && highlights.length < 3) {
+          highlights.push(bestComment);
+        }
+      }
+
+      if (avgScoreRounded >= 7.5) {
+        highlights.push("Consistent high performance throughout the week");
+      }
+
+      if (worstDay) {
+        const worstScore = normalize(parseNumeric(worstDay.score));
+        if (worstScore < 6) {
+          lowlights.push(`Recovery dip on ${formatDateLabel(worstDay)} (${worstScore.toFixed(1)} score)`);
+        }
+
+        const strainComment = getComponentComment(worstDay.components, 'trainingAlignment');
+        if (strainComment && lowlights.length < 3) {
+          lowlights.push(strainComment);
+        }
+      }
+
+      if (weekScores.some((record) => getComponentScore(record.components, 'sleep') < 6)) {
+        lowlights.push("Sleep quality needs attention");
+      }
+
+      const roastText = avgScoreRounded >= 8
+        ? "Look at you, crushing it like a well-oiled machine! Your metrics are so consistent, I'm wondering if you're actually a robot. Keep this up and you'll be invincible... or at least feel that way."
+        : avgScoreRounded >= 7
+        ? "Solid week! You're performing well, though there's definitely room to push harder. You're like a sports car stuck in second gear - powerful, but not quite unleashed."
+        : avgScoreRounded >= 6
+        ? "Not bad, not great. You're hovering in that 'meh' zone. Time to step it up - your potential is higher than your actual performance right now."
+        : "Okay, let's be real - this week was rough. But hey, acknowledging it is the first step. Focus on recovery, sleep, and getting back to basics.";
+
+      res.json({
+        title: avgScoreRounded >= 8 ? "🔥 Outstanding Week" :
+               avgScoreRounded >= 7 ? "💪 Solid Performance" :
+               avgScoreRounded >= 6 ? "⚖️ Mixed Results" :
+               "📉 Recovery Week",
+        roast: roastText,
+        highlights: highlights.length > 0 ? highlights : ["Completed the week"],
+        lowlights: lowlights.length > 0 ? lowlights : [],
+        weekScore: avgScoreRounded,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('[AI Roast] Error:', error);
+      if (process.env.NODE_ENV !== 'production') {
+        return res.json({
+          title: "💪 Solid Performance",
+          roast: "Solid week! You're performing well, though there's definitely room to push harder. You're like a sports car stuck in second gear - powerful, but not quite unleashed.",
+          highlights: [
+            "Consistent training schedule maintained",
+            "Strong recovery metrics on most days"
+          ],
+          lowlights: [
+            "Nutrition consistency could be improved",
+            "Two days showed suboptimal sleep duration"
+          ],
+          weekScore: 7.2,
+          timestamp: new Date().toISOString()
+        });
+      }
+      res.status(500).json({ error: 'Failed to generate weekly roast' });
     }
   });
 
@@ -499,7 +1382,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         try {
           // Check if token is expired or expires soon (within 1 hour)
           const currentTime = Math.floor(Date.now() / 1000);
-          const expiresAt = token.expiresAt ? Math.floor(token.expiresAt.getTime() / 1000) : null;
+          const tokenData = token.tokenData;
+          const expiresAtRaw = tokenData.expires_at;
+          const expiresAt = typeof expiresAtRaw === 'number'
+            ? expiresAtRaw
+            : expiresAtRaw instanceof Date
+              ? Math.floor(expiresAtRaw.getTime() / 1000)
+              : null;
           
           if (!expiresAt) {
             console.log(`[TOKEN REFRESH] Token for user ${token.userId} has no expiry time, skipping`);
@@ -515,7 +1404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             continue;
           }
           
-          if (!token.refreshToken) {
+          if (!tokenData.refresh_token) {
             console.log(`[TOKEN REFRESH] Token for user ${token.userId} is expired but has no refresh token`);
             continue;
           }
@@ -523,7 +1412,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[TOKEN REFRESH] Refreshing token for user ${token.userId}...`);
           
           // Attempt to refresh the token
-          const newToken = await whoopTokenStorage.refreshWhoopToken(token.userId, token.refreshToken);
+          const newToken = await whoopTokenStorage.refreshWhoopToken(token.userId, tokenData.refresh_token);
           
           if (newToken) {
             updatedUsers.push(token.userId);
@@ -638,8 +1527,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[WHOOP AUTH] Existing user updated in database: ${whoopUserId}`);
         }
       } catch (userError) {
-        console.error(`[WHOOP AUTH] User upsert failed:`, userError);
-        throw new Error(`Failed to create user: ${userError.message}`);
+        const message = userError instanceof Error ? userError.message : String(userError);
+        console.error(`[WHOOP AUTH] User upsert failed:`, message);
+        throw new Error(`Failed to create user: ${message}`);
       }
       
       // Verify user exists before creating token
@@ -668,8 +1558,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await whoopTokenStorage.setToken(whoopUserId, tokenData);
         console.log(`[WHOOP AUTH] Token and static JWT stored successfully for WHOOP user ${whoopUserId}`);
       } catch (tokenError) {
-        console.error(`[WHOOP AUTH] Token storage failed:`, tokenError);
-        throw new Error(`Failed to store token: ${tokenError.message}`);
+        const message = tokenError instanceof Error ? tokenError.message : String(tokenError);
+        console.error(`[WHOOP AUTH] Token storage failed:`, message);
+        throw new Error(`Failed to store token: ${message}`);
       }
       console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
       
@@ -680,11 +1571,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const whoopDataResult = await whoopApiService.getTodaysData(whoopUserId);
         
         if (whoopDataResult && whoopDataResult.recovery_score !== undefined) {
+          const sleepHours = typeof whoopDataResult.sleep_hours === 'number' ? whoopDataResult.sleep_hours : 0;
           const whoopDataRecord = {
             userId: whoopUserId,
             date: today,
             recoveryScore: Math.round(whoopDataResult.recovery_score),
-            sleepScore: Math.round(whoopDataResult.sleep_hours * 10) || 0, // Convert hours to score
+            sleepScore: Math.round(sleepHours * 10) || 0, // Convert hours to score
             strainScore: Math.round((whoopDataResult.strain || 0) * 10), // Store as integer * 10
             restingHeartRate: Math.round(whoopDataResult.resting_heart_rate || 0)
           };
@@ -694,7 +1586,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.log(`[WHOOP AUTH] Today's data stored for user: ${whoopUserId}`, whoopDataRecord);
         }
       } catch (dataError) {
-        console.error(`[WHOOP AUTH] Failed to fetch initial WHOOP data:`, dataError);
+        const message = dataError instanceof Error ? dataError.message : String(dataError);
+        console.error(`[WHOOP AUTH] Failed to fetch initial WHOOP data:`, message);
         // Continue with authentication even if data fetch fails
       }
       
@@ -704,11 +1597,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.redirect(`/#token=${staticJwtToken}`);
       
     } catch (error) {
-      console.error('[WHOOP AUTH] Callback error:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP AUTH] Callback error:', message);
       
       // Check if it's a token exchange error (common with expired/used auth codes)
-      if (error.message?.includes('invalid_grant') || error.message?.includes('HTTP 400') || error.message?.includes('request_forbidden')) {
-        console.log('[WHOOP AUTH] OAuth error detected:', error.message);
+      if (message.includes('invalid_grant') || message.includes('HTTP 400') || message.includes('request_forbidden')) {
+        console.log('[WHOOP AUTH] OAuth error detected:', message);
         console.log('[WHOOP AUTH] This usually means the authorization code was expired, used, or invalid');
         console.log('[WHOOP AUTH] Redirecting user to retry OAuth flow with fresh authorization code');
         
@@ -729,7 +1623,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             <body>
               <div class="error">
                 <h1>⚠️ WHOOP Authentication Error</h1>
-                <p>Error: ${error.message}</p>
+                <p>Error: ${message}</p>
                 <p>This usually happens when the authorization code expires or is used more than once.</p>
               </div>
               <div class="retry-info">
@@ -739,7 +1633,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 </button>
               </div>
               <script>
-                console.error('[WHOOP AUTH] OAuth error:', '${error.message}');
+                console.error('[WHOOP AUTH] OAuth error:', '${message.replace(/'/g, "\\'")}');
               </script>
             </body>
           </html>
@@ -766,7 +1660,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           </head>
           <body>
             <div class="error">❌ Authentication Failed</div>
-            <div class="message">WHOOP authentication encountered an error: ${error instanceof Error ? error.message : 'An error occurred during authentication'}</div>
+            <div class="message">WHOOP authentication encountered an error: ${message}</div>
             <div class="retry">
               <a href="/api/whoop/login">🔄 Try Again</a>
             </div>
@@ -806,11 +1700,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: 'Raw WHOOP API response for debugging purposes'
       });
       
-    } catch (error: any) {
-      console.error('[WHOOP RAW] Error:', error.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP RAW] Error:', message);
       res.status(500).json({ 
         error: 'Failed to fetch raw WHOOP data',
-        details: error.message 
+        details: message 
       });
     }
   });
@@ -861,9 +1756,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           auth_url: null,
           expires_at: tokenData.expires_at
         });
-      } catch (tokenError: any) {
+      } catch (tokenError) {
+        const tokenErrorMessage = tokenError instanceof Error ? tokenError.message : String(tokenError);
         // Token appears valid but fails API validation
-        console.error('[TOKEN TEST] Token validation failed:', tokenError.response?.status || tokenError.message);
+        console.error('[TOKEN TEST] Token validation failed:', tokenErrorMessage);
         res.json({
           authenticated: false,
           message: 'WHOOP token is invalid or expired',
@@ -872,7 +1768,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
     } catch (error) {
-      console.error('Error checking WHOOP status:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error checking WHOOP status:', message);
       res.status(500).json({ error: 'Failed to check WHOOP authentication status' });
     }
   });
@@ -883,16 +1780,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const oauthUrl = whoopApiService.getOAuthUrl();
       const defaultUserId = await getDefaultUserId();
       const tokenData = await whoopTokenStorage.getToken(defaultUserId);
+      
+      // Use the same redirect URI logic as the service (from .env)
+      const redirectUriEnv = process.env.WHOOP_REDIRECT_URI?.trim();
+      if (!redirectUriEnv) {
+        throw new Error('WHOOP_REDIRECT_URI must be set in environment variables');
+      }
+      
       res.json({
         oauth_url: oauthUrl,
         client_id: process.env.WHOOP_CLIENT_ID,
-        redirect_uri: 'https://health-data-hub.replit.app/api/whoop/callback',
+        redirect_uri: redirectUriEnv, // Use .env value, not hardcoded Replit URL
         status: 'OAuth flow ready',
         has_token: !!tokenData,
         token_valid: tokenData ? whoopTokenStorage.isTokenValid(tokenData) : false
       });
     } catch (error) {
-      res.status(500).json({ error: 'Failed to generate OAuth URL' });
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to generate OAuth URL', details: message });
     }
   });
 
@@ -908,27 +1813,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const whoopUserId = `whoop_${user_id}`;
       
       // Set session manually for testing
-      const session = req.session as any;
+      const sessionRequest = req as typeof req & { session?: any; sessionID?: string };
+      if (!sessionRequest.session) {
+        return res.status(500).json({ error: 'Session middleware not available' });
+      }
+
+      const session = sessionRequest.session as any;
       session.userId = whoopUserId;
       
       console.log(`[TEST SESSION] Setting session userId to: ${whoopUserId}`);
       console.log(`[TEST SESSION] Session before save:`, session);
       
       // Save session and return success
-      req.session.save((err) => {
+      session.save?.((err: unknown) => {
         if (err) {
           console.error('[TEST SESSION] Session save error:', err);
           return res.status(500).json({ error: 'Session creation failed' });
         }
         
         console.log(`[TEST SESSION] Session saved successfully for WHOOP user ${whoopUserId}`);
-        console.log(`[TEST SESSION] Session after save:`, req.session);
+        console.log(`[TEST SESSION] Session after save:`, sessionRequest.session);
         
         // Force session modification and save
-        req.session.touch();
-        (req.session as any).modified = true;
-        
-        req.session.save((saveErr) => {
+        session.touch?.();
+        if (sessionRequest.session) {
+          (sessionRequest.session as any).modified = true;
+        }
+
+        session.save?.((saveErr: unknown) => {
           if (saveErr) {
             console.error('[TEST SESSION] Session save failed:', saveErr);
             return res.status(500).json({ error: 'Session save failed' });
@@ -936,7 +1848,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           
           // Manually set the Set-Cookie header for testing
           const cookieName = 'fitscore.sid';
-          const cookieValue = req.sessionID;
+          const cookieValue = sessionRequest.sessionID ?? '';
           const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
           const isReplotDeployment = !!process.env.REPLIT_DOMAINS;
           
@@ -959,7 +1871,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           res.json({ 
             message: 'Test session created successfully',
             userId: whoopUserId,
-            sessionId: req.sessionID,
+            sessionId: sessionRequest.sessionID,
             cookieSet: true
           });
         });
@@ -967,7 +1879,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
       
     } catch (error) {
-      console.error('Error creating test session:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error creating test session:', message);
       res.status(500).json({ error: 'Failed to create test session' });
     }
   });
@@ -976,11 +1889,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('[ROUTE] GET /api/session/debug');
   app.get('/api/session/debug', (req, res) => {
     const userId = getCurrentUserId(req);
+    const sessionRequest = req as typeof req & { session?: any; sessionID?: string };
+
     res.json({
-      sessionId: req.sessionID,
+      sessionId: sessionRequest.sessionID,
       userId: userId,
-      sessionExists: !!req.session,
-      sessionKeys: req.session ? Object.keys(req.session) : [],
+      sessionExists: !!sessionRequest.session,
+      sessionKeys: sessionRequest.session ? Object.keys(sessionRequest.session) : [],
       cookies: req.headers.cookie,
       timestamp: new Date().toISOString()
     });
@@ -1019,8 +1934,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         console.log(`Test user created/updated: ${whoopUserId}`);
       } catch (userError) {
-        console.error('Failed to create test user:', userError);
-        return res.status(500).json({ error: 'Failed to create test user' });
+        const message = userError instanceof Error ? userError.message : String(userError);
+        console.error('Failed to create test user:', message);
+        return res.status(500).json({ error: 'Failed to create test user', details: message });
       }
       
       await whoopTokenStorage.setToken(whoopUserId, {
@@ -1035,8 +1951,353 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: 'authenticated'
       });
     } catch (error) {
-      console.error('Error setting test token:', error);
-      res.status(500).json({ error: 'Failed to set test token' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error setting test token:', message);
+      res.status(500).json({ error: 'Failed to set test token', details: message });
+    }
+  });
+
+  // FitScore Forecast endpoint - predicts today's FitScore based on current metrics
+  app.get('/api/fitscore/forecast', requireJWTAuth, async (req, res) => {
+    console.log('[FITSCORE FORECAST] Generating forecast');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const todayDate = todayKey(tz);
+
+      // Fetch today's WHOOP data
+      let todayData;
+      try {
+        todayData = await whoopApiService.getTodaysData(userId);
+      } catch (error) {
+        // Fallback to cached data
+        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
+        if (cachedData) {
+          todayData = {
+            recovery_score: cachedData.recoveryScore,
+            sleep_score: cachedData.sleepScore,
+            sleep_hours: cachedData.sleepHours,
+            strain: cachedData.strainScore,
+            hrv: cachedData.hrv,
+            resting_heart_rate: cachedData.restingHeartRate,
+          };
+        } else {
+          return res.status(404).json({ error: 'No WHOOP data available' });
+        }
+      }
+
+      // Use FitScore v3.0 calculator for forecast (1-10 scale)
+      const { fitScoreCalculatorV3 } = await import('./services/fitScoreCalculatorV3');
+
+      const recovery = todayData.recovery_score || 0;
+      const sleepScore = todayData.sleep_score || 0;
+      const sleepHours = todayData.sleep_hours || 0;
+      const hrv = todayData.hrv || 0;
+      const rhr = todayData.resting_heart_rate || 0;
+      const strain = todayData.strain || 0;
+
+      // Build input for v3.0 calculator
+      const forecastInput = {
+        sleepHours,
+        targetSleepHours: 8.0,
+        recoveryPercent: recovery,
+        currentHRV: hrv,
+        baselineHRV: hrv, // Use current as baseline for forecast
+        currentRHR: rhr,
+        baselineRHR: rhr,
+        actualStrain: strain,
+        targetStrain: 14.0,
+        // Predict nutrition and training based on typical behavior
+        meals: [] // No meals yet - will predict
+      };
+
+      // Calculate current metrics (what we know)
+      const partialResult = fitScoreCalculatorV3.calculate(forecastInput, todayDate);
+
+      // Predict nutrition score (assume user will log 3-4 balanced meals)
+      const predictedNutritionScore = 7.5; // Optimistic but realistic
+
+      // Dynamic nutrition tip based on projected score
+      const projectedScoreWithoutNutrition = (
+        partialResult.components.sleep.score * 0.25 +
+        partialResult.components.recovery.score * 0.25 +
+        partialResult.components.cardioBalance.score * 0.15 +
+        8.0 * 0.10 // Assume decent training
+      );
+      const nutritionImpact = predictedNutritionScore * 0.25;
+      const potentialTotal = projectedScoreWithoutNutrition + nutritionImpact;
+
+      let nutritionTip = 'Aim for 3-4 balanced meals with adequate protein';
+      if (potentialTotal >= 8.0) {
+        // Only mention hitting 8+ if actually achievable
+        nutritionTip = 'Aim for 3-4 balanced meals with adequate protein to maintain strong performance';
+      }
+
+      // Predict training alignment (based on strain and recovery)
+      let predictedTrainingScore = 8.0;
+      let trainingTip = 'Follow your planned training — your body is ready';
+
+      if (recovery < 50) {
+        predictedTrainingScore = 6.0;
+        trainingTip = 'Consider light active recovery instead of high intensity';
+      } else if (recovery >= 70) {
+        predictedTrainingScore = 9.0;
+        trainingTip = 'Great day for quality training — push for your goals';
+      }
+
+      // Calculate projected FitScore with predicted nutrition and training
+      const projectedFitScore = (
+        partialResult.components.sleep.score * 0.25 +
+        partialResult.components.recovery.score * 0.25 +
+        partialResult.components.cardioBalance.score * 0.15 +
+        predictedNutritionScore * 0.25 +
+        predictedTrainingScore * 0.10
+      );
+
+      const forecast = Math.round(projectedFitScore * 10) / 10; // Round to 0.1
+
+      // Generate insight with predictions
+      let insight = '';
+      const factors = {
+        sleep: `${sleepHours.toFixed(1)}h (${partialResult.components.sleep.score}/10)`,
+        recovery: `${recovery}% (${partialResult.components.recovery.score}/10)`,
+        cardio: `HRV ${hrv}ms, RHR ${rhr}bpm (${partialResult.components.cardioBalance.score}/10)`,
+        nutritionPrediction: `Projected: ${predictedNutritionScore}/10`,
+        trainingPrediction: `Projected: ${predictedTrainingScore}/10`
+      };
+
+      if (recovery >= 70 && sleepScore >= 70) {
+        insight = `💪 Projected FitScore: ${forecast}/10 if you complete planned training and nutrition.
+
+${trainingTip}. ${nutritionTip}.`;
+      } else if (recovery >= 50 && sleepScore >= 50) {
+        insight = `⚡ Projected FitScore: ${forecast}/10 with moderate training and solid nutrition.
+
+${trainingTip}. ${nutritionTip}.`;
+      } else {
+        insight = `🧘 Projected FitScore: ${forecast}/10 — prioritize recovery today.
+
+${trainingTip}. ${nutritionTip}.`;
+      }
+
+      const response = {
+        forecast, // Now 1-10 scale
+        factors,
+        insight,
+        nutritionTip,
+        trainingTip,
+        updatedAt: new Date().toISOString(),
+      };
+
+      console.log(`[FITSCORE FORECAST] user=${userId} forecast=${forecast}/10 recovery=${recovery}% sleep=${sleepScore}%`);
+      res.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITSCORE FORECAST] Error:', message);
+      res.status(500).json({ error: 'Failed to generate forecast', details: message });
+    }
+  });
+
+  // FitScore history endpoint (7-day sparkline data)
+  app.get('/api/fitscore/history', requireJWTAuth, async (req, res) => {
+    console.log('[FITSCORE HISTORY] Fetching 7-day history');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Fetch last 7 days of FitScores from the database
+      const result = await db
+        .select({
+          date: fitScores.date,
+          score: fitScores.score,
+        })
+        .from(fitScores)
+        .where(eq(fitScores.userId, userId))
+        .orderBy(desc(fitScores.date))
+        .limit(7);
+
+      if (result.length === 0) {
+        return res.json({ scores: [], weeklyAverage: 0, trend: 0 });
+      }
+
+      // Reverse to get chronological order (oldest to newest)
+      const scores = result.reverse().map(item => ({
+        date: item.date,
+        score: Number(item.score.toFixed(1)),
+      }));
+
+      // Calculate weekly average
+      const weeklyAverage = scores.reduce((sum, item) => sum + item.score, 0) / scores.length;
+
+      // Calculate trend (difference between last 3 days avg and first 3 days avg)
+      let trend = 0;
+      if (scores.length >= 6) {
+        const firstThree = scores.slice(0, 3).reduce((sum, item) => sum + item.score, 0) / 3;
+        const lastThree = scores.slice(-3).reduce((sum, item) => sum + item.score, 0) / 3;
+        trend = lastThree - firstThree;
+      }
+
+      console.log(`[FITSCORE HISTORY] user=${userId} count=${scores.length} avg=${weeklyAverage.toFixed(1)} trend=${trend >= 0 ? '+' : ''}${trend.toFixed(1)}`);
+
+      res.json({
+        scores,
+        weeklyAverage: Number(weeklyAverage.toFixed(1)),
+        trend: Number(trend.toFixed(1)),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITSCORE HISTORY] Error:', message);
+      res.status(500).json({ error: 'Failed to fetch FitScore history', details: message });
+    }
+  });
+
+  // Goals endpoints
+  // GET /api/goals - Fetch all goals for user
+  app.get('/api/goals', requireJWTAuth, async (req, res) => {
+    console.log('[GOALS] Fetching user goals');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const goals = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.userId, userId))
+        .orderBy(desc(userGoals.createdAt));
+
+      console.log(`[GOALS] Found ${goals.length} goals for user ${userId}`);
+      res.json(goals);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[GOALS] Error fetching goals:', message);
+      res.status(500).json({ error: 'Failed to fetch goals', details: message });
+    }
+  });
+
+  // POST /api/goals - Create new goal
+  app.post('/api/goals', requireJWTAuth, async (req, res) => {
+    console.log('[GOALS] Creating new goal');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const { id, title, emoji, category, progress, streak, microhabits } = req.body;
+
+      if (!id || !title || !emoji || !category || !microhabits) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      const newGoal = await db
+        .insert(userGoals)
+        .values({
+          id,
+          userId,
+          title,
+          emoji,
+          category,
+          progress: progress || 0,
+          streak: streak || 0,
+          microhabits,
+        })
+        .returning();
+
+      console.log(`[GOALS] Created goal ${id} for user ${userId}`);
+      res.json(newGoal[0]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[GOALS] Error creating goal:', message);
+      res.status(500).json({ error: 'Failed to create goal', details: message });
+    }
+  });
+
+  // PATCH /api/goals/:id - Update existing goal
+  app.patch('/api/goals/:id', requireJWTAuth, async (req, res) => {
+    console.log('[GOALS] Updating goal');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const { id } = req.params;
+      const updates = req.body;
+
+      // Verify goal belongs to user
+      const [existingGoal] = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.id, id))
+        .limit(1);
+
+      if (!existingGoal) {
+        return res.status(404).json({ error: 'Goal not found' });
+      }
+
+      if (existingGoal.userId !== userId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      const [updatedGoal] = await db
+        .update(userGoals)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(userGoals.id, id))
+        .returning();
+
+      console.log(`[GOALS] Updated goal ${id}`);
+      res.json(updatedGoal);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[GOALS] Error updating goal:', message);
+      res.status(500).json({ error: 'Failed to update goal', details: message });
+    }
+  });
+
+  // DELETE /api/goals/:id - Delete goal
+  app.delete('/api/goals/:id', requireJWTAuth, async (req, res) => {
+    console.log('[GOALS] Deleting goal');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const { id } = req.params;
+
+      // Verify goal belongs to user
+      const [existingGoal] = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.id, id))
+        .limit(1);
+
+      if (!existingGoal) {
+        return res.status(404).json({ error: 'Goal not found' });
+      }
+
+      if (existingGoal.userId !== userId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      await db
+        .delete(userGoals)
+        .where(eq(userGoals.id, id));
+
+      console.log(`[GOALS] Deleted goal ${id}`);
+      res.json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[GOALS] Error deleting goal:', message);
+      res.status(500).json({ error: 'Failed to delete goal', details: message });
     }
   });
 
@@ -1078,40 +2339,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
           freshData = await whoopApiService.getTodaysData(userId);
           
           if (freshData && typeof freshData.recovery_score === 'number') {
+            const recoveryScore = freshData.recovery_score;
+            const sleepScore = typeof freshData.sleep_score === 'number' ? freshData.sleep_score : 0;
+            const strain = typeof freshData.strain === 'number' ? freshData.strain : 0;
+            const restingHeartRate = typeof freshData.resting_heart_rate === 'number' ? freshData.resting_heart_rate : 0;
+            const sleepHours = typeof freshData.sleep_hours === 'number' ? freshData.sleep_hours : 0;
+            const hrv = typeof freshData.hrv === 'number' ? freshData.hrv : 0;
+            const respiratoryRate = typeof freshData.respiratory_rate === 'number' ? freshData.respiratory_rate : 0;
+            const skinTemp = typeof freshData.skin_temperature === 'number' ? freshData.skin_temperature : 0;
+            const spo2 = typeof freshData.spo2_percentage === 'number' ? freshData.spo2_percentage : 0;
+            const averageHeartRate = typeof freshData.average_heart_rate === 'number' ? freshData.average_heart_rate : 0;
+
             // Store the fresh data in cache
             await storage.upsertWhoopData({
               userId: userId,
               date: todayDate,
-              recoveryScore: Math.round(freshData.recovery_score),
-              sleepScore: Math.round(freshData.sleep_score || 0), // Store sleep score as percentage
-              strainScore: freshData.strain || 0, // Store strain as decimal for precision
-              restingHeartRate: Math.round(freshData.resting_heart_rate || 0),
-              sleepHours: freshData.sleep_hours || 0,
-              hrv: freshData.hrv || 0, // Store HRV as decimal for precision
-              respiratoryRate: freshData.respiratory_rate || 0,
-              skinTempCelsius: freshData.skin_temperature || 0,
-              spo2Percentage: freshData.spo2_percentage || 0,
-              averageHeartRate: Math.round(freshData.average_heart_rate || 0)
+              recoveryScore: Math.round(recoveryScore),
+              sleepScore: Math.round(sleepScore || 0), // Store sleep score as percentage
+              strainScore: strain || 0, // Store strain as decimal for precision
+              restingHeartRate: Math.round(restingHeartRate || 0),
+              sleepHours: sleepHours || 0,
+              hrv: hrv || 0, // Store HRV as decimal for precision
+              respiratoryRate: respiratoryRate || 0,
+              skinTempCelsius: skinTemp || 0,
+              spo2Percentage: spo2 || 0,
+              averageHeartRate: Math.round(averageHeartRate || 0)
             });
             
             source = 'live';
-            console.log(`[WHOOP TODAY] user=${userId} date=${todayDate} source=${source} values: rec=${Math.round(freshData.recovery_score)}% sleepScore=${Math.round(freshData.sleep_score)}% hours=${freshData.sleep_hours} strain=${freshData.strain} hrv=${Math.round(freshData.hrv)} rhr=${Math.round(freshData.resting_heart_rate)}`);
+            console.log(`[WHOOP TODAY] user=${userId} date=${todayDate} source=${source} values: rec=${Math.round(recoveryScore)}% sleepScore=${Math.round(sleepScore)}% hours=${sleepHours} strain=${strain} hrv=${Math.round(hrv)} rhr=${Math.round(restingHeartRate)}`);
             
             return res.json({
-              recovery_score: freshData.recovery_score,
-              sleep_score: freshData.sleep_score,
-              sleep_hours: freshData.sleep_hours,
-              strain: freshData.strain,
-              resting_heart_rate: freshData.resting_heart_rate,
-              hrv: Math.round(freshData.hrv),
+              recovery_score: recoveryScore,
+              sleep_score: sleepScore,
+              sleep_hours: sleepHours,
+              strain,
+              resting_heart_rate: restingHeartRate,
+              hrv: Math.round(hrv),
               date: todayDate,
               user_id: userId,
               timestamp: new Date().toISOString(),
               source: 'live'
             });
           }
-        } catch (fetchError: any) {
-          console.log(`[WHOOP TODAY] Live fetch failed: ${fetchError.message}`);
+        } catch (fetchError) {
+          const fetchMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+          console.log(`[WHOOP TODAY] Live fetch failed: ${fetchMessage}`);
           // Continue to cache fallback
         }
       }
@@ -1129,7 +2402,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             recovery_score: cachedData.recoveryScore,
             sleep_score: cachedData.sleepScore,
             sleep_hours: cachedData.sleepHours || null,
-            strain: cachedData.strainScore / 10, // Convert back from stored int×10
+            strain: cachedData.strainScore,
             resting_heart_rate: cachedData.restingHeartRate,
             hrv: cachedData.hrv || null,
             date: todayDate,
@@ -1146,11 +2419,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         date: todayDate
       });
       
-    } catch (error: any) {
-      console.error('[WHOOP TODAY] Error:', error.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP TODAY] Error:', message);
       res.status(500).json({ 
         error: 'Failed to fetch WHOOP data',
-        details: error.message
+        details: message
       });
     }
   });
@@ -1207,11 +2481,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[N8N ENDPOINT] WHOOP data retrieved successfully for n8n');
       res.json(result);
-    } catch (error: any) {
-      console.error('[N8N ENDPOINT] n8n WHOOP fetch failed:', error.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[N8N ENDPOINT] n8n WHOOP fetch failed:', message);
       
       // Check if it's a token-related error and provide helpful message
-      if (error.message.includes('token') || error.message.includes('access')) {
+      if (message.includes('token') || message.includes('access')) {
         return res.status(401).json({ 
           error: 'WHOOP authentication failed',
           message: 'Please visit /api/whoop/login to re-authenticate with WHOOP',
@@ -1221,7 +2496,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       res.status(500).json({ 
         error: 'Failed to fetch WHOOP data',
-        message: error.message
+        message
       });
     }
   });
@@ -1265,8 +2540,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           new_expires_at: refreshedToken.expires_at,
           refresh_worked: true
         });
-      } catch (refreshError: any) {
-        console.error('[TOKEN REFRESH TEST] Token refresh failed:', refreshError.message);
+      } catch (refreshError) {
+        const refreshMessage = refreshError instanceof Error ? refreshError.message : String(refreshError);
+        console.error('[TOKEN REFRESH TEST] Token refresh failed:', refreshMessage);
         
         // Restore original token
         await whoopTokenStorage.setToken(defaultUserId, currentToken);
@@ -1274,16 +2550,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         res.json({
           success: false,
           message: 'Token refresh failed',
-          error: refreshError.message,
+          error: refreshMessage,
           refresh_worked: false,
-          reason: refreshError.message.includes('refresh token') ? 'No refresh token available' : 'Refresh API failed'
+          reason: refreshMessage.includes('refresh token') ? 'No refresh token available' : 'Refresh API failed'
         });
       }
-    } catch (error: any) {
-      console.error('[TOKEN REFRESH TEST] Test failed:', error.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TOKEN REFRESH TEST] Test failed:', message);
       res.status(500).json({ 
         error: 'Token refresh test failed',
-        message: error.message
+        message
       });
     }
   });
@@ -1304,8 +2581,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: 'Test JWT token generated successfully'
       });
     } catch (error) {
-      console.error('[TEST] JWT generation error:', error);
-      res.status(500).json({ error: 'Failed to generate test JWT token' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TEST] JWT generation error:', message);
+      res.status(500).json({ error: 'Failed to generate test JWT token', details: message });
     }
   });
 
@@ -1361,8 +2639,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.redirect(`/#token=${authToken}`);
       
     } catch (error) {
-      console.error('[TEST] Simulated callback error:', error);
-      res.status(500).json({ error: 'Test callback failed', details: error.message });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TEST] Simulated callback error:', message);
+      res.status(500).json({ error: 'Test callback failed', details: message });
     }
   });
 
@@ -1370,6 +2649,422 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/whoop/weekly', requireJWTAuth, async (req, res) => {
     try {
       console.log('Fetching weekly WHOOP averages...');
+      
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
+      
+      // Token validation using user-specific token
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const tokenData = await whoopTokenStorage.getToken(userId);
+      if (!tokenData?.access_token) {
+        return res.status(401).json({ error: 'Missing WHOOP access token for user' });
+      }
+
+      // Try WHOOP API first, fallback to cache if needed
+      let weeklyData;
+      const isTokenValid = whoopTokenStorage.isTokenValid(tokenData);
+
+      if (!isTokenValid) {
+        console.warn('WHOOP access token has expired. Using cache fallback only.');
+      }
+
+      try {
+        if (isTokenValid) {
+          weeklyData = await whoopApiService.getWeeklyAverages(userId);
+        } else {
+          throw new Error('Token expired, skip to cache');
+        }
+        
+        // If API succeeds but returns null values, try cache fallback
+        if (!weeklyData || (weeklyData.avgRecovery === null && weeklyData.avgStrain === null && weeklyData.avgSleep === null && weeklyData.avgHRV === null)) {
+          console.log('WHOOP API returned null values, trying cache fallback');
+          throw new Error('No data from WHOOP API');
+        }
+        
+        console.log('Weekly WHOOP averages retrieved successfully from API');
+      } catch (apiError) {
+        const apiMessage = apiError instanceof Error ? apiError.message : String(apiError);
+        console.log('Failed to get weekly data from WHOOP API, trying cache fallback', apiMessage ? `(${apiMessage})` : '');
+        
+        // Get 7 days of cached data as fallback using timezone-aware dates
+        const tz = process.env.USER_TZ || 'Europe/Zurich';
+        const cachedData = [];
+        for (let i = 0; i < 7; i++) {
+          const dateIso = DateTime.now().setZone(tz).minus({ days: i }).toISODate();
+          if (!dateIso) {
+            continue;
+          }
+          const dayData = await storage.getWhoopDataByUserAndDate(userId, dateIso);
+          if (dayData) cachedData.push(dayData);
+        }
+        
+        if (cachedData && cachedData.length > 0) {
+          // Calculate averages from cached data
+          const recoverySum = cachedData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0);
+          const strainSum = cachedData.reduce((sum, d) => sum + (d.strainScore || 0), 0);
+          const sleepSum = cachedData.reduce((sum, d) => sum + (d.sleepScore || 0), 0);
+          const hrvSum = cachedData.reduce((sum, d) => sum + (d.hrv || 0), 0);
+          
+          const count = cachedData.length;
+          weeklyData = {
+            avgRecovery: recoverySum > 0 ? Math.round(recoverySum / count) : null,
+            avgStrain: strainSum > 0 ? Math.round((strainSum / count) * 10) / 10 : null,
+            avgSleep: sleepSum > 0 ? Math.round(sleepSum / count) : null,
+            avgHRV: hrvSum > 0 ? Math.round(hrvSum / count) : null
+          };
+          const used = 'cache-only';
+          console.log(`[WHOOP WEEKLY] user=${userId} tz=${tz} used=${used} avg: rec=${weeklyData.avgRecovery}, strain=${weeklyData.avgStrain}, sleep=${weeklyData.avgSleep}, hrv=${weeklyData.avgHRV}`);
+        } else {
+          weeklyData = { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
+        }
+      }
+      
+      // Convert camelCase to snake_case for mobile app compatibility
+      const response = {
+        avg_recovery: weeklyData.avgRecovery,
+        avg_strain: weeklyData.avgStrain,
+        avg_sleep: weeklyData.avgSleep,
+        avg_hrv: weeklyData.avgHRV
+      };
+      res.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error in /api/whoop/weekly:', message);
+
+      const maybeAxiosError = error as {
+        response?: { status?: number; data?: unknown };
+        config?: { url?: string };
+      };
+
+      if (maybeAxiosError.response) {
+        console.error('WHOOP API Error Response:', {
+          status: maybeAxiosError.response.status,
+          data: maybeAxiosError.response.data,
+          endpoint: maybeAxiosError.config?.url,
+        });
+      }
+      
+      res.status(500).json({
+        error: 'Failed to fetch weekly WHOOP averages',
+        details: message
+      });
+    }
+  });
+
+  // WHOOP monthly-comparison endpoint (current week vs. month ago)
+  app.get('/api/whoop/monthly-comparison', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('[WHOOP MONTHLY-COMPARISON] Fetching current week vs. month ago comparison...');
+
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+
+      // Helper function to get or fetch data for a date
+      const getOrFetchData = async (dateStr: string) => {
+        // Try cache first
+        let data = await storage.getWhoopDataByUserAndDate(userId, dateStr);
+
+        if (!data) {
+          // Not in cache, try to fetch from WHOOP API
+          console.log(`[WHOOP MONTHLY-COMPARISON] No cached data for ${dateStr}, fetching from API...`);
+          try {
+            const apiData = await whoopApiService.getDataForDate(userId, dateStr);
+            if (apiData && (apiData.recoveryScore || apiData.sleepScore || apiData.strainScore)) {
+              // Cache the fetched data
+              await storage.upsertWhoopData({
+                userId,
+                date: dateStr,
+                recoveryScore: Math.round(apiData.recoveryScore || 0),
+                sleepScore: Math.round(apiData.sleepScore || 0),
+                strainScore: apiData.strainScore || 0,
+                hrv: apiData.hrv || 0,
+                restingHeartRate: Math.round(apiData.restingHeartRate || 0),
+              });
+
+              // Return the cached data after upserting
+              data = await storage.getWhoopDataByUserAndDate(userId, dateStr);
+            }
+          } catch (fetchError) {
+            console.log(`[WHOOP MONTHLY-COMPARISON] Failed to fetch data for ${dateStr}:`, fetchError instanceof Error ? fetchError.message : String(fetchError));
+          }
+        }
+
+        return data;
+      };
+
+      // Calculate averages for current 7 days (days 0-6)
+      const currentWeekData = [];
+      for (let i = 0; i < 7; i++) {
+        const dateIso = DateTime.now().setZone(tz).minus({ days: i }).toISODate();
+        if (dateIso) {
+          const dayData = await getOrFetchData(dateIso);
+          if (dayData) currentWeekData.push(dayData);
+        }
+      }
+
+      // Calculate averages for ~month ago (days 23-29, ~4 weeks ago)
+      const previousMonthData = [];
+      for (let i = 23; i <= 29; i++) {
+        const dateIso = DateTime.now().setZone(tz).minus({ days: i }).toISODate();
+        if (dateIso) {
+          const dayData = await getOrFetchData(dateIso);
+          if (dayData) previousMonthData.push(dayData);
+        }
+      }
+
+      // Calculate current week averages
+      const currentCount = currentWeekData.length;
+      const currentAvg = {
+        sleep: currentCount > 0 ? Math.round(currentWeekData.reduce((sum, d) => sum + (d.sleepScore || 0), 0) / currentCount) : null,
+        recovery: currentCount > 0 ? Math.round(currentWeekData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0) / currentCount) : null,
+        strain: currentCount > 0 ? Math.round((currentWeekData.reduce((sum, d) => sum + (d.strainScore || 0), 0) / currentCount) * 10) / 10 : null,
+        hrv: currentCount > 0 ? Math.round(currentWeekData.reduce((sum, d) => sum + (d.hrv || 0), 0) / currentCount) : null,
+      };
+
+      // Calculate previous month averages
+      const prevCount = previousMonthData.length;
+      const prevAvg = {
+        sleep: prevCount > 0 ? Math.round(previousMonthData.reduce((sum, d) => sum + (d.sleepScore || 0), 0) / prevCount) : null,
+        recovery: prevCount > 0 ? Math.round(previousMonthData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0) / prevCount) : null,
+        strain: prevCount > 0 ? Math.round((previousMonthData.reduce((sum, d) => sum + (d.strainScore || 0), 0) / prevCount) * 10) / 10 : null,
+        hrv: prevCount > 0 ? Math.round(previousMonthData.reduce((sum, d) => sum + (d.hrv || 0), 0) / prevCount) : null,
+      };
+
+      // Build response with averages and deltas (percentages for sleep/recovery; raw values for strain/HRV)
+      const response = {
+        avg_sleep: currentAvg.sleep,
+        avg_recovery: currentAvg.recovery,
+        avg_strain: currentAvg.strain,
+        avg_hrv: currentAvg.hrv,
+        sleep_delta: (currentAvg.sleep !== null && prevAvg.sleep !== null && prevAvg.sleep !== 0)
+          ? Math.round(((currentAvg.sleep - prevAvg.sleep) / prevAvg.sleep) * 100) : null,
+        recovery_delta: (currentAvg.recovery !== null && prevAvg.recovery !== null && prevAvg.recovery !== 0)
+          ? Math.round(((currentAvg.recovery - prevAvg.recovery) / prevAvg.recovery) * 100) : null,
+        strain_delta: (currentAvg.strain !== null && prevAvg.strain !== null)
+          ? Number((currentAvg.strain - prevAvg.strain).toFixed(1)) : null,
+        hrv_delta: (currentAvg.hrv !== null && prevAvg.hrv !== null)
+          ? Math.round(currentAvg.hrv - prevAvg.hrv) : null,
+      };
+
+      console.log(`[WHOOP MONTHLY-COMPARISON] user=${userId} currentWeek(${currentCount} days) vs prevMonth(${prevCount} days) deltas: sleep=${response.sleep_delta}, recovery=${response.recovery_delta}, strain=${response.strain_delta}, hrv=${response.hrv_delta}`);
+      res.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP MONTHLY-COMPARISON] Error:', message);
+      res.status(500).json({ error: 'Failed to fetch monthly comparison data', details: message });
+    }
+  });
+
+  // WHOOP yesterday endpoint
+  app.get('/api/whoop/yesterday', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('Fetching yesterday WHOOP data...');
+      
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
+      
+      // Token validation using user-specific token
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const tokenData = await whoopTokenStorage.getToken(userId);
+      if (!tokenData?.access_token) {
+        return res.status(401).json({ error: 'Missing WHOOP access token for user' });
+      }
+
+      // Try WHOOP API first, fallback to cache if needed
+      let yesterdayData;
+      const isTokenValid = whoopTokenStorage.isTokenValid(tokenData);
+
+      if (!isTokenValid) {
+        console.warn('WHOOP access token has expired. Using cache fallback only.');
+      }
+
+      try {
+        if (isTokenValid) {
+          yesterdayData = await whoopApiService.getYesterdaysData(userId);
+        } else {
+          throw new Error('Token expired, skip to cache');
+        }
+        
+        // If API succeeds but returns null values, try cache fallback
+        if (!yesterdayData || (yesterdayData.recovery_score === null && yesterdayData.strain === null && yesterdayData.sleep_score === null && yesterdayData.hrv === null)) {
+          console.log('WHOOP API returned null values for yesterday, trying cache fallback');
+          throw new Error('No data from WHOOP API');
+        }
+        
+        console.log('Yesterday WHOOP data retrieved successfully from API');
+      } catch (apiError) {
+        const apiMessage = apiError instanceof Error ? apiError.message : String(apiError);
+        console.log('Failed to get yesterday data from WHOOP API, trying cache fallback', apiMessage ? `(${apiMessage})` : '');
+        
+        // Get yesterday's cached data as fallback using timezone-aware dates
+        const tz = process.env.USER_TZ || 'Europe/Zurich';
+        const yesterday = DateTime.now().setZone(tz).minus({ days: 1 }).toISODate();
+        
+        if (yesterday) {
+          const dayData = await storage.getWhoopDataByUserAndDate(userId, yesterday);
+          if (dayData) {
+            yesterdayData = {
+              recovery_score: dayData.recoveryScore || null,
+              strain: dayData.strainScore || null,
+              sleep_score: dayData.sleepScore || null,
+              hrv: dayData.hrv || null
+            };
+            console.log(`[WHOOP YESTERDAY] user=${userId} tz=${tz} used=cache-only data:`, yesterdayData);
+          } else {
+            yesterdayData = { recovery_score: null, strain: null, sleep_score: null, hrv: null };
+          }
+        } else {
+          yesterdayData = { recovery_score: null, strain: null, sleep_score: null, hrv: null };
+        }
+      }
+      
+      res.json(yesterdayData);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error in /api/whoop/yesterday:', message);
+
+      const maybeAxiosError = error as {
+        response?: { status?: number; data?: unknown };
+        config?: { url?: string };
+      };
+
+      if (maybeAxiosError.response) {
+        res.status(maybeAxiosError.response.status || 500).json({
+          error: 'WHOOP API error',
+          status: maybeAxiosError.response.status,
+          data: maybeAxiosError.response.data,
+          endpoint: maybeAxiosError.config?.url,
+        });
+      }
+
+      res.status(500).json({ 
+        error: 'Failed to fetch yesterday WHOOP data',
+        details: message
+      });
+    }
+  });
+
+  // WHOOP yesterday-comparison endpoint (yesterday vs. 7 days ago)
+  app.get('/api/whoop/yesterday-comparison', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('[WHOOP YESTERDAY-COMPARISON] Fetching yesterday vs. last week comparison...');
+
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Fetch recent cycles directly from WHOOP API (like getWeeklyAverages does)
+      // cycles[0] = today (ongoing), cycles[1] = yesterday (completed), cycles[8] = 7 days ago
+      const BASE = 'https://api.prod.whoop.com/developer/v1';
+      const headers = await whoopApiService.authHeader(userId);
+      const cyclesResponse = await axios.get(`${BASE}/cycle?limit=10`, { headers });
+
+      if (!cyclesResponse.data?.records || cyclesResponse.data.records.length < 2) {
+        console.log('[WHOOP YESTERDAY-COMPARISON] Not enough cycles available');
+        return res.json({
+          sleep_score: null,
+          recovery_score: null,
+          strain: null,
+          hrv: null,
+          sleep_delta: null,
+          recovery_delta: null,
+          strain_delta: null,
+          hrv_delta: null,
+        });
+      }
+
+      const cycles = cyclesResponse.data.records;
+
+      // Yesterday's completed cycle is cycles[1]
+      const yesterdayCycle = cycles[1];
+      // Last week's cycle is cycles[8] if available
+      const lastWeekCycle = cycles.length >= 9 ? cycles[8] : null;
+
+      console.log(`[WHOOP YESTERDAY-COMPARISON] Using cycle[1] for yesterday: ${yesterdayCycle.id}, strain=${yesterdayCycle.score?.strain}`);
+      if (lastWeekCycle) {
+        console.log(`[WHOOP YESTERDAY-COMPARISON] Using cycle[8] for last week: ${lastWeekCycle.id}, strain=${lastWeekCycle.score?.strain}`);
+      }
+
+      // Get yesterday's data
+      const yesterdayRecovery = await whoopApiService.getRecovery(yesterdayCycle.id, userId);
+      let yesterdaySleepScore = null;
+      if (yesterdayRecovery?.sleep_id) {
+        try {
+          const sleepResponse = await axios.get(`${BASE}/activity/sleep/${yesterdayRecovery.sleep_id}`, { headers });
+          if (sleepResponse.status === 200 && sleepResponse.data?.score?.sleep_performance_percentage !== undefined) {
+            yesterdaySleepScore = Math.min(Math.max(sleepResponse.data.score.sleep_performance_percentage, 0), 100);
+          }
+        } catch (err) {
+          console.warn('[WHOOP YESTERDAY-COMPARISON] Failed to fetch yesterday sleep data');
+        }
+      }
+
+      // Get last week's data if available
+      let lastWeekRecovery = null;
+      let lastWeekSleepScore = null;
+      if (lastWeekCycle) {
+        lastWeekRecovery = await whoopApiService.getRecovery(lastWeekCycle.id, userId);
+        if (lastWeekRecovery?.sleep_id) {
+          try {
+            const sleepResponse = await axios.get(`${BASE}/activity/sleep/${lastWeekRecovery.sleep_id}`, { headers });
+            if (sleepResponse.status === 200 && sleepResponse.data?.score?.sleep_performance_percentage !== undefined) {
+              lastWeekSleepScore = Math.min(Math.max(sleepResponse.data.score.sleep_performance_percentage, 0), 100);
+            }
+          } catch (err) {
+            console.warn('[WHOOP YESTERDAY-COMPARISON] Failed to fetch last week sleep data');
+          }
+        }
+      }
+
+      // Extract values
+      const yesterdaySleep = yesterdaySleepScore;
+      const yesterdayRecoveryScore = yesterdayRecovery?.score?.recovery_score || null;
+      const yesterdayStrain = yesterdayCycle.score?.strain || null;
+      const yesterdayHRV = yesterdayRecovery?.score?.hrv_rmssd_milli || null;
+
+      const lastWeekSleep = lastWeekSleepScore;
+      const lastWeekRecoveryScore = lastWeekRecovery?.score?.recovery_score || null;
+      const lastWeekStrain = lastWeekCycle?.score?.strain || null;
+      const lastWeekHRV = lastWeekRecovery?.score?.hrv_rmssd_milli || null;
+
+      // Build response with deltas
+      const response = {
+        sleep_score: yesterdaySleep,
+        recovery_score: yesterdayRecoveryScore,
+        strain: yesterdayStrain,
+        hrv: yesterdayHRV,
+        sleep_delta: (yesterdaySleep !== null && lastWeekSleep !== null && lastWeekSleep !== 0)
+          ? Math.round(((yesterdaySleep - lastWeekSleep) / lastWeekSleep) * 100) : null,
+        recovery_delta: (yesterdayRecoveryScore !== null && lastWeekRecoveryScore !== null && lastWeekRecoveryScore !== 0)
+          ? Math.round(((yesterdayRecoveryScore - lastWeekRecoveryScore) / lastWeekRecoveryScore) * 100) : null,
+        strain_delta: (yesterdayStrain !== null && lastWeekStrain !== null)
+          ? Number((yesterdayStrain - lastWeekStrain).toFixed(1)) : null,
+        hrv_delta: (yesterdayHRV !== null && lastWeekHRV !== null)
+          ? Math.round(yesterdayHRV - lastWeekHRV) : null,
+      };
+
+      console.log(`[WHOOP YESTERDAY-COMPARISON] user=${userId} yesterday_strain=${response.strain} lastWeek_strain=${lastWeekStrain} delta=${response.strain_delta}`);
+      res.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP YESTERDAY-COMPARISON] Error:', message);
+      res.status(500).json({ error: 'Failed to fetch yesterday comparison data', details: message });
+    }
+  });
+
+  // WHOOP insights endpoint
+  app.get('/api/whoop/insights', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('Fetching WHOOP insights...');
       
       // Get current user ID from session
       const userId = getCurrentUserId(req);
@@ -1392,69 +3087,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
-      if (!userId) {
-        return res.status(401).json({ error: 'Authentication required' });
-      }
       // Try WHOOP API first, fallback to cache if needed
-      let weeklyData;
+      let insightsData;
       try {
-        weeklyData = await whoopApiService.getWeeklyAverages(userId);
+        insightsData = await whoopApiService.getInsightsData(userId);
         
         // If API succeeds but returns null values, try cache fallback
-        if (!weeklyData || (weeklyData.avgRecovery === null && weeklyData.avgStrain === null && weeklyData.avgSleep === null && weeklyData.avgHRV === null)) {
-          console.log('WHOOP API returned null values, trying cache fallback');
+        if (!insightsData || (insightsData.sleep_hours === null && insightsData.resting_heart_rate === null)) {
+          console.log('WHOOP API returned null values for insights, trying cache fallback');
           throw new Error('No data from WHOOP API');
         }
         
-        console.log('Weekly WHOOP averages retrieved successfully from API');
-      } catch (error: any) {
-        console.log('Failed to get weekly data from WHOOP API, trying cache fallback');
+        console.log('WHOOP insights retrieved successfully from API');
+      } catch (apiError) {
+        const apiMessage = apiError instanceof Error ? apiError.message : String(apiError);
+        console.log('Failed to get insights from WHOOP API, trying cache fallback', apiMessage ? `(${apiMessage})` : '');
         
-        // Get 7 days of cached data as fallback using timezone-aware dates
+        // Get today's cached data as fallback for insights
         const tz = process.env.USER_TZ || 'Europe/Zurich';
-        const cachedData = [];
-        for (let i = 0; i < 7; i++) {
-          const date = DateTime.now().setZone(tz).minus({ days: i }).toISODate();
-          const dayData = await storage.getWhoopDataByUserAndDate(userId, date);
-          if (dayData) cachedData.push(dayData);
-        }
+        const today = DateTime.now().setZone(tz).toISODate();
         
-        if (cachedData && cachedData.length > 0) {
-          // Calculate averages from cached data
-          const recoverySum = cachedData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0);
-          const strainSum = cachedData.reduce((sum, d) => sum + (d.strainScore ? d.strainScore / 10 : 0), 0); // Convert back from stored ×10
-          const sleepSum = cachedData.reduce((sum, d) => sum + (d.sleepScore || 0), 0);
-          const hrvSum = cachedData.reduce((sum, d) => sum + (d.hrv || 0), 0);
-          
-          const count = cachedData.length;
-          weeklyData = {
-            avgRecovery: recoverySum > 0 ? Math.round(recoverySum / count) : null,
-            avgStrain: strainSum > 0 ? Math.round((strainSum / count) * 10) / 10 : null,
-            avgSleep: sleepSum > 0 ? Math.round(sleepSum / count) : null,
-            avgHRV: hrvSum > 0 ? Math.round(hrvSum / count) : null
-          };
-          const used = 'cache-only';
-          console.log(`[WHOOP WEEKLY] user=${userId} tz=${tz} used=${used} avg: rec=${weeklyData.avgRecovery}, strain=${weeklyData.avgStrain}, sleep=${weeklyData.avgSleep}, hrv=${weeklyData.avgHRV}`);
+        if (today) {
+          const dayData = await storage.getWhoopDataByUserAndDate(userId, today);
+          if (dayData) {
+            insightsData = {
+              sleep_hours: dayData.sleepHours || null,
+              resting_heart_rate: dayData.restingHeartRate || null
+            };
+            console.log(`[WHOOP INSIGHTS] user=${userId} tz=${tz} used=cache-only data:`, insightsData);
+          } else {
+            insightsData = { sleep_hours: null, resting_heart_rate: null };
+          }
         } else {
-          weeklyData = { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
+          insightsData = { sleep_hours: null, resting_heart_rate: null };
         }
       }
       
-      res.json(weeklyData);
-    } catch (error: any) {
-      console.error('Error in /api/whoop/weekly:', error.message);
-      
-      if (error.response) {
-        console.error('WHOOP API Error Response:', {
-          status: error.response.status,
-          data: error.response.data,
-          endpoint: error.config?.url
+      res.json(insightsData);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error in /api/whoop/insights:', message);
+
+      const maybeAxiosError = error as {
+        response?: { status?: number; data?: unknown };
+        config?: { url?: string };
+      };
+
+      if (maybeAxiosError.response) {
+        res.status(maybeAxiosError.response.status || 500).json({
+          error: 'WHOOP API error',
+          status: maybeAxiosError.response.status,
+          data: maybeAxiosError.response.data,
+          endpoint: maybeAxiosError.config?.url,
         });
       }
-      
+
       res.status(500).json({ 
-        error: 'Failed to fetch weekly WHOOP averages',
-        details: error.message
+        error: 'Failed to fetch WHOOP insights',
+        details: message
       });
     }
   });
@@ -1476,9 +3166,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         deleted: true,
         date: todayDate
       });
-    } catch (error: any) {
-      console.error('Error deleting today cache:', error.message);
-      res.status(500).json({ error: 'Failed to delete cache' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error deleting today cache:', message);
+      res.status(500).json({ error: 'Failed to delete cache', details: message });
     }
   });
 
@@ -1502,9 +3193,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         deleted: true,
         date: date
       });
-    } catch (error: any) {
-      console.error('Error deleting day cache:', error.message);
-      res.status(500).json({ error: 'Failed to delete cache' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error deleting day cache:', message);
+      res.status(500).json({ error: 'Failed to delete cache', details: message });
     }
   });
 
@@ -1547,9 +3239,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         res.status(400).json({ error: 'source=live parameter required for raw endpoint' });
       }
-    } catch (error: any) {
-      console.error('Error fetching raw WHOOP data:', error.message);
-      res.status(500).json({ error: 'Failed to fetch raw data', details: error.message });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching raw WHOOP data:', message);
+      res.status(500).json({ error: 'Failed to fetch raw data', details: message });
     }
   });
 
@@ -1573,11 +3266,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         period_days: days,
         ...averages
       });
-    } catch (error: any) {
-      console.error('Error in /api/whoop/summary:', error.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error in /api/whoop/summary:', message);
       res.status(500).json({ 
         error: 'Failed to calculate WHOOP summary',
-        details: error.message
+        details: message
       });
     }
   });
@@ -1610,13 +3304,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       console.log(`Uploaded ${uploadedMeals.length} meal images`);
-      res.json({ 
+
+      // Auto-trigger FitScore calculation if 2+ meals uploaded today
+      try {
+        const { fitScoreService } = await import('./services/fitScoreService');
+        await fitScoreService.checkMealTrigger(userId, today);
+      } catch (error) {
+        console.warn('[MEAL UPLOAD] FitScore auto-trigger failed:', error);
+      }
+
+      res.json({
         message: `Successfully uploaded ${uploadedMeals.length} meal images`,
-        meals: uploadedMeals 
+        meals: uploadedMeals
       });
     } catch (error) {
-      console.error('Error uploading meals:', error);
-      res.status(500).json({ error: 'Failed to upload meal images' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error uploading meals:', message);
+      res.status(500).json({ error: 'Failed to upload meal images', details: message });
     }
   });
 
@@ -1624,19 +3328,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/meals/today', async (req, res) => {
     try {
       console.log('Fetching today\'s meals...');
-      
+
       const today = getTodayDate();
       const meals = await storage.getMealsByDate(today);
-      
+
       // Return full URLs including domain
       const baseUrl = req.protocol + '://' + req.get('host');
       const mealUrls = meals.map(meal => `${baseUrl}/uploads/${meal.filename}`);
-      
+
       console.log(`Found ${meals.length} meals for today`);
       res.json(mealUrls);
     } catch (error) {
-      console.error('Error fetching meals:', error);
-      res.status(500).json({ error: 'Failed to fetch today\'s meals' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching meals:', message);
+      res.status(500).json({ error: 'Failed to fetch today\'s meals', details: message });
+    }
+  });
+
+  // Get yesterday's meals endpoint
+  app.get('/api/meals/yesterday', async (req, res) => {
+    try {
+      console.log('Fetching yesterday\'s meals...');
+
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const meals = await storage.getMealsByDate(yesterdayStr);
+
+      // Return full URLs including domain
+      const baseUrl = req.protocol + '://' + req.get('host');
+      const mealUrls = meals.map(meal => `${baseUrl}/uploads/${meal.filename}`);
+
+      console.log(`Found ${meals.length} meals for yesterday (${yesterdayStr})`);
+      res.json(mealUrls);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching yesterday\'s meals:', message);
+      res.status(500).json({ error: 'Failed to fetch yesterday\'s meals', details: message });
     }
   });
 
@@ -1646,8 +3374,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const meals = await storage.getAllMeals();
       res.json(meals);
     } catch (error) {
-      console.error('Error fetching all meals:', error);
-      res.status(500).json({ error: 'Failed to fetch meals' });
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching all meals:', message);
+      res.status(500).json({ error: 'Failed to fetch meals', details: message });
     }
   });
 
@@ -1865,7 +3594,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(401).json({ error: 'Authentication required' });
       }
       const calendars = await storage.getUserCalendars(userId);
-      res.json(calendars);
+
+      // Transform to match mobile app expectations (name instead of calendarName)
+      const transformedCalendars = calendars.map(cal => ({
+        id: cal.id,
+        calendar_url: cal.calendarUrl,
+        name: cal.calendarName, // Map calendarName to name
+        is_active: cal.isActive
+      }));
+
+      res.json(transformedCalendars);
     } catch (error) {
       console.error('Error fetching calendars:', error);
       res.status(500).json({ error: 'Failed to fetch calendars' });
@@ -1928,7 +3666,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const id = parseInt(req.params.id);
       const updates = req.body;
-      
+
       const calendar = await storage.updateUserCalendar(id, updates);
       res.json(calendar);
     } catch (error) {
@@ -1936,6 +3674,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ error: 'Failed to update calendar' });
     }
   });
+
+  // Chat summarization endpoints
+  console.log('[ROUTE] POST /api/chat/summarize');
+  app.post('/api/chat/summarize', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[CHAT SUMMARIZE] Summarizing conversation for user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      await chatSummarizationService.summarizeUserConversation(userId);
+
+      res.json({
+        message: 'Conversation summarized successfully',
+        userId
+      });
+    } catch (error) {
+      console.error('[CHAT SUMMARIZE] Error:', error);
+      res.status(500).json({
+        error: 'Failed to summarize conversation',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Admin endpoint to trigger summarization for all users (for cron jobs)
+  console.log('[ROUTE] POST /api/chat/summarize-all');
+  app.post('/api/chat/summarize-all', async (req, res) => {
+    try {
+      // Optional: Add admin authentication or API key check here
+      const authHeader = req.headers.authorization;
+      const adminKey = process.env.ADMIN_API_KEY || 'default-admin-key-change-me';
+
+      if (authHeader !== `Bearer ${adminKey}`) {
+        return res.status(401).json({ error: 'Unauthorized - admin key required' });
+      }
+
+      console.log('[CHAT SUMMARIZE ALL] Starting batch summarization');
+
+      await chatSummarizationService.summarizeAllUsers();
+
+      res.json({
+        message: 'Successfully summarized conversations for all active users'
+      });
+    } catch (error) {
+      console.error('[CHAT SUMMARIZE ALL] Error:', error);
+      res.status(500).json({
+        error: 'Failed to summarize all conversations',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Onboarding routes
+  console.log('[ROUTE] Importing onboarding routes');
+  const onboardingRoutes = (await import('./routes/onboarding')).default;
+  app.use('/api/onboarding', onboardingRoutes);
+  console.log('[ROUTE] GET /api/onboarding');
+  console.log('[ROUTE] POST /api/onboarding');
+  console.log('[ROUTE] GET /api/onboarding/questions');
+  console.log('[ROUTE] GET /api/onboarding/status');
+  console.log('[ROUTE] POST /api/onboarding/reset');
 
   // Serve ai-plugin.json for Custom GPT integration
   app.get('/ai-plugin.json', (req, res) => {

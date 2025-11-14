@@ -177,11 +177,29 @@ export class WhoopApiService {
       });
     }
 
-    // Check if token is expired and needs refresh
+    // Check if token is expired or expiring soon (within 10 minutes) and needs refresh
     const currentTime = Math.floor(Date.now() / 1000);
-    if (tokenData.expires_at && tokenData.expires_at < currentTime) {
-      console.log('[TOKEN VALIDATION] Token expired for user:', userId, 'expired at:', new Date(tokenData.expires_at * 1000));
-      
+    const refreshBufferSeconds = 10 * 60; // Refresh 10 minutes before expiration
+
+    const expiresAtSeconds = typeof tokenData.expires_at === 'number'
+      ? tokenData.expires_at
+      : tokenData.expires_at instanceof Date
+        ? Math.floor(tokenData.expires_at.getTime() / 1000)
+        : null;
+
+    // Check if token is expired or will expire within the buffer time
+    const needsRefresh = expiresAtSeconds && expiresAtSeconds < (currentTime + refreshBufferSeconds);
+
+    if (needsRefresh) {
+      const isAlreadyExpired = expiresAtSeconds < currentTime;
+      const timeUntilExpiry = expiresAtSeconds ? expiresAtSeconds - currentTime : 0;
+
+      if (isAlreadyExpired) {
+        console.log('[TOKEN VALIDATION] Token expired for user:', userId, 'expired at:', new Date(expiresAtSeconds * 1000));
+      } else {
+        console.log(`[TOKEN VALIDATION] Token expiring soon for user: ${userId} (${Math.floor(timeUntilExpiry / 60)} minutes remaining)`);
+      }
+
       if (!tokenData.refresh_token) {
         console.log('[TOKEN VALIDATION] No refresh token available for user:', userId);
         throw new WhoopApiError({
@@ -192,16 +210,23 @@ export class WhoopApiService {
       }
 
       try {
-        console.log('[TOKEN VALIDATION] Refreshing expired token for user:', userId);
+        console.log('[TOKEN VALIDATION] Refreshing token for user:', userId);
         const refreshedTokenData = await this.refreshToken(tokenData.refresh_token, userId);
-        
+
         // Store the refreshed token
         await whoopTokenStorage.setToken(userId, refreshedTokenData);
         console.log('[TOKEN VALIDATION] Token refreshed and stored for user:', userId);
-        
+
         return refreshedTokenData;
       } catch (refreshError: any) {
         console.error('[TOKEN VALIDATION] Token refresh failed for user:', userId, refreshError.message);
+
+        // If refresh failed but token is still technically valid, continue with existing token
+        if (!isAlreadyExpired) {
+          console.log('[TOKEN VALIDATION] Refresh failed but token still valid, continuing with existing token');
+          return tokenData;
+        }
+
         throw new WhoopApiError({
           type: WhoopErrorType.AUTHENTICATION_ERROR,
           message: 'Failed to refresh expired WHOOP token',
@@ -217,16 +242,13 @@ export class WhoopApiService {
   async exchangeCodeForToken(code: string): Promise<any> {
     const clientId = process.env.WHOOP_CLIENT_ID;
     const clientSecret = process.env.WHOOP_CLIENT_SECRET;
-    
-    // Use production redirect URI since we have registered WHOOP credentials  
-    const isProduction = true; // Use registered redirect URI
-    const redirectUri = isProduction 
-      ? 'https://health-data-hub.replit.app/api/whoop/callback'
-      : 'http://localhost:5000/api/whoop/callback';
 
     if (!clientId || !clientSecret) {
       throw new Error('Missing WHOOP client credentials');
     }
+
+    const { redirectUri } = this.resolveRedirectUri();
+    console.log('[WHOOP AUTH] Using redirect URI for token exchange:', redirectUri);
 
     console.log('Starting WHOOP token exchange...');
 
@@ -648,107 +670,119 @@ export class WhoopApiService {
     }
     try {
       const headers = await this.authHeader(userId);
-      
-      // Get cycles from the past 7 days
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 7);
-      
-      const response = await axios.get(
-        `${BASE}/cycle?start=${startDate.toISOString()}&end=${endDate.toISOString()}`, 
-        { headers }
-      );
-      
+
+      // Get last 8 cycles (we'll skip the first one which is today/current)
+      // WHOOP app shows last 7 COMPLETED days, not including today
+      const response = await axios.get(`${BASE}/cycle?limit=8`, { headers });
+
       if (!response.data.records || response.data.records.length === 0) {
-        console.log('No cycles found for weekly averages');
+        console.log('[WHOOP] No cycles found for weekly averages');
         return { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
       }
-      
+
       const cycles = response.data.records;
-      console.log(`Processing ${cycles.length} cycles for weekly averages`);
-      
+      console.log(`[WHOOP] Fetched ${cycles.length} cycles for weekly averages calculation`);
+
+      // Skip first cycle (today/current incomplete cycle) and use next 7
+      const completedCycles = cycles.slice(1, 8);
+      console.log(`[WHOOP] Using ${completedCycles.length} completed cycles (skipping today)`);
+
       const recoveryScores: number[] = [];
       const strainScores: number[] = [];
       const sleepScores: number[] = [];
       const hrvScores: number[] = [];
-      
-      // Process each cycle with rate limiting protection
-      for (let i = 0; i < Math.min(cycles.length, 5); i++) {
-        const cycle = cycles[i];
+
+      // Process the 7 completed cycles
+      for (let i = 0; i < completedCycles.length; i++) {
+        const cycle = completedCycles[i];
         try {
-          // Add delay between API calls to respect rate limits
+          // Add delay between API calls to respect rate limits (increased from 100ms to 250ms)
           if (i > 0) {
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 250));
           }
-          
+
           // Get recovery data
           const recovery = await this.getRecovery(cycle.id, userId);
-          if (recovery?.score?.recovery_score) {
+          if (recovery?.score?.recovery_score !== null && recovery?.score?.recovery_score !== undefined) {
             recoveryScores.push(recovery.score.recovery_score);
           }
-          if (recovery?.score?.hrv_rmssd_milli) {
+          if (recovery?.score?.hrv_rmssd_milli !== null && recovery?.score?.hrv_rmssd_milli !== undefined) {
             hrvScores.push(recovery.score.hrv_rmssd_milli);
           }
-          
+
           // Get strain data from cycle
-          if (cycle.score?.strain) {
+          if (cycle.score?.strain !== null && cycle.score?.strain !== undefined) {
             strainScores.push(cycle.score.strain);
           }
-          
+
           // Get sleep data using sleep_id from recovery data if available
           if (recovery?.sleep_id) {
             try {
-              // Add delay before sleep API call
-              await new Promise(resolve => setTimeout(resolve, 100));
-              
+              // Add delay before sleep API call (increased from 100ms to 250ms)
+              await new Promise(resolve => setTimeout(resolve, 250));
+
               const headers = await this.authHeader(userId);
-              const response = await axios.get(`${BASE}/activity/sleep/${recovery.sleep_id}`, { headers });
-              if (response.status === 200) {
-                const sleepData = response.data;
-                
-                // Get sleep score percentage 
+              const sleepResponse = await axios.get(`${BASE}/activity/sleep/${recovery.sleep_id}`, { headers });
+              if (sleepResponse.status === 200) {
+                const sleepData = sleepResponse.data;
+
+                // Get sleep performance percentage (WHOOP returns 0-100 scale already)
                 if (sleepData.score?.sleep_performance_percentage !== null && sleepData.score?.sleep_performance_percentage !== undefined) {
                   sleepScores.push(sleepData.score.sleep_performance_percentage);
                 }
               }
-            } catch (error) {
-              // Sleep data may not be available for all cycles or rate limited
+            } catch (sleepError) {
+              const sleepAxiosError = sleepError as { response?: { status?: number }; message?: string };
+              if (sleepAxiosError.response?.status === 429) {
+                console.log(`[WHOOP] Rate limit hit fetching sleep for cycle ${cycle.id}`);
+              }
+              // Sleep data may not be available for all cycles - continue processing
             }
           }
-          
+
         } catch (error) {
-          if (error.response?.status === 429) {
-            console.log(`Rate limit hit for cycle ${cycle.id}, skipping remaining cycles`);
+          const axiosError = error as { response?: { status?: number }; message?: string };
+
+          if (axiosError.response?.status === 429) {
+            console.log(`[WHOOP] Rate limit hit for cycle ${cycle.id}, skipping remaining cycles`);
             break;
           }
-          console.error(`Error processing cycle ${cycle.id}:`, error.message);
+          console.error(`[WHOOP] Error processing cycle ${cycle.id}:`, axiosError.message ?? error);
           // Continue with other cycles
         }
       }
       
-      // Calculate averages
-      const avgRecovery = recoveryScores.length > 0 
+      // Log collected data for debugging
+      console.log(`[WHOOP] Collected data points:`);
+      console.log(`  - Recovery: ${recoveryScores.length} values: [${recoveryScores.join(', ')}]`);
+      console.log(`  - Strain: ${strainScores.length} values: [${strainScores.join(', ')}]`);
+      console.log(`  - Sleep: ${sleepScores.length} values: [${sleepScores.join(', ')}]`);
+      console.log(`  - HRV: ${hrvScores.length} values: [${hrvScores.join(', ')}]`);
+
+      // Calculate averages with rounding to 1 decimal place
+      const avgRecovery = recoveryScores.length > 0
         ? Math.round((recoveryScores.reduce((a, b) => a + b, 0) / recoveryScores.length) * 10) / 10
         : null;
-      
-      const avgStrain = strainScores.length > 0 
+
+      const avgStrain = strainScores.length > 0
         ? Math.round((strainScores.reduce((a, b) => a + b, 0) / strainScores.length) * 10) / 10
         : null;
-      
-      const avgSleep = sleepScores.length > 0 
+
+      const avgSleep = sleepScores.length > 0
         ? Math.round((sleepScores.reduce((a, b) => a + b, 0) / sleepScores.length) * 10) / 10
         : null;
-      
-      const avgHRV = hrvScores.length > 0 
+
+      const avgHRV = hrvScores.length > 0
         ? Math.round((hrvScores.reduce((a, b) => a + b, 0) / hrvScores.length) * 10) / 10
         : null;
-      
-      console.log(`Weekly averages calculated: Recovery: ${avgRecovery}%, Strain: ${avgStrain}, Sleep: ${avgSleep}%, HRV: ${avgHRV}ms`);
-      
+
+      console.log(`[WHOOP] Weekly averages calculated: Recovery=${avgRecovery}%, Strain=${avgStrain}, Sleep=${avgSleep}%, HRV=${avgHRV}ms`);
+
       return { avgRecovery, avgStrain, avgSleep, avgHRV };
       
     } catch (error) {
-      console.error('Error calculating weekly averages:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP] Error calculating weekly averages:', message);
       return { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
     }
   }
@@ -850,7 +884,8 @@ export class WhoopApiService {
             console.log('No sleep data available - this is normal if sleep hasn\'t been processed yet');
           }
         } catch (error) {
-          console.log('Sleep data retrieval failed:', error instanceof WhoopApiError ? error.message : error);
+          const message = error instanceof WhoopApiError ? error.message : String(error);
+          console.log('Sleep data retrieval failed:', message);
         }
       }
 
@@ -868,7 +903,8 @@ export class WhoopApiService {
         bodyMeasurements = await this.getBodyMeasurements(userId);
         
       } catch (error) {
-        console.log('Error fetching additional insights:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        console.log('Error fetching additional insights:', message);
       }
 
       // Calculate sleep stages in minutes if available
@@ -882,30 +918,30 @@ export class WhoopApiService {
 
       const result: WhoopTodayData = {
         cycle_id: latestCycle.id,
-        strain: latestCycle.score?.strain || null,
-        recovery_score: recovery?.score?.recovery_score || null,
+        strain: latestCycle.score?.strain ?? undefined,
+        recovery_score: recovery?.score?.recovery_score ?? undefined,
         // sleep fields
-        sleep_score: sleepScore ?? null,
-        sleep_stages: sleepStages ?? null,
+        sleep_score: sleepScore ?? undefined,
+        sleep_stages: sleepStages ?? undefined,
 
         // primary "time asleep" (null if stages not scored yet)
-        sleep_hours: sleepHours ?? null,
+        sleep_hours: sleepHours ?? undefined,
 
         // NEW: temporary camelCase alias for frontend compatibility (remove later if not needed)
-        sleepHours: sleepHours ?? null as any,
+        sleepHours: sleepHours ?? undefined,
 
         // fallback & context
-        time_in_bed_hours: timeInBedHours ?? null,
-        sleep_efficiency_pct: sleepEfficiencyPct ?? null,
-        hrv: recovery?.score?.hrv_rmssd_milli || null,
-        resting_heart_rate: recovery?.score?.resting_heart_rate || null,
-        average_heart_rate: workoutData?.avgHeartRate || latestCycle.score?.average_heart_rate || null,
+        time_in_bed_hours: timeInBedHours ?? undefined,
+        sleep_efficiency_pct: sleepEfficiencyPct ?? undefined,
+        hrv: recovery?.score?.hrv_rmssd_milli ?? undefined,
+        resting_heart_rate: recovery?.score?.resting_heart_rate ?? undefined,
+        average_heart_rate: workoutData?.avgHeartRate ?? latestCycle.score?.average_heart_rate ?? undefined,
         stress_score: undefined, // WHOOP doesn't provide stress score in current API
-        skin_temperature: recovery?.score?.skin_temp_celsius || undefined,
-        spo2_percentage: recovery?.score?.spo2_percentage || null,
-        respiratory_rate: recovery?.score?.respiratory_rate || null,
-        calories_burned: workoutData?.kilojoule ? Math.round(workoutData.kilojoule * 0.239) : undefined, // Convert kJ to calories
-        activity_log: workoutData?.activities || [],
+        skin_temperature: recovery?.score?.skin_temp_celsius ?? undefined,
+        spo2_percentage: recovery?.score?.spo2_percentage ?? undefined,
+        respiratory_rate: recovery?.score?.respiratory_rate ?? undefined,
+        calories_burned: workoutData?.kilojoule != null ? Math.round(workoutData.kilojoule * 0.239) : undefined, // Convert kJ to calories
+        activity_log: workoutData?.activities ?? [],
         raw_data: {
           cycle: latestCycle,
           recovery: recovery,
@@ -938,9 +974,34 @@ export class WhoopApiService {
 
       return result;
     } catch (error) {
-      console.error('Error fetching WHOOP data:', error);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching WHOOP data:', message);
       return {};
     }
+  }
+
+  private resolveRedirectUri() {
+    const redirectUriEnv = process.env.WHOOP_REDIRECT_URI?.trim();
+    const nodeEnv = process.env.NODE_ENV ?? 'development';
+    
+    // Mobile environment: Always prefer .env value, no fallback to Replit
+    // Web environment: Uses Replit redirect (https://health-data-hub.replit.app/api/whoop/callback)
+    // Mobile environment: Uses only .env redirect (e.g., ngrok URL)
+    
+    if (!redirectUriEnv) {
+      throw new Error('WHOOP_REDIRECT_URI must be set in environment variables for mobile app');
+    }
+
+    if (!redirectUriEnv.startsWith('http')) {
+      throw new Error('WHOOP_REDIRECT_URI must include protocol (http/https)');
+    }
+
+    const isProduction = redirectUriEnv.startsWith('https://');
+    const redirectUri = redirectUriEnv; // Always use .env value, no fallbacks
+
+    console.log(`[WHOOP REDIRECT] Using .env redirect URI: ${redirectUri} (production: ${isProduction})`);
+    
+    return { redirectUri, nodeEnv };
   }
 
   getOAuthUrl(): string {
@@ -948,18 +1009,13 @@ export class WhoopApiService {
     if (!clientId) {
       throw new Error('WHOOP_CLIENT_ID not configured');
     }
-
-    // Use production redirect URI since we have registered WHOOP credentials
-    const isProduction = true; // Use registered redirect URI 
-    const redirectUri = isProduction 
-      ? 'https://health-data-hub.replit.app/api/whoop/callback'
-      : 'http://localhost:5000/api/whoop/callback';
+    const { redirectUri, nodeEnv } = this.resolveRedirectUri();
 
     const scope = 'read:cycles read:recovery read:sleep read:profile read:workout read:body_measurement offline';
     const state = 'whoop_auth_' + Date.now();
     
-    console.log('[OAUTH] Environment: Production=' + isProduction);
-    console.log('[OAUTH] Redirect URI:', redirectUri);
+    console.log('[OAUTH] NODE_ENV:', nodeEnv);
+    console.log('[OAUTH] Using WHOOP redirect URI:', redirectUri);
     console.log('[OAUTH] Client ID:', clientId);
     console.log('[OAUTH] Requesting scopes:', scope);
     console.log('[OAUTH] Including offline scope for refresh token capability');
@@ -973,6 +1029,277 @@ export class WhoopApiService {
       
     console.log('[OAUTH] Generated OAuth URL:', oauthUrl);
     return oauthUrl;
+  }
+
+  // Get yesterday's WHOOP data (similar to getTodaysData but for yesterday)
+  async getYesterdaysData(userId: string): Promise<WhoopTodayData> {
+    if (!userId) {
+      throw new Error('User ID is required to get yesterday\'s data');
+    }
+    try {
+      console.log('Getting yesterday\'s WHOOP data for user:', userId);
+
+      // Get multiple recent cycles to find yesterday's COMPLETED cycle
+      const headers = await this.authHeader(userId);
+      const response = await axios.get(`${BASE}/cycle?limit=10`, { headers });
+
+      if (!response.data?.records || !response.data.records.length) {
+        console.log('No cycles found for yesterday');
+        return {};
+      }
+
+      // Find yesterday's COMPLETED cycle
+      // WHOOP cycles start in the evening and run ~24 hours
+      // cycles[0] = today's ongoing cycle (started yesterday evening)
+      // cycles[1] = yesterday's cycle (may still be completing if checked early morning)
+      // cycles[2] = 2 days ago cycle (definitely completed)
+      // To ensure we get completed data, we look at cycles[2] or cycles[1] if it's ended
+      const cycles = response.data.records;
+
+      // Debug: Log all cycles with their strain values
+      console.log('[YESTERDAY STRAIN DEBUG] All cycles retrieved:');
+      cycles.forEach((cycle: any, idx: number) => {
+        console.log(`  cycles[${idx}]: id=${cycle.id}, start=${cycle.start}, end=${cycle.end}, strain=${cycle.score?.strain}`);
+      });
+
+      let yesterdayCycle = null;
+      const now = new Date();
+
+      // Try cycles[1] first if it has ended
+      if (cycles.length >= 2 && cycles[1].end) {
+        const cycleEnd = new Date(cycles[1].end);
+        // If the cycle ended and we're past that time, it's complete
+        if (cycleEnd < now) {
+          yesterdayCycle = cycles[1];
+          console.log(`Using completed cycle[1]: ${yesterdayCycle.id} (ended: ${cycles[1].end})`);
+        }
+      }
+
+      // If cycles[1] is not complete, use cycles[2] as fallback
+      if (!yesterdayCycle && cycles.length >= 3) {
+        yesterdayCycle = cycles[2];
+        console.log(`Using cycle[2] as fallback (completed cycle): ${yesterdayCycle.id}`);
+      }
+
+      // If still no cycle found, fall back to cycles[1] anyway
+      if (!yesterdayCycle && cycles.length >= 2) {
+        yesterdayCycle = cycles[1];
+        console.log(`Using cycle[1] as last resort: ${yesterdayCycle.id}`);
+      }
+
+      if (!yesterdayCycle) {
+        console.log('Not enough cycles to find yesterday\'s data');
+        return {};
+      }
+
+      // Get recovery data for yesterday's cycle
+      const recovery = await this.getRecovery(yesterdayCycle.id, userId);
+      console.log('Recovery data found for yesterday cycle:', yesterdayCycle.id);
+
+      // Get sleep data using sleep_id from recovery data if available
+      let sleepData = null;
+      let sleepScore = null;
+
+      if (recovery?.sleep_id) {
+        console.log(`Found sleep_id in yesterday recovery data: ${recovery.sleep_id}`);
+        try {
+          const sleepResponse = await axios.get(`${BASE}/activity/sleep/${recovery.sleep_id}`, { headers });
+          if (sleepResponse.status === 200) {
+            sleepData = sleepResponse.data;
+            if (sleepData?.score?.sleep_performance_percentage !== undefined && sleepData?.score?.sleep_performance_percentage !== null) {
+              sleepScore = Math.min(Math.max(sleepData.score.sleep_performance_percentage, 0), 100);
+            }
+          }
+        } catch (sleepError) {
+          console.warn('Failed to get yesterday sleep data via sleep_id:', sleepError);
+        }
+      }
+
+      // Build result object - get strain from the completed cycle
+      const result: WhoopTodayData = {
+        recovery_score: recovery?.score?.recovery_score ?? undefined,
+        strain: yesterdayCycle.score?.strain ?? undefined, // Get strain from completed cycle
+        hrv: recovery?.score?.hrv_rmssd_milli ?? undefined,
+        sleep_score: sleepScore ?? undefined
+      };
+
+      console.log('Yesterday data result:', result);
+      return result;
+    } catch (error) {
+      console.error('Error getting yesterday\'s data:', error);
+      return {};
+    }
+  }
+
+  // Get insights data (sleep hours and resting heart rate)
+  async getInsightsData(userId: string): Promise<{ sleep_hours: number | undefined; resting_heart_rate: number | undefined }> {
+    if (!userId) {
+      throw new Error('User ID is required to get insights data');
+    }
+    try {
+      console.log('Getting insights data for user:', userId);
+      
+      // Get the latest cycle for insights
+      const latestCycle = await this.getLatestCycle(userId);
+      if (!latestCycle) {
+        console.log('No cycles found for insights');
+        return { sleep_hours: undefined, resting_heart_rate: undefined };
+      }
+      
+      // Get recovery data for RHR and sleep data for sleep hours
+      const recovery = await this.getRecovery(latestCycle.id, userId);
+      let sleepHours: number | undefined = undefined;
+      
+      if (recovery?.sleep_id) {
+        try {
+          const headers = await this.authHeader(userId);
+          const sleepResponse = await axios.get(`${BASE}/activity/sleep/${recovery.sleep_id}`, { headers });
+          if (sleepResponse.status === 200) {
+            const sleepData = sleepResponse.data;
+            const stageSummary = sleepData?.score?.stage_summary;
+            
+            if (stageSummary) {
+              // Calculate sleep hours from stage summary
+              const totalSleepMs = (stageSummary.total_light_sleep_time_milli || 0) +
+                                  (stageSummary.total_slow_wave_sleep_time_milli || 0) +
+                                  (stageSummary.total_rem_sleep_time_milli || 0);
+              
+              if (totalSleepMs > 0) {
+                sleepHours = Math.round((totalSleepMs / (1000 * 60 * 60)) * 10) / 10; // Convert ms to hours, round to 1 decimal
+              }
+            }
+          }
+        } catch (sleepError) {
+          console.warn('Failed to get sleep data for insights:', sleepError);
+        }
+      }
+      
+      const result = {
+        sleep_hours: sleepHours,
+        resting_heart_rate: recovery?.score?.resting_heart_rate ?? undefined
+      };
+      
+      console.log('Insights data result:', result);
+      return result;
+    } catch (error) {
+      console.error('Error getting insights data:', error);
+      return { sleep_hours: undefined, resting_heart_rate: undefined };
+    }
+  }
+
+  /**
+   * Fetch WHOOP data for a specific historical date
+   * Returns recovery, sleep, strain, and HRV data for the given date
+   */
+  async getDataForDate(userId: string, dateStr: string): Promise<{
+    recoveryScore?: number;
+    sleepScore?: number;
+    strainScore?: number;
+    hrv?: number;
+    restingHeartRate?: number;
+  } | null> {
+    if (!userId) {
+      throw new Error('User ID is required to get historical data');
+    }
+
+    try {
+      console.log(`[WHOOP HISTORICAL] Fetching data for user=${userId}, date=${dateStr}`);
+
+      const headers = await this.authHeader(userId);
+
+      // Calculate date range: the date itself + next day to catch cycles that started on this date
+      const startDate = new Date(dateStr);
+      const endDate = new Date(dateStr);
+      endDate.setDate(endDate.getDate() + 2); // Add 2 days to ensure we catch the cycle
+
+      const startStr = startDate.toISOString();
+      const endStr = endDate.toISOString();
+
+      console.log(`[WHOOP HISTORICAL] Fetching cycles from ${startStr} to ${endStr}`);
+
+      // Fetch cycles for the date range
+      const cycleResponse = await axios.get(
+        `${BASE}/cycle?start=${startStr}&end=${endStr}&limit=10`,
+        { headers, timeout: 15000 }
+      );
+
+      if (!cycleResponse.data?.records || cycleResponse.data.records.length === 0) {
+        console.log(`[WHOOP HISTORICAL] No cycles found for date ${dateStr}`);
+        return null;
+      }
+
+      console.log(`[WHOOP HISTORICAL] Found ${cycleResponse.data.records.length} cycles`);
+
+      // Find the cycle that corresponds to this date
+      // WHOOP cycles typically start in the evening and end the next evening
+      // We want the cycle where the date falls within the cycle period
+      const targetDate = new Date(dateStr);
+      const targetDateStr = dateStr;
+
+      let targetCycle = null;
+      for (const cycle of cycleResponse.data.records) {
+        const cycleStart = new Date(cycle.start);
+        const cycleEnd = new Date(cycle.end);
+        const cycleDate = cycleStart.toISOString().split('T')[0];
+
+        console.log(`[WHOOP HISTORICAL] Checking cycle: ${cycle.id}, date=${cycleDate}, start=${cycle.start}, end=${cycle.end}, strain=${cycle.score?.strain}`);
+
+        // Match if the cycle start date matches our target date
+        if (cycleDate === targetDateStr) {
+          targetCycle = cycle;
+          console.log(`[WHOOP HISTORICAL] Found matching cycle: ${cycle.id} for date ${targetDateStr}, strain=${cycle.score?.strain}`);
+          break;
+        }
+      }
+
+      if (!targetCycle) {
+        console.log(`[WHOOP HISTORICAL] No cycle found matching date ${dateStr}`);
+        return null;
+      }
+
+      // Fetch recovery data for this cycle
+      const recovery = await this.getRecovery(targetCycle.id, userId);
+
+      let sleepScore = null;
+      let hrv = null;
+
+      if (recovery) {
+        hrv = recovery.score?.hrv_rmssd_milli || null;
+
+        // Fetch sleep data if available
+        if (recovery.sleep_id) {
+          try {
+            await new Promise(resolve => setTimeout(resolve, 250)); // Rate limiting
+            const sleepResponse = await axios.get(
+              `${BASE}/activity/sleep/${recovery.sleep_id}`,
+              { headers, timeout: 15000 }
+            );
+
+            if (sleepResponse.data?.score?.sleep_performance_percentage !== null) {
+              sleepScore = sleepResponse.data.score.sleep_performance_percentage;
+            }
+          } catch (sleepError) {
+            console.log(`[WHOOP HISTORICAL] Failed to fetch sleep for cycle ${targetCycle.id}`);
+          }
+        }
+      }
+
+      const result = {
+        recoveryScore: recovery?.score?.recovery_score || null,
+        sleepScore: sleepScore,
+        strainScore: targetCycle.score?.strain || null,
+        hrv: hrv,
+        restingHeartRate: recovery?.score?.resting_heart_rate || null,
+      };
+
+      console.log(`[WHOOP HISTORICAL] Data for ${dateStr}:`, result);
+      return result;
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[WHOOP HISTORICAL] Error fetching data for ${dateStr}:`, message);
+      return null;
+    }
   }
 }
 
