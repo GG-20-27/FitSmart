@@ -1,3 +1,6 @@
+// CRITICAL: Load environment variables FIRST before any other imports
+import "./loadEnv";
+
 // Fallback for manual injection in Replit (optional safety net)
 if (!process.env.N8N_SECRET_TOKEN) {
   process.env.N8N_SECRET_TOKEN = 'fitgpt-secret-2025';
@@ -28,12 +31,17 @@ function startTokenRefreshService() {
   // Check and refresh tokens every 5 minutes
   const refreshTokens = async () => {
     try {
-      const adminUser = await userService.getUserByEmail('admin@fitscore.local');
+      // Get admin WHOOP ID from environment
+      const adminWhoopId = process.env.ADMIN_WHOOP_ID || '25283528';
+      const adminUserId = `whoop_${adminWhoopId}`;
+      
+      // Try to find admin user by ID
+      const adminUser = await userService.getUserById(adminUserId);
       if (adminUser) {
         await whoopApiService.getValidWhoopToken(adminUser.id);
-        console.log('[TOKEN SERVICE] Token validation completed successfully');
+        console.log('[TOKEN SERVICE] Token validation completed successfully for admin user');
       } else {
-        console.log('[TOKEN SERVICE] Default admin user not found');
+        console.log(`[TOKEN SERVICE] Admin user not found (ID: ${adminUserId}). User may need to authenticate via WHOOP OAuth first.`);
       }
     } catch (error) {
       console.log('[TOKEN SERVICE] Token validation failed, user may need to re-authenticate');
@@ -129,16 +137,21 @@ app.use((req, res, next) => {
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on port 5000
+  // Serve the app on port 3001 (or PORT env variable)
   // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, (r: any) => {
+  const port = parseInt(process.env.PORT || "3001", 10);
+  server.listen(port, "0.0.0.0", () => {
     log(`serving on port ${port}`);
+  }).on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n❌ Port ${port} is already in use.`);
+      console.error(`   Kill the process using: lsof -ti:${port} | xargs kill`);
+      console.error(`   Or use a different port: PORT=3002 npm run dev\n`);
+      process.exit(1);
+    } else {
+      console.error(`\n❌ Server error:`, err);
+      process.exit(1);
+    }
   });
 
   // Start background token refresh service

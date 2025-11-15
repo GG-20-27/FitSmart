@@ -1,4 +1,3 @@
-import './loadEnv';
 import type { ChatResponse } from '@shared/schema';
 import { whoopApiService } from './whoopApiService';
 import type { WhoopTodayResponse } from '@shared/schema';

@@ -62,7 +62,43 @@ export const userCalendars = pgTable("user_calendars", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+export const chatHistory = pgTable("chat_history", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text("role").notNull(), // "user" or "assistant"
+  content: text("content").notNull(),
+  hasImages: boolean("has_images").default(false).notNull(),
+  imageCount: integer("image_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
 
+export const chatSummaries = pgTable("chat_summaries", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  summary: text("summary").notNull(),
+  messageCount: integer("message_count").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const userGoals = pgTable("user_goals", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  title: text("title").notNull(),
+  category: text("category").notNull(),
+  progress: integer("progress").notNull().default(0),
+  streak: integer("streak").notNull().default(0),
+  microhabits: text("microhabits"), // JSON string array
+  emoji: text("emoji"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const fitScores = pgTable("fit_scores", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  score: real("score").notNull(),
+  calculatedAt: timestamp("calculated_at").defaultNow().notNull(),
+});
 
 export const insertUserSchema = createInsertSchema(users).pick({
   id: true,
@@ -91,6 +127,26 @@ export const insertUserCalendarSchema = createInsertSchema(userCalendars).omit({
   updatedAt: true,
 });
 
+export const insertChatHistorySchema = createInsertSchema(chatHistory).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertChatSummarySchema = createInsertSchema(chatSummaries).omit({
+  updatedAt: true,
+});
+
+export const insertUserGoalSchema = createInsertSchema(userGoals).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export const insertFitScoreSchema = createInsertSchema(fitScores).omit({
+  id: true,
+  calculatedAt: true,
+});
+
 // Type definitions
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -102,6 +158,14 @@ export type InsertWhoopToken = z.infer<typeof insertWhoopTokenSchema>;
 export type WhoopToken = typeof whoopTokens.$inferSelect;
 export type InsertUserCalendar = z.infer<typeof insertUserCalendarSchema>;
 export type UserCalendar = typeof userCalendars.$inferSelect;
+export type InsertChatHistory = z.infer<typeof insertChatHistorySchema>;
+export type ChatHistory = typeof chatHistory.$inferSelect;
+export type InsertChatSummary = z.infer<typeof insertChatSummarySchema>;
+export type ChatSummary = typeof chatSummaries.$inferSelect;
+export type InsertUserGoal = z.infer<typeof insertUserGoalSchema>;
+export type UserGoal = typeof userGoals.$inferSelect;
+export type InsertFitScore = z.infer<typeof insertFitScoreSchema>;
+export type FitScore = typeof fitScores.$inferSelect;
 
 
 
@@ -161,3 +225,15 @@ export interface ApiStatusResponse {
   status: string;
   message: string;
 }
+
+export interface ChatRequest {
+  message: string;
+  image?: string;
+  images?: string[];
+}
+
+export interface ChatResponse {
+  reply: string;
+  fitScore?: number;
+}
+

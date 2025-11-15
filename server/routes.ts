@@ -13,7 +13,7 @@ import { whoopTokenStorage } from "./whoopTokenStorage";
 import { userService } from "./userService";
 import { chatService, ChatErrorType } from "./chatService";
 import { chatSummarizationService } from "./chatSummarizationService";
-import { whisperService } from "./whisperService";
+import { whisperService } from "./whisperService.ts";
 import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
