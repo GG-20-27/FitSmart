@@ -1,0 +1,3778 @@
+import type { Express, Request, Response } from "express";
+import express from "express";
+import { createServer, type Server } from "http";
+import { storage } from "./storage";
+import multer, { type FileFilterCallback } from "multer";
+import path from "path";
+import fs from "fs";
+import cors from "cors";
+import { z } from "zod";
+import type { WhoopTodayResponse, MealResponse, ApiStatusResponse, ChatRequest, ChatResponse } from "@shared/schema";
+import { whoopApiService } from "./whoopApiService";
+import { whoopTokenStorage } from "./whoopTokenStorage";
+import { userService } from "./userService";
+import { chatService, ChatErrorType } from "./chatService";
+import { chatSummarizationService } from "./chatSummarizationService";
+import { whisperService } from "./whisperService";
+import ical from "ical";
+import { DateTime } from "luxon";
+import axios from "axios";
+import { getCurrentUserId, requireAdmin } from './authMiddleware';
+import { requireJWTAuth } from './jwtAuth';
+import { db } from './db';
+import { users, fitScores, userGoals } from '@shared/schema';
+import type { UserGoal, FitScore } from '@shared/schema';
+import { eq, desc } from 'drizzle-orm';
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer for file uploads
+const storage_multer = multer.diskStorage({
+  destination: (req: Request, file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const ext = path.extname(file.originalname);
+    cb(null, `meal_${timestamp}${ext}`);
+  }
+});
+
+const upload = multer({
+  storage: storage_multer,
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+  fileFilter: (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files are allowed'));
+    }
+  }
+});
+
+// Configure multer for audio file uploads (voice messages)
+const audioUpload = multer({
+  storage: multer.memoryStorage(), // Store in memory for immediate processing
+  limits: {
+    fileSize: 25 * 1024 * 1024, // 25MB limit for audio files
+  },
+  fileFilter: (req: Request, file: Express.Multer.File, cb: FileFilterCallback) => {
+    const audioMimeTypes = [
+      'audio/mpeg', 'audio/mp3', 'audio/mp4', 'audio/m4a',
+      'audio/wav', 'audio/webm', 'audio/ogg', 'audio/flac'
+    ];
+    if (audioMimeTypes.includes(file.mimetype) || file.mimetype.startsWith('audio/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only audio files are allowed'));
+    }
+  }
+});
+
+// Helper function for timezone-aware date keys
+function todayKey(tz = process.env.USER_TZ || 'Europe/Zurich'): string {
+  const isoDate = DateTime.now().setZone(tz).toISODate();
+  return isoDate ?? new Date().toISOString().split('T')[0];
+}
+
+// Helper function to get default user ID for WHOOP OAuth testing
+async function getDefaultUserId(): Promise<string> {
+  // For WHOOP OAuth, we don't have a default admin user anymore
+  // Return a test WHOOP user ID format for development
+  return 'whoop_25283528';
+}
+
+// Fetch live WHOOP data using OAuth access token
+async function fetchWhoopData(userId?: string): Promise<WhoopTodayResponse> {
+  try {
+    const actualUserId = userId || await getDefaultUserId();
+    const data = await whoopApiService.getTodaysData(actualUserId);
+    return data;
+  } catch (error) {
+    console.error('Failed to fetch live WHOOP data:', error);
+    throw error;
+  }
+}
+
+function getTodayDate(): string {
+  return new Date().toISOString().split('T')[0];
+}
+
+// Daily WHOOP data logging system
+const historyFile = path.join(process.cwd(), 'data', 'userProfile.json');
+
+function logDailyStats(entry: any) {
+  try {
+    // Ensure data directory exists
+    const dataDir = path.dirname(historyFile);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
+    // Read existing data or initialize empty array
+    let allEntries: any[] = [];
+    if (fs.existsSync(historyFile)) {
+      const fileContent = fs.readFileSync(historyFile, 'utf8');
+      allEntries = JSON.parse(fileContent) || [];
+    }
+
+    // Remove existing entry for the same date and add new one
+    const updated = [...allEntries.filter(d => d.date !== entry.date), entry];
+    
+    // Write back to file
+    fs.writeFileSync(historyFile, JSON.stringify(updated, null, 2));
+    console.log('Daily WHOOP stats logged:', entry.date);
+  } catch (error) {
+    console.error('Failed to log daily stats:', error);
+  }
+}
+
+function calculateAverages(days: number = 7): any {
+  try {
+    if (!fs.existsSync(historyFile)) {
+      return { avg_recovery: null, avg_strain: null, avg_sleep: null, avg_hrv: null };
+    }
+
+    const fileContent = fs.readFileSync(historyFile, 'utf8');
+    const allEntries = JSON.parse(fileContent) || [];
+    
+    // Get entries from the last N days
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - days);
+    const cutoffString = cutoffDate.toISOString().split('T')[0];
+    
+    const recentEntries = allEntries
+      .filter((entry: any) => entry.date >= cutoffString)
+      .filter((entry: any) => entry.recovery_score !== null || entry.strain_score !== null || entry.sleep_score !== null || entry.hrv !== null);
+
+    if (recentEntries.length === 0) {
+      return { avg_recovery: null, avg_strain: null, avg_sleep: null, avg_hrv: null };
+    }
+
+    // Calculate averages
+    const validRecovery = recentEntries.filter((e: any) => e.recovery_score !== null);
+    const validStrain = recentEntries.filter((e: any) => e.strain_score !== null);
+    const validSleep = recentEntries.filter((e: any) => e.sleep_score !== null);
+    const validHrv = recentEntries.filter((e: any) => e.hrv !== null);
+
+    return {
+      avg_recovery: validRecovery.length > 0 ? Math.round(validRecovery.reduce((sum: number, e: any) => sum + e.recovery_score, 0) / validRecovery.length * 10) / 10 : null,
+      avg_strain: validStrain.length > 0 ? Math.round(validStrain.reduce((sum: number, e: any) => sum + e.strain_score, 0) / validStrain.length * 10) / 10 : null,
+      avg_sleep: validSleep.length > 0 ? Math.round(validSleep.reduce((sum: number, e: any) => sum + e.sleep_score, 0) / validSleep.length * 10) / 10 : null,
+      avg_hrv: validHrv.length > 0 ? Math.round(validHrv.reduce((sum: number, e: any) => sum + e.hrv, 0) / validHrv.length * 10) / 10 : null
+    };
+  } catch (error) {
+    console.error('Failed to calculate averages:', error);
+    return { avg_recovery: null, avg_strain: null, avg_sleep: null, avg_hrv: null };
+  }
+}
+
+export async function registerRoutes(app: Express): Promise<Server> {
+  // Enable CORS for all routes with pre-flight support
+  app.use(cors({
+    origin: true,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
+  }));
+  
+  // Handle pre-flight requests for all routes
+  app.options('*', cors());
+
+  // Serve static files from uploads directory
+  app.use('/uploads', express.static(uploadsDir));
+
+  // Log API examples on startup
+  console.log('\n🚀 FitScore GPT API Endpoints:');
+  console.log('📊 Health Check: GET /api/health');
+  console.log('🔐 WHOOP Login: GET /api/whoop/login');
+  console.log('🔄 WHOOP Callback: GET /api/whoop/callback');
+  console.log('🏃 WHOOP Data: GET /api/whoop/today');
+  console.log('📸 Upload Meals: POST /api/meals (field: mealPhotos)');
+  console.log('🍽️ Today\'s Meals: GET /api/meals/today');
+  console.log('📅 Calendar Today: GET /api/calendar/today');
+  console.log('🤖 Chat Coach: POST /api/chat (requires JWT)');
+  console.log('🧪 Chat Test: GET /api/chat/test (requires JWT)');
+  console.log('\n📝 Test with curl:');
+  console.log('curl http://localhost:3001/api/health');
+  console.log('curl http://localhost:3001/api/whoop/login');
+  console.log('curl http://localhost:3001/api/whoop/today');
+  console.log('curl http://localhost:3001/api/meals/today');
+  console.log('curl http://localhost:3001/api/calendar/today');
+  console.log('curl -F "mealPhotos=@image.jpg" http://localhost:3001/api/meals');
+  console.log('curl -H "Authorization: Bearer <jwt>" http://localhost:3001/api/chat/test');
+  console.log('curl -X POST -H "Authorization: Bearer <jwt>" -H "Content-Type: application/json" -d \'{"messages":[{"role":"user","content":"Hello"}]}\' http://localhost:3001/api/chat');
+  console.log('');
+
+  // Remove email/password authentication - redirect to WHOOP OAuth
+  console.log('[ROUTE] GET /api/auth/login');
+  app.get('/api/auth/login', (req, res) => {
+    res.redirect('/api/whoop/login');
+  });
+  
+  // Legacy POST login redirects to WHOOP OAuth
+  console.log('[ROUTE] POST /api/auth/login');
+  app.post('/api/auth/login', (req, res) => {
+    res.redirect('/api/whoop/login');
+  });
+
+
+  console.log('[ROUTE] POST /api/auth/logout');
+  app.post('/api/auth/logout', (req, res) => {
+    // For JWT, logout is handled client-side by removing the token
+    res.json({ message: 'Logout successful' });
+  });
+
+  console.log('[ROUTE] GET /api/auth/me');
+  app.get('/api/auth/me', async (req, res) => {
+    try {
+      const whoopUserId = getCurrentUserId(req);
+      console.log(`[AUTH ME] Checking JWT authentication, userId: ${whoopUserId}`);
+      console.log(`[AUTH ME] Headers:`, req.headers.authorization ? 'Bearer token present' : 'No bearer token');
+      
+      if (!whoopUserId) {
+        console.log(`[AUTH ME] No userId found in JWT token - authentication required`);
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
+        });
+      }
+      
+      // Get user role from JWT token
+      const authHeader = req.headers.authorization;
+      let userRole = 'user'; // default role
+      
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const token = authHeader.split(' ')[1];
+          const { verifyJWT } = await import('./jwtAuth');
+          const payload = verifyJWT(token);
+
+          if (payload) {
+          userRole = payload.role || 'user';
+          }
+        } catch (jwtError) {
+          const message = jwtError instanceof Error ? jwtError.message : String(jwtError);
+          console.log(`[AUTH ME] JWT verification failed:`, message);
+        }
+      }
+      
+      console.log(`[AUTH ME] Authentication successful for user: ${whoopUserId} with role: ${userRole}`);
+      res.json({ userId: whoopUserId, role: userRole });
+    } catch (error) {
+      console.error('Get user error:', error);
+      res.status(500).json({ error: 'Failed to get user information' });
+    }
+  });
+
+  // User profile endpoint
+  console.log('[ROUTE] GET /api/users/me');
+  app.get('/api/users/me', requireJWTAuth, async (req, res) => {
+    try {
+      const whoopUserId = getCurrentUserId(req);
+
+      // Get user role from JWT token
+      const authHeader = req.headers.authorization;
+      let userRole = 'user';
+
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        try {
+          const token = authHeader.split(' ')[1];
+          const { verifyJWT } = await import('./jwtAuth');
+          const payload = verifyJWT(token);
+
+          if (payload) {
+          userRole = payload.role || 'user';
+          }
+        } catch (jwtError) {
+          const message = jwtError instanceof Error ? jwtError.message : String(jwtError);
+          console.log(`[USERS ME] JWT verification failed:`, message);
+        }
+      }
+
+      res.json({
+        whoopId: whoopUserId,
+        role: userRole
+      });
+    } catch (error) {
+      console.error('Get user profile error:', error);
+      res.status(500).json({ error: 'Failed to get user profile' });
+    }
+  });
+
+  // User settings endpoints
+  console.log('[ROUTE] GET /api/users/settings');
+  app.get('/api/users/settings', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const user = await userService.getUserById(userId!);
+
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.json({
+        estimate_macros_enabled: user.estimateMacrosEnabled ?? false,
+        morning_outlook_enabled: user.morningOutlookEnabled ?? false,
+        comedy_roast_enabled: user.comedyRoastEnabled ?? false,
+        meal_reminders_enabled: user.mealRemindersEnabled ?? false,
+      });
+    } catch (error) {
+      console.error('Get user settings error:', error);
+      res.status(500).json({ error: 'Failed to get user settings' });
+    }
+  });
+
+  console.log('[ROUTE] PATCH /api/users/settings');
+  app.patch('/api/users/settings', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const {
+        estimate_macros_enabled,
+        morning_outlook_enabled,
+        outlook_time,
+        comedy_roast_enabled,
+        meal_reminders_enabled
+      } = req.body;
+
+      const updates: any = {};
+      if (estimate_macros_enabled !== undefined) updates.estimateMacrosEnabled = estimate_macros_enabled;
+      if (morning_outlook_enabled !== undefined) updates.morningOutlookEnabled = morning_outlook_enabled;
+      if (outlook_time !== undefined) updates.outlookTime = outlook_time;
+      if (comedy_roast_enabled !== undefined) updates.comedyRoastEnabled = comedy_roast_enabled;
+      if (meal_reminders_enabled !== undefined) updates.mealRemindersEnabled = meal_reminders_enabled;
+
+      await userService.updateUser(userId, updates);
+
+      res.json({
+        message: 'Settings updated successfully',
+        settings: updates
+      });
+    } catch (error) {
+      console.error('Update user settings error:', error);
+      res.status(500).json({ error: 'Failed to update user settings' });
+    }
+  });
+
+  // Static JWT endpoint for Custom GPT integration
+  console.log('[ROUTE] GET /api/auth/static-jwt');
+  app.get('/api/auth/static-jwt', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[STATIC JWT] Fetching static JWT for user: ${userId}`);
+      
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
+        });
+      }
+      
+      const tokenData = await whoopTokenStorage.getToken(userId);
+      const staticJwt = tokenData?.static_jwt || null;
+      
+      console.log(`[STATIC JWT] Found static JWT for user ${userId}:`, staticJwt ? 'Present' : 'Not found');
+      
+      res.json({ 
+        static_jwt: staticJwt 
+      });
+    } catch (error) {
+      console.error('Get static JWT error:', error);
+      res.status(500).json({ error: 'Failed to get static JWT token' });
+    }
+  });
+
+  // Remove registration - users are created via WHOOP OAuth only
+  console.log('[ROUTE] POST /api/auth/register');
+  app.post('/api/auth/register', (req, res) => {
+    res.redirect('/api/whoop/login');
+  });
+
+  // Admin routes for multi-user management (admin only)
+  console.log('[ROUTE] POST /api/admin/users');
+  app.post('/api/admin/users', requireAdmin, async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: 'Email is required' });
+      }
+
+      const existingUser = await userService.getUserByEmail(email);
+      if (existingUser) {
+        return res.json({ message: 'User already exists', user: existingUser });
+      }
+
+      const user = await userService.createUser(email);
+      res.json({ message: 'User created successfully', user });
+    } catch (error) {
+      console.error('Error creating user:', error);
+      res.status(500).json({ error: 'Failed to create user' });
+    }
+  });
+
+  console.log('[ROUTE] GET /api/admin/users');
+  app.get('/api/admin/users', requireAdmin, async (req, res) => {
+    try {
+      const users = await userService.getAllUsers();
+      const usersWithTokens = await Promise.all(
+        users.map(async (user) => {
+          const token = await userService.getWhoopToken(user.id);
+          return {
+            ...user,
+            hasWhoopToken: !!token,
+            tokenExpiry: token?.expiresAt || null
+          };
+        })
+      );
+      res.json(usersWithTokens);
+    } catch (error) {
+      console.error('Error fetching users:', error);
+      res.status(500).json({ error: 'Failed to fetch users' });
+    }
+  });
+
+  console.log('[ROUTE] POST /api/admin/users/:userId/whoop-token');
+  app.post('/api/admin/users/:userId/whoop-token', requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { accessToken, refreshToken, expiresAt } = req.body;
+      
+      if (!accessToken) {
+        return res.status(400).json({ error: 'Access token is required' });
+      }
+
+      const user = await userService.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      const expiry = expiresAt ? new Date(expiresAt * 1000) : undefined;
+      await userService.addWhoopToken(userId, accessToken, refreshToken, expiry);
+      
+      res.json({ message: 'WHOOP token added successfully' });
+    } catch (error) {
+      console.error('Error adding WHOOP token:', error);
+      res.status(500).json({ error: 'Failed to add WHOOP token' });
+    }
+  });
+
+  console.log('[ROUTE] DELETE /api/admin/users/:userId');
+  app.delete('/api/admin/users/:userId', requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      
+      const user = await userService.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      await userService.deleteUser(userId);
+      res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting user:', error);
+      res.status(500).json({ error: 'Failed to delete user' });
+    }
+  });
+
+  console.log('[ROUTE] PATCH /api/admin/users/:userId');
+  app.patch('/api/admin/users/:userId', requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { displayName } = req.body;
+      
+      const user = await userService.getUserById(userId);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      await userService.updateUserDisplayName(userId, displayName);
+      res.json({ message: 'User display name updated successfully' });
+    } catch (error) {
+      console.error('Error updating user display name:', error);
+      res.status(500).json({ error: 'Failed to update user display name' });
+    }
+  });
+
+  // Voice transcription endpoint (base64 JSON approach)
+  console.log('[ROUTE] POST /api/chat/transcribe');
+  app.post('/api/chat/transcribe', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[TRANSCRIBE] Voice transcription request from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to use transcription service'
+        });
+      }
+
+      // Extract base64 audio and filename from JSON body
+      const { audioBase64, filename } = req.body;
+
+      if (!audioBase64 || typeof audioBase64 !== 'string') {
+        console.error('[TRANSCRIBE] No audioBase64 in request body');
+        return res.status(400).json({
+          error: 'Invalid request',
+          message: 'audioBase64 (string) is required in request body'
+        });
+      }
+
+      if (!whisperService.isConfigured()) {
+        return res.status(500).json({
+          error: 'Transcription service not configured',
+          message: 'OpenAI API key is not configured'
+        });
+      }
+
+      // Decode base64 to buffer
+      const audioBuffer = Buffer.from(audioBase64, 'base64');
+      console.log(`[TRANSCRIBE] Decoded ${audioBuffer.length} bytes from base64`);
+      console.log(`[TRANSCRIBE] Filename: ${filename || 'audio.m4a'}`);
+
+      const transcription = await whisperService.transcribeAudio(
+        audioBuffer,
+        filename || 'audio.m4a'
+      );
+
+      console.log(`[TRANSCRIBE] Successfully transcribed audio for user ${userId}`);
+      res.json({ transcription });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred while transcribing audio';
+      console.error('[TRANSCRIBE] Error:', message);
+      res.status(500).json({
+        error: 'Transcription failed',
+        message
+      });
+    }
+  });
+
+  // Image upload endpoint - uploads base64 images to ImgBB and returns URLs
+  console.log('[ROUTE] POST /api/images/upload');
+  app.post('/api/images/upload', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[IMAGE UPLOAD] Image upload request from user: ${userId}`);
+      console.log(`[IMAGE UPLOAD] Request body keys:`, Object.keys(req.body));
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to upload images'
+        });
+      }
+
+      const { images } = req.body;
+
+      console.log(`[IMAGE UPLOAD] images present: ${!!images}, is array: ${Array.isArray(images)}, length: ${images?.length || 0}`);
+
+      if (!images || !Array.isArray(images) || images.length === 0) {
+        console.error('[IMAGE UPLOAD] Invalid images array! Body keys:', Object.keys(req.body));
+        return res.status(400).json({
+          error: 'Invalid request',
+          message: 'images array is required'
+        });
+      }
+
+      console.log(`[IMAGE UPLOAD] Processing ${images.length} images`);
+
+      // Upload images to ImgBB
+      const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '84c0b2a7c88733fb5ad2ad1f8c5eef2e'; // Free API key
+      const uploadedUrls: string[] = [];
+
+      for (let i = 0; i < images.length; i++) {
+        const base64Image = images[i];
+
+        // Remove data URL prefix if present
+        const base64Data = base64Image.includes(',')
+          ? base64Image.split(',')[1]
+          : base64Image;
+
+        console.log(`[IMAGE UPLOAD] Uploading image ${i + 1}/${images.length}, base64 size: ${base64Data.length} chars`);
+
+        try {
+          const formData = new URLSearchParams();
+          formData.append('image', base64Data);
+
+          console.log(`[IMAGE UPLOAD] Sending request to ImgBB...`);
+
+          const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: formData,
+          });
+
+          console.log(`[IMAGE UPLOAD] ImgBB response status: ${response.status}`);
+
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[IMAGE UPLOAD] ImgBB HTTP ${response.status} error for image ${i + 1}:`, errorText);
+            throw new Error(`ImgBB upload failed: HTTP ${response.status} - ${errorText.substring(0, 200)}`);
+          }
+
+          const data = await response.json();
+          console.log(`[IMAGE UPLOAD] ImgBB response data:`, JSON.stringify(data).substring(0, 300));
+
+          if (!data.success || !data.data || !data.data.url) {
+            console.error(`[IMAGE UPLOAD] ImgBB response missing URL:`, data);
+            throw new Error('ImgBB response missing image URL');
+          }
+
+          const imageUrl = data.data.url;
+          uploadedUrls.push(imageUrl);
+          console.log(`[IMAGE UPLOAD] ✅ Image ${i + 1} uploaded successfully: ${imageUrl}`);
+        } catch (uploadError) {
+          const errorMsg = uploadError instanceof Error ? uploadError.message : String(uploadError);
+          console.error(`[IMAGE UPLOAD] ❌ Failed to upload image ${i + 1} to ImgBB:`, errorMsg);
+
+          // Fallback: Use base64 data URI instead of failing
+          console.log(`[IMAGE UPLOAD] Using base64 data URI fallback for image ${i + 1}`);
+          const dataUri = base64Image.includes('data:')
+            ? base64Image
+            : `data:image/jpeg;base64,${base64Data}`;
+          uploadedUrls.push(dataUri);
+          console.log(`[IMAGE UPLOAD] ✅ Image ${i + 1} using base64 fallback (${dataUri.length} chars)`);
+        }
+      }
+
+      // All images processed (either uploaded or using base64 fallback)
+      if (uploadedUrls.length === 0) {
+        return res.status(500).json({
+          error: 'Upload failed',
+          message: 'Failed to process any images'
+        });
+      }
+
+      console.log(`[IMAGE UPLOAD] Successfully uploaded ${uploadedUrls.length}/${images.length} images`);
+      res.json({ urls: uploadedUrls });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred while uploading images';
+      console.error('[IMAGE UPLOAD] Error:', message);
+      res.status(500).json({
+        error: 'Upload failed',
+        message
+      });
+    }
+  });
+
+  // Chat endpoints
+  console.log('[ROUTE] GET /api/chat/test');
+  app.get('/api/chat/test', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('[CHAT TEST] Testing chat service connection');
+      const response = await chatService.testConnection();
+      res.json(response);
+    } catch (error) {
+      console.error('[CHAT TEST] Error:', error);
+      res.status(500).json({ error: 'Chat service test failed' });
+    }
+  });
+
+  console.log('[ROUTE] POST /api/chat');
+  app.post('/api/chat', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[CHAT] Chat request from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate to use chat service'
+        });
+      }
+
+      // Validate request body
+      const { message, image, images, goalsContext }: ChatRequest = req.body;
+
+      const hasImages = (images && images.length > 0) || image;
+      if ((!message || typeof message !== 'string' || !message.trim()) && !hasImages) {
+        return res.status(400).json({
+          error: 'Invalid request',
+          message: 'A message string or image is required'
+        });
+      }
+
+      // Check if chat service is configured
+      if (!chatService.isConfigured()) {
+        return res.status(500).json({
+          error: 'Chat service not configured',
+          message: 'OpenAI API key is not configured'
+        });
+      }
+
+      const imageCount = images?.length || (image ? 1 : 0);
+      console.log(`[CHAT] Processing message for user ${userId}: "${message?.substring(0, 50) || `${imageCount} image(s)`}..."`);
+
+      const response: ChatResponse = await chatService.sendChat({
+        userId,
+        message: message || 'Analyze these images',
+        image,
+        images,
+        goalsContext
+      });
+      
+      console.log(`[CHAT] Successfully processed chat request for user ${userId}`);
+      res.json(response);
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred while processing your request';
+      console.error('[CHAT] Error processing chat request:', message);
+
+      const chatError = error as { type?: ChatErrorType; message?: string } | null;
+
+      // Handle chat service errors
+      if (chatError?.type === ChatErrorType.CONFIGURATION_ERROR) {
+        return res.status(500).json({ error: chatError.message ?? message });
+      }
+      
+      if (chatError?.type === ChatErrorType.VALIDATION_ERROR) {
+        return res.status(400).json({ error: chatError.message ?? message });
+      }
+      
+      if (chatError?.type === ChatErrorType.RATE_LIMIT_ERROR) {
+        return res.status(429).json({ error: 'Rate limit exceeded. Please try again later.' });
+      }
+      
+      if (chatError?.type === ChatErrorType.NETWORK_ERROR) {
+        return res.status(503).json({ error: 'Chat service temporarily unavailable' });
+      }
+      
+      // Generic error
+      res.status(500).json({ 
+        error: 'Failed to process chat request',
+        message
+      });
+    }
+  });
+
+  // Persona test endpoint - test FitSmart persona responses with current WHOOP data
+  console.log('[ROUTE] POST /api/chat/persona-test');
+  app.post('/api/chat/persona-test', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[PERSONA-TEST] Persona test request from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to use persona test'
+        });
+      }
+
+      // Use default test message if none provided
+      const testMessage = req.body.message || "How's my recovery today?";
+
+      console.log(`[PERSONA-TEST] Testing with message: "${testMessage}"`);
+
+      // Call chat service (which now uses persona pipeline)
+      const response: ChatResponse = await chatService.sendChat({
+        userId,
+        message: testMessage
+      });
+
+      // Return response with debug info
+      res.json({
+        message: testMessage,
+        reply: response.reply,
+        timestamp: new Date().toISOString(),
+        debug: {
+          personaPipelineUsed: true,
+          flowSteps: ['[CTX] Build context pack', '[PERSONA] Compose prompt', '[REFLECT] Add reflection', '[FINAL] Deliver reply']
+        }
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred during persona test';
+      console.error('[PERSONA-TEST] Error:', message);
+      res.status(500).json({
+        error: 'Persona test failed',
+        message
+      });
+    }
+  });
+
+  // Morning Outlook Test Endpoint
+  console.log('[ROUTE] POST /api/chat/outlook-test');
+  app.post('/api/chat/outlook-test', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[OUTLOOK-TEST] Manual outlook test from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to test morning outlook'
+        });
+      }
+
+      // TODO: Create morning outlook persona/prompt
+      // For now, use a placeholder message
+      const outlookMessage = "Good morning! Here's your daily outlook based on your recovery metrics...";
+
+      res.json({
+        message: outlookMessage,
+        timestamp: new Date().toISOString(),
+        note: 'Morning outlook feature - prompt to be implemented'
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred during outlook test';
+      console.error('[OUTLOOK-TEST] Error:', message);
+      res.status(500).json({
+        error: 'Outlook test failed',
+        message
+      });
+    }
+  });
+
+  // Comedy Roast Test Endpoint
+  console.log('[ROUTE] POST /api/chat/roast-test');
+  app.post('/api/chat/roast-test', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[ROAST-TEST] Manual roast test from user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to test comedy roast'
+        });
+      }
+
+      // TODO: Create comedy roast persona/prompt
+      // For now, use a placeholder message
+      const roastMessage = "Weekly roast coming soon! We'll have some fun with your training data...";
+
+      res.json({
+        message: roastMessage,
+        timestamp: new Date().toISOString(),
+        note: 'Comedy roast feature - prompt to be implemented'
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'An error occurred during roast test';
+      console.error('[ROAST-TEST] Error:', message);
+      res.status(500).json({
+        error: 'Roast test failed',
+        message
+      });
+    }
+  });
+
+  // Health check endpoint (moved from root to avoid conflicts with frontend)
+  app.get('/api/health', async (req, res) => {
+    try {
+      const defaultUserId = await getDefaultUserId();
+      const tokenData = await whoopTokenStorage.getToken(defaultUserId);
+      const tokenStatus = tokenData?.access_token ? 'connected' : 'not connected';
+      
+      let expiryInfo = '';
+      if (tokenData?.expires_at) {
+        const expiresAtSeconds = typeof tokenData.expires_at === 'number'
+          ? tokenData.expires_at
+          : tokenData.expires_at instanceof Date
+            ? Math.floor(tokenData.expires_at.getTime() / 1000)
+            : null;
+
+        if (expiresAtSeconds) {
+          const expiryTime = new Date(expiresAtSeconds * 1000);
+        const now = new Date();
+        const timeUntilExpiry = expiryTime.getTime() - now.getTime();
+        const hoursUntilExpiry = Math.round(timeUntilExpiry / (1000 * 60 * 60));
+        
+        if (hoursUntilExpiry > 0) {
+          expiryInfo = ` (expires in ${hoursUntilExpiry} hours)`;
+        } else {
+          expiryInfo = ' (expired, auto-refresh active)';
+        }
+        }
+      }
+      
+      const response: ApiStatusResponse = {
+        status: "success",
+        message: `✅ FitScore GPT API is running - WHOOP: ${tokenStatus}${expiryInfo} - Auto-refresh: enabled`
+      };
+      res.json(response);
+    } catch (error) {
+      const response: ApiStatusResponse = {
+        status: "success",
+        message: "✅ FitScore GPT API is running - WHOOP: not connected - Auto-refresh: enabled"
+      };
+      res.json(response);
+    }
+  });
+
+  // ============================================
+  // AI INSIGHTS ENDPOINTS
+  // ============================================
+
+  // POST /api/ai/fitscore - Calculate and return daily FitScore
+  app.post('/api/ai/fitscore', requireJWTAuth, async (req, res) => {
+    const buildFallback = () => ({
+      title: "✨ Strong Performance",
+      summary: "Your daily performance is balanced. Sleep and recovery are solid, while nutrition and strain show room for optimization.",
+      components: {
+        sleep: 7.5,
+        recovery: 8.2,
+        nutrition: 6.8,
+        strain: 7.0
+      },
+      finalScore: 7.4,
+      timestamp: new Date().toISOString()
+    });
+
+    const isProduction = process.env.NODE_ENV === 'production';
+
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // If no database URL, return mock data immediately
+      if (!process.env.DATABASE_URL) {
+        return res.json(buildFallback());
+      }
+
+      const latestScore = await db
+        .select()
+        .from(fitScores)
+        .where(eq(fitScores.userId, userId))
+        .orderBy(desc(fitScores.calculatedAt), desc(fitScores.date))
+        .limit(1);
+
+      if (latestScore.length === 0) {
+        return res.json({
+          title: "No Data Available",
+          summary: "Start logging your meals and syncing WHOOP data to calculate your FitScore.",
+          components: {
+            sleep: 0,
+            recovery: 0,
+            nutrition: 0,
+            strain: 0
+          },
+          finalScore: 0,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const score = latestScore[0];
+      const componentsData = (score.components || {}) as Record<string, any>;
+
+      const parseNumeric = (value: unknown): number => {
+        if (typeof value === 'number') return value;
+        if (typeof value === 'string') {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+        return 0;
+      };
+
+      const normalize = (value: number): number =>
+        Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
+
+      const getMetric = (key: string) => {
+        const metric = componentsData?.[key];
+        if (!metric) {
+          return { score: 0, comment: undefined as string | undefined };
+        }
+
+        if (typeof metric === 'number') {
+          return { score: metric, comment: undefined as string | undefined };
+        }
+
+        return {
+          score: normalize(parseNumeric(metric.score)),
+          comment: typeof metric.comment === 'string' ? metric.comment : undefined
+        };
+      };
+
+      const sleepMetric = getMetric('sleep');
+      const recoveryMetric = getMetric('recovery');
+      const nutritionMetric = getMetric('nutrition');
+      const cardioMetric = getMetric('cardioBalance');
+      const trainingMetric = getMetric('trainingAlignment');
+
+      const finalScoreRaw = normalize(parseNumeric(score.score));
+      const strainMetric = trainingMetric.score > 0 ? trainingMetric : cardioMetric;
+      const title =
+        (typeof score.tagline === 'string' && score.tagline.trim().length > 0)
+          ? score.tagline
+          : finalScoreRaw >= 8 ? "⚡ Exceptional Performance"
+          : finalScoreRaw >= 7 ? "✨ Strong Performance"
+          : finalScoreRaw >= 6 ? "💪 Good Balance"
+          : finalScoreRaw >= 5 ? "⚖️ Room for Improvement"
+          : "🔄 Recovery Focus Needed";
+
+      const summaryCandidates = [
+        typeof score.motivation === 'string' ? score.motivation : undefined,
+        sleepMetric.comment,
+        recoveryMetric.comment,
+        nutritionMetric.comment,
+        strainMetric.comment
+      ].filter((text): text is string => !!text && text.trim().length > 0);
+
+      const summary = summaryCandidates.length > 0
+        ? summaryCandidates.slice(0, 2).map(text => text.trim()).join(' • ')
+        : "Your daily performance summary based on sleep, recovery, nutrition, and training alignment.";
+
+      const toIsoDate = (): string => {
+        if (score.calculatedAt instanceof Date) {
+          return score.calculatedAt.toISOString();
+        }
+
+        if (typeof score.calculatedAt === 'string') {
+          const parsed = new Date(score.calculatedAt);
+          if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toISOString();
+          }
+        }
+
+        if (typeof score.date === 'string' && score.date.length > 0) {
+          const parsed = new Date(`${score.date}T00:00:00Z`);
+          if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toISOString();
+          }
+        }
+
+        return new Date().toISOString();
+      };
+
+      res.json({
+        title,
+        summary,
+        components: {
+          sleep: sleepMetric.score,
+          recovery: recoveryMetric.score,
+          nutrition: nutritionMetric.score,
+          strain: strainMetric.score
+        },
+        finalScore: finalScoreRaw,
+        timestamp: toIsoDate()
+      });
+    } catch (error) {
+      console.error('[AI FitScore] Error:', error);
+      if (!isProduction) {
+        return res.json(buildFallback());
+      }
+      res.status(500).json({ error: 'Failed to calculate FitScore' });
+    }
+  });
+
+  // POST /api/ai/outlook - Generate morning outlook
+  app.post('/api/ai/outlook', requireJWTAuth, async (req, res) => {
+    const isProduction = process.env.NODE_ENV === 'production';
+    const buildMockOutlook = () => {
+      const mockReadiness = 8.1;
+      return {
+        title: "🌅 Ready to Perform",
+        summary: "Your recovery looks strong today. You're primed for challenging workouts and high performance tasks.",
+        readiness: mockReadiness,
+        focusAreas: [
+          "High-intensity training is favorable today",
+          "Maintain consistent meal timing",
+          "Focus on achieving your strength goals"
+        ],
+        timestamp: new Date().toISOString()
+      };
+    };
+
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // If no database URL, return mock data
+      if (!process.env.DATABASE_URL) {
+        return res.json(buildMockOutlook());
+      }
+
+      // Fetch latest WHOOP data
+      const whoopData = await whoopApiService.getTodaysData(userId);
+
+      // Calculate readiness score (simple average of recovery and sleep)
+      const readiness = whoopData?.recovery_score
+        ? (whoopData.recovery_score * 10) / 100
+        : 7.0;
+
+      // Get today's goals
+      const goals: UserGoal[] = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.userId, userId))
+        .limit(3);
+
+      const focusAreas = goals.map((goal) => goal.title);
+
+      res.json({
+        title: readiness >= 8 ? "🌅 Ready to Perform" :
+               readiness >= 6 ? "☀️ Moderate Energy" :
+               "🌤️ Recovery Priority",
+        summary: readiness >= 8
+          ? "Your recovery looks strong today. You're primed for challenging workouts and high performance tasks."
+          : readiness >= 6
+          ? "You're moderately recovered. Consider scaling intensity based on how you feel throughout the day."
+          : "Your body needs recovery today. Focus on low-intensity activities, good nutrition, and rest.",
+        readiness: readiness,
+        focusAreas: focusAreas.length > 0 ? focusAreas : [
+          "Prioritize sleep quality tonight",
+          "Stay hydrated throughout the day",
+          "Listen to your body's signals"
+        ],
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('[AI Outlook] Error:', error);
+      if (!isProduction) {
+        return res.json(buildMockOutlook());
+      }
+      res.status(500).json({ error: 'Failed to generate morning outlook' });
+    }
+  });
+
+  // POST /api/ai/roast - Generate weekly performance roast
+  app.post('/api/ai/roast', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // If no database URL, return mock data
+      if (!process.env.DATABASE_URL) {
+        const mockAvgScore = 7.2;
+        return res.json({
+          title: "💪 Solid Performance",
+          roast: "Solid week! You're performing well, though there's definitely room to push harder. You're like a sports car stuck in second gear - powerful, but not quite unleashed.",
+          highlights: [
+            "Consistent training schedule maintained",
+            "Strong recovery metrics on most days"
+          ],
+          lowlights: [
+            "Nutrition consistency could be improved",
+            "Two days showed suboptimal sleep duration"
+          ],
+          weekScore: mockAvgScore,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Get past week's FitScores
+      const weekScores: FitScore[] = await db
+        .select()
+        .from(fitScores)
+        .where(eq(fitScores.userId, userId))
+        .orderBy(desc(fitScores.calculatedAt), desc(fitScores.date))
+        .limit(7);
+
+      if (weekScores.length === 0) {
+        return res.json({
+          title: "📊 Not Enough Data",
+          roast: "I'd love to roast your performance, but you haven't given me much to work with yet! Start tracking your metrics consistently.",
+          highlights: [],
+          lowlights: ["Need more data to generate insights"],
+          weekScore: 0,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      const parseNumeric = (value: unknown): number => {
+        if (typeof value === 'number') return value;
+        if (typeof value === 'string') {
+          const parsed = Number(value);
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+        return 0;
+      };
+
+      const normalize = (value: number): number =>
+        Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
+
+      const getComponentScore = (components: FitScore['components'], key: string): number => {
+        const data = (components || {}) as Record<string, any>;
+        const metric = data?.[key];
+        if (!metric) return 0;
+        if (typeof metric === 'number') {
+          return normalize(metric);
+        }
+        return normalize(parseNumeric(metric.score));
+      };
+
+      const getComponentComment = (components: FitScore['components'], key: string): string | undefined => {
+        const data = (components || {}) as Record<string, any>;
+        const metric = data?.[key];
+        if (metric && typeof metric === 'object' && typeof metric.comment === 'string') {
+          return metric.comment;
+        }
+        return undefined;
+      };
+
+      const formatDateLabel = (record: FitScore): string => {
+        if (record.calculatedAt instanceof Date) {
+          return record.calculatedAt.toLocaleDateString();
+        }
+
+        if (typeof record.calculatedAt === 'string') {
+          const parsed = new Date(record.calculatedAt);
+          if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toLocaleDateString();
+          }
+        }
+
+        if (typeof record.date === 'string') {
+          const parsed = new Date(`${record.date}T00:00:00Z`);
+          if (!Number.isNaN(parsed.getTime())) {
+            return parsed.toLocaleDateString();
+          }
+        }
+
+        return 'recent day';
+      };
+
+      // Calculate average score
+      const avgScore = weekScores.reduce((sum: number, record: FitScore) => sum + parseNumeric(record.score), 0) / weekScores.length;
+      const avgScoreRounded = normalize(avgScore);
+
+      // Find best and worst days
+      const sortedScores = [...weekScores].sort((a, b) => parseNumeric(b.score) - parseNumeric(a.score));
+      const bestDay = sortedScores[0];
+      const worstDay = sortedScores[sortedScores.length - 1];
+
+      const highlights = [];
+      const lowlights = [];
+
+      if (bestDay) {
+        const bestScore = normalize(parseNumeric(bestDay.score));
+        if (bestScore >= 8) {
+          highlights.push(`Peak performance on ${formatDateLabel(bestDay)} with a ${bestScore.toFixed(1)} score`);
+        }
+
+        const bestComment = getComponentComment(bestDay.components, 'trainingAlignment')
+          || getComponentComment(bestDay.components, 'recovery')
+          || getComponentComment(bestDay.components, 'sleep');
+        if (bestComment && highlights.length < 3) {
+          highlights.push(bestComment);
+        }
+      }
+
+      if (avgScoreRounded >= 7.5) {
+        highlights.push("Consistent high performance throughout the week");
+      }
+
+      if (worstDay) {
+        const worstScore = normalize(parseNumeric(worstDay.score));
+        if (worstScore < 6) {
+          lowlights.push(`Recovery dip on ${formatDateLabel(worstDay)} (${worstScore.toFixed(1)} score)`);
+        }
+
+        const strainComment = getComponentComment(worstDay.components, 'trainingAlignment');
+        if (strainComment && lowlights.length < 3) {
+          lowlights.push(strainComment);
+        }
+      }
+
+      if (weekScores.some((record) => getComponentScore(record.components, 'sleep') < 6)) {
+        lowlights.push("Sleep quality needs attention");
+      }
+
+      const roastText = avgScoreRounded >= 8
+        ? "Look at you, crushing it like a well-oiled machine! Your metrics are so consistent, I'm wondering if you're actually a robot. Keep this up and you'll be invincible... or at least feel that way."
+        : avgScoreRounded >= 7
+        ? "Solid week! You're performing well, though there's definitely room to push harder. You're like a sports car stuck in second gear - powerful, but not quite unleashed."
+        : avgScoreRounded >= 6
+        ? "Not bad, not great. You're hovering in that 'meh' zone. Time to step it up - your potential is higher than your actual performance right now."
+        : "Okay, let's be real - this week was rough. But hey, acknowledging it is the first step. Focus on recovery, sleep, and getting back to basics.";
+
+      res.json({
+        title: avgScoreRounded >= 8 ? "🔥 Outstanding Week" :
+               avgScoreRounded >= 7 ? "💪 Solid Performance" :
+               avgScoreRounded >= 6 ? "⚖️ Mixed Results" :
+               "📉 Recovery Week",
+        roast: roastText,
+        highlights: highlights.length > 0 ? highlights : ["Completed the week"],
+        lowlights: lowlights.length > 0 ? lowlights : [],
+        weekScore: avgScoreRounded,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('[AI Roast] Error:', error);
+      if (process.env.NODE_ENV !== 'production') {
+        return res.json({
+          title: "💪 Solid Performance",
+          roast: "Solid week! You're performing well, though there's definitely room to push harder. You're like a sports car stuck in second gear - powerful, but not quite unleashed.",
+          highlights: [
+            "Consistent training schedule maintained",
+            "Strong recovery metrics on most days"
+          ],
+          lowlights: [
+            "Nutrition consistency could be improved",
+            "Two days showed suboptimal sleep duration"
+          ],
+          weekScore: 7.2,
+          timestamp: new Date().toISOString()
+        });
+      }
+      res.status(500).json({ error: 'Failed to generate weekly roast' });
+    }
+  });
+
+  // GET handler for browser testing of refresh-tokens endpoint
+  app.get('/api/whoop/refresh-tokens', async (req, res) => {
+    const authSecret = req.query.auth as string;
+    const expectedSecret = process.env.N8N_SECRET_TOKEN || 'fitgpt-secret-2025';
+    
+    if (!authSecret || authSecret !== expectedSecret) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    res.json({ 
+      status: 'GET ok', 
+      message: 'GET endpoint working - use POST for actual token refresh',
+      auth_valid: true 
+    });
+  });
+
+  // Bulk WHOOP token refresh endpoint for n8n automation
+  app.post('/api/whoop/refresh-tokens', async (req, res) => {
+    try {
+      // Force JSON content type header
+      res.setHeader('Content-Type', 'application/json');
+      
+      // Check authentication via query parameter
+      const authSecret = req.query.auth as string;
+      const expectedSecret = process.env.N8N_SECRET_TOKEN || 'fitgpt-secret-2025';
+      
+      if (!authSecret || authSecret !== expectedSecret) {
+        return res.status(401).json({ error: 'Unauthorized' });
+      }
+      
+      console.log('[TOKEN REFRESH] Starting bulk token refresh process...');
+      
+      // Get all WHOOP tokens from database
+      const allTokens = await whoopTokenStorage.getAllTokens();
+      console.log(`[TOKEN REFRESH] Found ${allTokens.length} tokens to check`);
+      
+      if (allTokens.length === 0) {
+        return res.json({
+          message: 'No WHOOP tokens found in database',
+          updated_users: [],
+          total_checked: 0,
+          total_refreshed: 0
+        });
+      }
+      
+      const updatedUsers: string[] = [];
+      let totalChecked = 0;
+      let totalRefreshed = 0;
+      
+      for (const token of allTokens) {
+        totalChecked++;
+        
+        try {
+          // Check if token is expired or expires soon (within 1 hour)
+          const currentTime = Math.floor(Date.now() / 1000);
+          const tokenData = token.tokenData;
+          const expiresAtRaw = tokenData.expires_at;
+          const expiresAt = typeof expiresAtRaw === 'number'
+            ? expiresAtRaw
+            : expiresAtRaw instanceof Date
+              ? Math.floor(expiresAtRaw.getTime() / 1000)
+              : null;
+          
+          if (!expiresAt) {
+            console.log(`[TOKEN REFRESH] Token for user ${token.userId} has no expiry time, skipping`);
+            continue;
+          }
+          
+          // Refresh if expired or expires within 1 hour (3600 seconds)
+          const needsRefresh = (expiresAt - currentTime) <= 3600;
+          
+          if (!needsRefresh) {
+            const hoursUntilExpiry = Math.round((expiresAt - currentTime) / 3600);
+            console.log(`[TOKEN REFRESH] Token for user ${token.userId} expires in ${hoursUntilExpiry} hours, not refreshing`);
+            continue;
+          }
+          
+          if (!tokenData.refresh_token) {
+            console.log(`[TOKEN REFRESH] Token for user ${token.userId} is expired but has no refresh token`);
+            continue;
+          }
+          
+          console.log(`[TOKEN REFRESH] Refreshing token for user ${token.userId}...`);
+          
+          // Attempt to refresh the token
+          const newToken = await whoopTokenStorage.refreshWhoopToken(token.userId, tokenData.refresh_token);
+          
+          if (newToken) {
+            updatedUsers.push(token.userId);
+            totalRefreshed++;
+            console.log(`[TOKEN REFRESH] Successfully refreshed token for user ${token.userId}`);
+          } else {
+            console.log(`[TOKEN REFRESH] Failed to refresh token for user ${token.userId}`);
+          }
+          
+        } catch (error) {
+          console.error(`[TOKEN REFRESH] Error processing token for user ${token.userId}:`, error);
+        }
+      }
+      
+      // Always return JSON regardless of content negotiation
+      res.setHeader('Content-Type', 'application/json');
+      
+      const result = {
+        message: `Bulk token refresh completed. Checked ${totalChecked} tokens, refreshed ${totalRefreshed}`,
+        updated_users: updatedUsers,
+        total_checked: totalChecked,
+        total_refreshed: totalRefreshed,
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log('[TOKEN REFRESH] Bulk refresh completed:', result);
+      res.json(result);
+      
+    } catch (error) {
+      console.error('[TOKEN REFRESH] Bulk refresh failed:', error);
+      res.status(500).json({ 
+        error: 'Failed to refresh tokens',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // WHOOP OAuth login endpoint
+  app.get('/api/whoop/login', (req, res) => {
+    try {
+      const oauthUrl = whoopApiService.getOAuthUrl();
+      console.log('Redirecting to WHOOP OAuth:', oauthUrl);
+      res.redirect(oauthUrl);
+    } catch (error) {
+      console.error('Failed to initiate WHOOP OAuth:', error);
+      res.status(500).json({ error: 'Failed to initiate WHOOP authentication' });
+    }
+  });
+
+  // WHOOP OAuth callback endpoint - CLEAN IMPLEMENTATION FOLLOWING CHECKLIST
+  app.get('/api/whoop/callback', async (req, res, next) => {
+    try {
+      console.log('[WHOOP AUTH] OAuth callback received');
+      const { code, error, state } = req.query;
+      
+      if (error) {
+        console.error('[WHOOP AUTH] OAuth error:', error);
+        return res.status(400).json({ error: 'OAuth authentication failed', details: error });
+      }
+
+      if (!code) {
+        console.error('[WHOOP AUTH] No authorization code received');
+        return res.status(400).json({ error: 'No authorization code received' });
+      }
+
+      if (!state || !state.toString().startsWith('whoop_auth_')) {
+        console.error('[WHOOP AUTH] Invalid state parameter:', state);
+        return res.status(400).json({ error: 'Invalid state parameter' });
+      }
+
+      console.log('[WHOOP AUTH] Exchanging code for token...');
+      const tokenResponse = await whoopApiService.exchangeCodeForToken(code as string);
+      
+      console.log('[WHOOP AUTH] Getting user profile...');
+      const userProfile = await whoopApiService.getUserProfile(tokenResponse.access_token);
+      const whoopUserId = `whoop_${userProfile.user_id}`;
+      
+      console.log(`[WHOOP AUTH] User authenticated: ${whoopUserId}`);
+      console.log(`[WHOOP AUTH] Full user profile:`, JSON.stringify(userProfile, null, 2));
+      
+      // Create or get user in database with admin role check
+      const userEmail = `${whoopUserId}@fitscore.local`;
+      const adminWhoopId = process.env.ADMIN_WHOOP_ID || '25283528';
+      const isAdmin = userProfile.user_id.toString() === adminWhoopId;
+      
+      const userData = {
+        id: whoopUserId,
+        email: userEmail,
+        whoopUserId: userProfile.user_id.toString(),
+        role: isAdmin ? 'admin' : 'user'
+      };
+      
+      console.log(`[WHOOP AUTH] User role assignment: ${isAdmin ? 'admin' : 'user'} (Admin WHOOP ID: ${adminWhoopId})`);
+      
+      // Insert or update user in database with detailed logging
+      console.log(`[WHOOP AUTH] Attempting to upsert user:`, userData);
+      try {
+        // Check if user exists first
+        const existingUser = await db.select().from(users).where(eq(users.id, whoopUserId)).limit(1);
+        if (existingUser.length === 0) {
+          // User doesn't exist, create new one
+          await db.insert(users).values(userData);
+          console.log(`[WHOOP AUTH] New user created in database: ${whoopUserId}`);
+        } else {
+          // User exists, update their information including role
+          await db.update(users).set({
+            email: userData.email,
+            whoopUserId: userData.whoopUserId,
+            role: userData.role,
+            updatedAt: new Date()
+          }).where(eq(users.id, whoopUserId));
+          console.log(`[WHOOP AUTH] Existing user updated in database: ${whoopUserId}`);
+        }
+      } catch (userError) {
+        const message = userError instanceof Error ? userError.message : String(userError);
+        console.error(`[WHOOP AUTH] User upsert failed:`, message);
+        throw new Error(`Failed to create user: ${message}`);
+      }
+      
+      // Verify user exists before creating token
+      const existingUser = await db.select().from(users).where(eq(users.id, whoopUserId)).limit(1);
+      if (existingUser.length === 0) {
+        throw new Error(`User verification failed - user ${whoopUserId} not found after upsert`);
+      }
+      console.log(`[WHOOP AUTH] User verified in database: ${whoopUserId}`);
+      
+      // Generate long-lived JWT token for Custom GPT integration (10 years)
+      const { generateJWT } = await import('./jwtAuth');
+      const staticJwtToken = generateJWT(whoopUserId, userData.role);
+      console.log(`[WHOOP AUTH] Generated static JWT token for user: ${whoopUserId} (10-year expiration)`);
+      
+      // Store the token with proper expiration using WHOOP user ID, including static JWT
+      const tokenData = {
+        access_token: tokenResponse.access_token,
+        refresh_token: tokenResponse.refresh_token,
+        expires_at: tokenResponse.expires_in ? Math.floor(Date.now() / 1000) + tokenResponse.expires_in : undefined,
+        user_id: whoopUserId,
+        static_jwt: staticJwtToken
+      };
+      
+      console.log(`[WHOOP AUTH] Attempting to store token for user: ${whoopUserId}`);
+      try {
+        await whoopTokenStorage.setToken(whoopUserId, tokenData);
+        console.log(`[WHOOP AUTH] Token and static JWT stored successfully for WHOOP user ${whoopUserId}`);
+      } catch (tokenError) {
+        const message = tokenError instanceof Error ? tokenError.message : String(tokenError);
+        console.error(`[WHOOP AUTH] Token storage failed:`, message);
+        throw new Error(`Failed to store token: ${message}`);
+      }
+      console.log(`[WHOOP AUTH] Token stored for WHOOP user ${whoopUserId} with expiration:`, tokenData.expires_at ? new Date(tokenData.expires_at * 1000) : 'no expiration');
+      
+      // Immediately fetch and store today's WHOOP data
+      console.log(`[WHOOP AUTH] Fetching today's WHOOP data for user: ${whoopUserId}`);
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const whoopDataResult = await whoopApiService.getTodaysData(whoopUserId);
+        
+        if (whoopDataResult && whoopDataResult.recovery_score !== undefined) {
+          const sleepHours = typeof whoopDataResult.sleep_hours === 'number' ? whoopDataResult.sleep_hours : 0;
+          const whoopDataRecord = {
+            userId: whoopUserId,
+            date: today,
+            recoveryScore: Math.round(whoopDataResult.recovery_score),
+            sleepScore: Math.round(sleepHours * 10) || 0, // Convert hours to score
+            strainScore: Math.round((whoopDataResult.strain || 0) * 10), // Store as integer * 10
+            restingHeartRate: Math.round(whoopDataResult.resting_heart_rate || 0)
+          };
+          
+          // Store with unique key whoop_data_<id>_<yyyy-mm-dd>
+          await storage.upsertWhoopData(whoopDataRecord);
+          console.log(`[WHOOP AUTH] Today's data stored for user: ${whoopUserId}`, whoopDataRecord);
+        }
+      } catch (dataError) {
+        const message = dataError instanceof Error ? dataError.message : String(dataError);
+        console.error(`[WHOOP AUTH] Failed to fetch initial WHOOP data:`, message);
+        // Continue with authentication even if data fetch fails
+      }
+      
+      console.log(`[WHOOP AUTH] Using static JWT token for redirect to user: ${whoopUserId} with role: ${userData.role}`);
+      
+      // Redirect to dashboard with the same static JWT token
+      res.redirect(`/#token=${staticJwtToken}`);
+      
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP AUTH] Callback error:', message);
+      
+      // Check if it's a token exchange error (common with expired/used auth codes)
+      if (message.includes('invalid_grant') || message.includes('HTTP 400') || message.includes('request_forbidden')) {
+        console.log('[WHOOP AUTH] OAuth error detected:', message);
+        console.log('[WHOOP AUTH] This usually means the authorization code was expired, used, or invalid');
+        console.log('[WHOOP AUTH] Redirecting user to retry OAuth flow with fresh authorization code');
+        
+        // Return error page with retry option instead of automatic redirect
+        const retryHtml = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>WHOOP Authentication Error</title>
+              <style>
+                body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; padding: 40px; background: #0f172a; color: white; text-align: center; }
+                .error { background: #dc2626; padding: 20px; border-radius: 8px; margin: 20px 0; }
+                .retry-info { background: #1e293b; padding: 15px; border-radius: 8px; margin: 20px 0; }
+                .retry-btn { background: #3b82f6; color: white; padding: 12px 24px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; }
+                .retry-btn:hover { background: #2563eb; }
+              </style>
+            </head>
+            <body>
+              <div class="error">
+                <h1>⚠️ WHOOP Authentication Error</h1>
+                <p>Error: ${message}</p>
+                <p>This usually happens when the authorization code expires or is used more than once.</p>
+              </div>
+              <div class="retry-info">
+                <p>Please try authenticating again with a fresh authorization code.</p>
+                <button class="retry-btn" onclick="window.location.href='/api/whoop/login'">
+                  🔄 Retry WHOOP Authentication
+                </button>
+              </div>
+              <script>
+                console.error('[WHOOP AUTH] OAuth error:', '${message.replace(/'/g, "\\'")}');
+              </script>
+            </body>
+          </html>
+        `;
+        
+        return res.status(400).send(retryHtml);
+      }
+      
+      // Return HTML error page for popup
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>WHOOP Authentication Error</title>
+            <style>
+              body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+              .error { color: #ef4444; font-size: 18px; margin-bottom: 20px; }
+              .message { color: #6b7280; }
+              .retry { margin-top: 20px; }
+              .retry a { color: #3b82f6; text-decoration: none; font-weight: bold; }
+              .retry { margin-top: 20px; }
+              .retry a { color: #3b82f6; text-decoration: none; font-weight: bold; }
+            </style>
+          </head>
+          <body>
+            <div class="error">❌ Authentication Failed</div>
+            <div class="message">WHOOP authentication encountered an error: ${message}</div>
+            <div class="retry">
+              <a href="/api/whoop/login">🔄 Try Again</a>
+            </div>
+            <div class="message">This window will close automatically...</div>
+            <script>
+              setTimeout(() => window.close(), 3000);
+            </script>
+          </body>
+        </html>
+      `;
+      
+      res.setHeader('Content-Type', 'text/html');
+      res.status(500).send(html);
+    }
+  });
+
+  // WHOOP raw data debug endpoint (JWT-authenticated)
+  app.get('/api/whoop/raw', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[WHOOP RAW] Getting raw WHOOP data for user: ${userId}`);
+      
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
+        });
+      }
+      
+      // Fetch comprehensive raw data for debugging
+      const rawData = await whoopApiService.getTodaysData(userId);
+      
+      return res.json({
+        timestamp: new Date().toISOString(),
+        userId: userId,
+        rawData: rawData,
+        message: 'Raw WHOOP API response for debugging purposes'
+      });
+      
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP RAW] Error:', message);
+      res.status(500).json({ 
+        error: 'Failed to fetch raw WHOOP data',
+        details: message 
+      });
+    }
+  });
+
+  // WHOOP authentication status endpoint
+  app.get('/api/whoop/status', requireJWTAuth, async (req, res) => {
+    // Disable caching for this endpoint
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    
+    try {
+      const userId = getCurrentUserId(req);
+      const tokenData = await whoopTokenStorage.getToken(userId!);
+      
+      if (!tokenData) {
+        return res.json({
+          authenticated: false,
+          message: 'No WHOOP token found',
+          auth_url: '/api/whoop/login'
+        });
+      }
+
+      const isValid = whoopTokenStorage.isTokenValid(tokenData);
+      
+      if (!isValid) {
+        return res.json({
+          authenticated: false,
+          message: 'WHOOP token has expired',
+          auth_url: '/api/whoop/login',
+          expires_at: tokenData.expires_at
+        });
+      }
+
+      // Test the token against the WHOOP API to make sure it's actually valid
+      try {
+        const headers = { Authorization: `Bearer ${tokenData.access_token}` };
+        console.log('[TOKEN TEST] Testing token against WHOOP API...');
+        const testResponse = await axios.get('https://api.prod.whoop.com/developer/v1/user/profile/basic', { 
+          headers,
+          timeout: 5000
+        });
+        
+        console.log('[TOKEN TEST] Token test successful, status:', testResponse.status);
+        res.json({
+          authenticated: true,
+          message: 'WHOOP token is valid',
+          auth_url: null,
+          expires_at: tokenData.expires_at
+        });
+      } catch (tokenError) {
+        const tokenErrorMessage = tokenError instanceof Error ? tokenError.message : String(tokenError);
+        // Token appears valid but fails API validation
+        console.error('[TOKEN TEST] Token validation failed:', tokenErrorMessage);
+        res.json({
+          authenticated: false,
+          message: 'WHOOP token is invalid or expired',
+          auth_url: '/api/whoop/login',
+          expires_at: tokenData.expires_at
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error checking WHOOP status:', message);
+      res.status(500).json({ error: 'Failed to check WHOOP authentication status' });
+    }
+  });
+
+  // Debug endpoint to test OAuth URL generation
+  app.get('/api/whoop/debug', async (req, res) => {
+    try {
+      const oauthUrl = whoopApiService.getOAuthUrl();
+      const defaultUserId = await getDefaultUserId();
+      const tokenData = await whoopTokenStorage.getToken(defaultUserId);
+      
+      // Use the same redirect URI logic as the service (from .env)
+      const redirectUriEnv = process.env.WHOOP_REDIRECT_URI?.trim();
+      if (!redirectUriEnv) {
+        throw new Error('WHOOP_REDIRECT_URI must be set in environment variables');
+      }
+      
+      res.json({
+        oauth_url: oauthUrl,
+        client_id: process.env.WHOOP_CLIENT_ID,
+        redirect_uri: redirectUriEnv, // Use .env value, not hardcoded Replit URL
+        status: 'OAuth flow ready',
+        has_token: !!tokenData,
+        token_valid: tokenData ? whoopTokenStorage.isTokenValid(tokenData) : false
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to generate OAuth URL', details: message });
+    }
+  });
+
+  // Test endpoint to manually create session (for debugging authentication)
+  app.post('/api/whoop/test-session', async (req, res) => {
+    try {
+      const { user_id } = req.body;
+      
+      if (!user_id) {
+        return res.status(400).json({ error: 'user_id required' });
+      }
+      
+      const whoopUserId = `whoop_${user_id}`;
+      
+      // Set session manually for testing
+      const sessionRequest = req as typeof req & { session?: any; sessionID?: string };
+      if (!sessionRequest.session) {
+        return res.status(500).json({ error: 'Session middleware not available' });
+      }
+
+      const session = sessionRequest.session as any;
+      session.userId = whoopUserId;
+      
+      console.log(`[TEST SESSION] Setting session userId to: ${whoopUserId}`);
+      console.log(`[TEST SESSION] Session before save:`, session);
+      
+      // Save session and return success
+      session.save?.((err: unknown) => {
+        if (err) {
+          console.error('[TEST SESSION] Session save error:', err);
+          return res.status(500).json({ error: 'Session creation failed' });
+        }
+        
+        console.log(`[TEST SESSION] Session saved successfully for WHOOP user ${whoopUserId}`);
+        console.log(`[TEST SESSION] Session after save:`, sessionRequest.session);
+        
+        // Force session modification and save
+        session.touch?.();
+        if (sessionRequest.session) {
+          (sessionRequest.session as any).modified = true;
+        }
+
+        session.save?.((saveErr: unknown) => {
+          if (saveErr) {
+            console.error('[TEST SESSION] Session save failed:', saveErr);
+            return res.status(500).json({ error: 'Session save failed' });
+          }
+          
+          // Manually set the Set-Cookie header for testing
+          const cookieName = 'fitscore.sid';
+          const cookieValue = sessionRequest.sessionID ?? '';
+          const isProduction = process.env.NODE_ENV === 'production' || !!process.env.REPLIT_DOMAINS;
+          const isReplotDeployment = !!process.env.REPLIT_DOMAINS;
+          
+          let cookieHeader = `${cookieName}=${cookieValue}; Path=/; HttpOnly; Max-Age=${7 * 24 * 60 * 60}`;
+          
+          if (isProduction) {
+            cookieHeader += '; Secure; SameSite=None';
+          } else {
+            cookieHeader += '; SameSite=Lax';
+          }
+          
+          if (isReplotDeployment) {
+            cookieHeader += '; Domain=.replit.app';
+          }
+          
+          res.setHeader('Set-Cookie', cookieHeader);
+          console.log(`[TEST SESSION] Manually set Set-Cookie header: ${cookieHeader}`);
+          console.log(`[TEST SESSION] Session saved successfully with cookie transmission`);
+          
+          res.json({ 
+            message: 'Test session created successfully',
+            userId: whoopUserId,
+            sessionId: sessionRequest.sessionID,
+            cookieSet: true
+          });
+        });
+
+      });
+      
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error creating test session:', message);
+      res.status(500).json({ error: 'Failed to create test session' });
+    }
+  });
+
+  // Session debugging endpoint
+  console.log('[ROUTE] GET /api/session/debug');
+  app.get('/api/session/debug', (req, res) => {
+    const userId = getCurrentUserId(req);
+    const sessionRequest = req as typeof req & { session?: any; sessionID?: string };
+
+    res.json({
+      sessionId: sessionRequest.sessionID,
+      userId: userId,
+      sessionExists: !!sessionRequest.session,
+      sessionKeys: sessionRequest.session ? Object.keys(sessionRequest.session) : [],
+      cookies: req.headers.cookie,
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // Test endpoint to manually set a WHOOP token for debugging
+  app.post('/api/whoop/test-token', async (req, res) => {
+    try {
+      const { access_token, refresh_token, expires_in, user_id } = req.body;
+      
+      if (!access_token || !user_id) {
+        return res.status(400).json({ 
+          error: 'Missing required fields: access_token and user_id are required' 
+        });
+      }
+      
+      // Use the user_id from request to format as WHOOP user ID
+      const whoopUserId = `whoop_${user_id}`;
+      
+      // First ensure the user exists in the database
+      try {
+        const userData = {
+          id: whoopUserId,
+          email: `${whoopUserId}@fitscore.local`,
+          whoopUserId: user_id.toString()
+        };
+        
+        await db.insert(users).values(userData).onConflictDoUpdate({
+          target: users.id,
+          set: {
+            email: userData.email,
+            whoopUserId: userData.whoopUserId,
+            updatedAt: new Date()
+          }
+        });
+        
+        console.log(`Test user created/updated: ${whoopUserId}`);
+      } catch (userError) {
+        const message = userError instanceof Error ? userError.message : String(userError);
+        console.error('Failed to create test user:', message);
+        return res.status(500).json({ error: 'Failed to create test user', details: message });
+      }
+      
+      await whoopTokenStorage.setToken(whoopUserId, {
+        access_token: access_token,
+        refresh_token: refresh_token,
+        expires_at: expires_in ? Math.floor(Date.now() / 1000) + expires_in : Math.floor(Date.now() / 1000) + (24 * 60 * 60),
+        user_id: whoopUserId
+      });
+
+      res.json({ 
+        message: 'Test token stored successfully',
+        status: 'authenticated'
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error setting test token:', message);
+      res.status(500).json({ error: 'Failed to set test token', details: message });
+    }
+  });
+
+  // FitScore Forecast endpoint - predicts today's FitScore based on current metrics
+  app.get('/api/fitscore/forecast', requireJWTAuth, async (req, res) => {
+    console.log('[FITSCORE FORECAST] Generating forecast');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const todayDate = todayKey(tz);
+
+      // Fetch today's WHOOP data
+      let todayData;
+      try {
+        todayData = await whoopApiService.getTodaysData(userId);
+      } catch (error) {
+        // Fallback to cached data
+        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
+        if (cachedData) {
+          todayData = {
+            recovery_score: cachedData.recoveryScore,
+            sleep_score: cachedData.sleepScore,
+            sleep_hours: cachedData.sleepHours,
+            strain: cachedData.strainScore,
+            hrv: cachedData.hrv,
+            resting_heart_rate: cachedData.restingHeartRate,
+          };
+        } else {
+          return res.status(404).json({ error: 'No WHOOP data available' });
+        }
+      }
+
+      // Use FitScore v3.0 calculator for forecast (1-10 scale)
+      const { fitScoreCalculatorV3 } = await import('./services/fitScoreCalculatorV3');
+
+      const recovery = todayData.recovery_score || 0;
+      const sleepScore = todayData.sleep_score || 0;
+      const sleepHours = todayData.sleep_hours || 0;
+      const hrv = todayData.hrv || 0;
+      const rhr = todayData.resting_heart_rate || 0;
+      const strain = todayData.strain || 0;
+
+      // Build input for v3.0 calculator
+      const forecastInput = {
+        sleepHours,
+        targetSleepHours: 8.0,
+        recoveryPercent: recovery,
+        currentHRV: hrv,
+        baselineHRV: hrv, // Use current as baseline for forecast
+        currentRHR: rhr,
+        baselineRHR: rhr,
+        actualStrain: strain,
+        targetStrain: 14.0,
+        // Predict nutrition and training based on typical behavior
+        meals: [] // No meals yet - will predict
+      };
+
+      // Calculate current metrics (what we know)
+      const partialResult = fitScoreCalculatorV3.calculate(forecastInput, todayDate);
+
+      // Predict nutrition score (assume user will log 3-4 balanced meals)
+      const predictedNutritionScore = 7.5; // Optimistic but realistic
+
+      // Dynamic nutrition tip based on projected score
+      const projectedScoreWithoutNutrition = (
+        partialResult.components.sleep.score * 0.25 +
+        partialResult.components.recovery.score * 0.25 +
+        partialResult.components.cardioBalance.score * 0.15 +
+        8.0 * 0.10 // Assume decent training
+      );
+      const nutritionImpact = predictedNutritionScore * 0.25;
+      const potentialTotal = projectedScoreWithoutNutrition + nutritionImpact;
+
+      let nutritionTip = 'Aim for 3-4 balanced meals with adequate protein';
+      if (potentialTotal >= 8.0) {
+        // Only mention hitting 8+ if actually achievable
+        nutritionTip = 'Aim for 3-4 balanced meals with adequate protein to maintain strong performance';
+      }
+
+      // Predict training alignment (based on strain and recovery)
+      let predictedTrainingScore = 8.0;
+      let trainingTip = 'Follow your planned training — your body is ready';
+
+      if (recovery < 50) {
+        predictedTrainingScore = 6.0;
+        trainingTip = 'Consider light active recovery instead of high intensity';
+      } else if (recovery >= 70) {
+        predictedTrainingScore = 9.0;
+        trainingTip = 'Great day for quality training — push for your goals';
+      }
+
+      // Calculate projected FitScore with predicted nutrition and training
+      const projectedFitScore = (
+        partialResult.components.sleep.score * 0.25 +
+        partialResult.components.recovery.score * 0.25 +
+        partialResult.components.cardioBalance.score * 0.15 +
+        predictedNutritionScore * 0.25 +
+        predictedTrainingScore * 0.10
+      );
+
+      const forecast = Math.round(projectedFitScore * 10) / 10; // Round to 0.1
+
+      // Generate insight with predictions
+      let insight = '';
+      const factors = {
+        sleep: `${sleepHours.toFixed(1)}h (${partialResult.components.sleep.score}/10)`,
+        recovery: `${recovery}% (${partialResult.components.recovery.score}/10)`,
+        cardio: `HRV ${hrv}ms, RHR ${rhr}bpm (${partialResult.components.cardioBalance.score}/10)`,
+        nutritionPrediction: `Projected: ${predictedNutritionScore}/10`,
+        trainingPrediction: `Projected: ${predictedTrainingScore}/10`
+      };
+
+      if (recovery >= 70 && sleepScore >= 70) {
+        insight = `💪 Projected FitScore: ${forecast}/10 if you complete planned training and nutrition.
+
+${trainingTip}. ${nutritionTip}.`;
+      } else if (recovery >= 50 && sleepScore >= 50) {
+        insight = `⚡ Projected FitScore: ${forecast}/10 with moderate training and solid nutrition.
+
+${trainingTip}. ${nutritionTip}.`;
+      } else {
+        insight = `🧘 Projected FitScore: ${forecast}/10 — prioritize recovery today.
+
+${trainingTip}. ${nutritionTip}.`;
+      }
+
+      const response = {
+        forecast, // Now 1-10 scale
+        factors,
+        insight,
+        nutritionTip,
+        trainingTip,
+        updatedAt: new Date().toISOString(),
+      };
+
+      console.log(`[FITSCORE FORECAST] user=${userId} forecast=${forecast}/10 recovery=${recovery}% sleep=${sleepScore}%`);
+      res.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITSCORE FORECAST] Error:', message);
+      res.status(500).json({ error: 'Failed to generate forecast', details: message });
+    }
+  });
+
+  // FitScore history endpoint (7-day sparkline data)
+  app.get('/api/fitscore/history', requireJWTAuth, async (req, res) => {
+    console.log('[FITSCORE HISTORY] Fetching 7-day history');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Fetch last 7 days of FitScores from the database
+      const result = await db
+        .select({
+          date: fitScores.date,
+          score: fitScores.score,
+        })
+        .from(fitScores)
+        .where(eq(fitScores.userId, userId))
+        .orderBy(desc(fitScores.date))
+        .limit(7);
+
+      if (result.length === 0) {
+        return res.json({ scores: [], weeklyAverage: 0, trend: 0 });
+      }
+
+      // Reverse to get chronological order (oldest to newest)
+      const scores = result.reverse().map(item => ({
+        date: item.date,
+        score: Number(item.score.toFixed(1)),
+      }));
+
+      // Calculate weekly average
+      const weeklyAverage = scores.reduce((sum, item) => sum + item.score, 0) / scores.length;
+
+      // Calculate trend (difference between last 3 days avg and first 3 days avg)
+      let trend = 0;
+      if (scores.length >= 6) {
+        const firstThree = scores.slice(0, 3).reduce((sum, item) => sum + item.score, 0) / 3;
+        const lastThree = scores.slice(-3).reduce((sum, item) => sum + item.score, 0) / 3;
+        trend = lastThree - firstThree;
+      }
+
+      console.log(`[FITSCORE HISTORY] user=${userId} count=${scores.length} avg=${weeklyAverage.toFixed(1)} trend=${trend >= 0 ? '+' : ''}${trend.toFixed(1)}`);
+
+      res.json({
+        scores,
+        weeklyAverage: Number(weeklyAverage.toFixed(1)),
+        trend: Number(trend.toFixed(1)),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITSCORE HISTORY] Error:', message);
+      res.status(500).json({ error: 'Failed to fetch FitScore history', details: message });
+    }
+  });
+
+  // Goals endpoints
+  // GET /api/goals - Fetch all goals for user
+  app.get('/api/goals', requireJWTAuth, async (req, res) => {
+    console.log('[GOALS] Fetching user goals');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const goals = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.userId, userId))
+        .orderBy(desc(userGoals.createdAt));
+
+      console.log(`[GOALS] Found ${goals.length} goals for user ${userId}`);
+      res.json(goals);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[GOALS] Error fetching goals:', message);
+      res.status(500).json({ error: 'Failed to fetch goals', details: message });
+    }
+  });
+
+  // POST /api/goals - Create new goal
+  app.post('/api/goals', requireJWTAuth, async (req, res) => {
+    console.log('[GOALS] Creating new goal');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const { id, title, emoji, category, progress, streak, microhabits } = req.body;
+
+      if (!id || !title || !emoji || !category || !microhabits) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      const newGoal = await db
+        .insert(userGoals)
+        .values({
+          id,
+          userId,
+          title,
+          emoji,
+          category,
+          progress: progress || 0,
+          streak: streak || 0,
+          microhabits,
+        })
+        .returning();
+
+      console.log(`[GOALS] Created goal ${id} for user ${userId}`);
+      res.json(newGoal[0]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[GOALS] Error creating goal:', message);
+      res.status(500).json({ error: 'Failed to create goal', details: message });
+    }
+  });
+
+  // PATCH /api/goals/:id - Update existing goal
+  app.patch('/api/goals/:id', requireJWTAuth, async (req, res) => {
+    console.log('[GOALS] Updating goal');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const { id } = req.params;
+      const updates = req.body;
+
+      // Verify goal belongs to user
+      const [existingGoal] = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.id, id))
+        .limit(1);
+
+      if (!existingGoal) {
+        return res.status(404).json({ error: 'Goal not found' });
+      }
+
+      if (existingGoal.userId !== userId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      const [updatedGoal] = await db
+        .update(userGoals)
+        .set({ ...updates, updatedAt: new Date() })
+        .where(eq(userGoals.id, id))
+        .returning();
+
+      console.log(`[GOALS] Updated goal ${id}`);
+      res.json(updatedGoal);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[GOALS] Error updating goal:', message);
+      res.status(500).json({ error: 'Failed to update goal', details: message });
+    }
+  });
+
+  // DELETE /api/goals/:id - Delete goal
+  app.delete('/api/goals/:id', requireJWTAuth, async (req, res) => {
+    console.log('[GOALS] Deleting goal');
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const { id } = req.params;
+
+      // Verify goal belongs to user
+      const [existingGoal] = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.id, id))
+        .limit(1);
+
+      if (!existingGoal) {
+        return res.status(404).json({ error: 'Goal not found' });
+      }
+
+      if (existingGoal.userId !== userId) {
+        return res.status(403).json({ error: 'Unauthorized' });
+      }
+
+      await db
+        .delete(userGoals)
+        .where(eq(userGoals.id, id));
+
+      console.log(`[GOALS] Deleted goal ${id}`);
+      res.json({ success: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[GOALS] Error deleting goal:', message);
+      res.status(500).json({ error: 'Failed to delete goal', details: message });
+    }
+  });
+
+  // WHOOP today's data endpoint (JWT-authenticated)
+  app.get('/api/whoop/today', requireJWTAuth, async (req, res) => {
+    console.log(`[WHOOP TODAY] *** ENDPOINT CALLED *** This should always appear in logs`);
+    try {
+      const userId = getCurrentUserId(req);
+      const sourceLive = req.query.source === 'live';
+      const invalidateCache = req.query.invalidate === '1';
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const todayDate = todayKey(tz);
+      
+      console.log(`[WHOOP TODAY] Getting today's WHOOP data for user: ${userId}, source: ${sourceLive ? 'live' : 'auto'}, invalidate: ${invalidateCache}`);
+      
+      if (!userId) {
+        return res.status(401).json({ 
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
+        });
+      }
+      
+      // Handle cache invalidation if requested
+      if (invalidateCache) {
+        console.log(`[WHOOP TODAY] Invalidating cache for user=${userId} date=${todayDate}`);
+        await storage.deleteWhoopDataByUserAndDate(userId, todayDate);
+      }
+      
+      // If source=live, bypass cache and fetch directly from WHOOP
+      let shouldTryLive = sourceLive || true; // Always try live first unless only cache requested
+      let freshData = null;
+      let source = 'cache';
+      
+      if (shouldTryLive) {
+        console.log(`[WHOOP TODAY] Attempting to fetch fresh WHOOP data for user: ${userId}`);
+        
+        try {
+          console.log(`[WHOOP TODAY] About to call whoopApiService.getTodaysData for user: ${userId}`);
+          freshData = await whoopApiService.getTodaysData(userId);
+          
+          if (freshData && typeof freshData.recovery_score === 'number') {
+            const recoveryScore = freshData.recovery_score;
+            const sleepScore = typeof freshData.sleep_score === 'number' ? freshData.sleep_score : 0;
+            const strain = typeof freshData.strain === 'number' ? freshData.strain : 0;
+            const restingHeartRate = typeof freshData.resting_heart_rate === 'number' ? freshData.resting_heart_rate : 0;
+            const sleepHours = typeof freshData.sleep_hours === 'number' ? freshData.sleep_hours : 0;
+            const hrv = typeof freshData.hrv === 'number' ? freshData.hrv : 0;
+            const respiratoryRate = typeof freshData.respiratory_rate === 'number' ? freshData.respiratory_rate : 0;
+            const skinTemp = typeof freshData.skin_temperature === 'number' ? freshData.skin_temperature : 0;
+            const spo2 = typeof freshData.spo2_percentage === 'number' ? freshData.spo2_percentage : 0;
+            const averageHeartRate = typeof freshData.average_heart_rate === 'number' ? freshData.average_heart_rate : 0;
+
+            // Store the fresh data in cache
+            await storage.upsertWhoopData({
+              userId: userId,
+              date: todayDate,
+              recoveryScore: Math.round(recoveryScore),
+              sleepScore: Math.round(sleepScore || 0), // Store sleep score as percentage
+              strainScore: strain || 0, // Store strain as decimal for precision
+              restingHeartRate: Math.round(restingHeartRate || 0),
+              sleepHours: sleepHours || 0,
+              hrv: hrv || 0, // Store HRV as decimal for precision
+              respiratoryRate: respiratoryRate || 0,
+              skinTempCelsius: skinTemp || 0,
+              spo2Percentage: spo2 || 0,
+              averageHeartRate: Math.round(averageHeartRate || 0)
+            });
+            
+            source = 'live';
+            console.log(`[WHOOP TODAY] user=${userId} date=${todayDate} source=${source} values: rec=${Math.round(recoveryScore)}% sleepScore=${Math.round(sleepScore)}% hours=${sleepHours} strain=${strain} hrv=${Math.round(hrv)} rhr=${Math.round(restingHeartRate)}`);
+            
+            return res.json({
+              recovery_score: recoveryScore,
+              sleep_score: sleepScore,
+              sleep_hours: sleepHours,
+              strain,
+              resting_heart_rate: restingHeartRate,
+              hrv: Math.round(hrv),
+              date: todayDate,
+              user_id: userId,
+              timestamp: new Date().toISOString(),
+              source: 'live'
+            });
+          }
+        } catch (fetchError) {
+          const fetchMessage = fetchError instanceof Error ? fetchError.message : String(fetchError);
+          console.log(`[WHOOP TODAY] Live fetch failed: ${fetchMessage}`);
+          // Continue to cache fallback
+        }
+      }
+      
+      // Try cached data if live failed or wasn't requested
+      if (!sourceLive || !freshData) {
+        console.log(`[WHOOP TODAY] Looking for cached data with userId: ${userId}, date: ${todayDate}`);
+        const cachedData = await storage.getWhoopDataByUserAndDate(userId, todayDate);
+        
+        if (cachedData) {
+          source = 'cache';
+          console.log(`[WHOOP TODAY] user=${userId} date=${todayDate} source=${source} values: rec=${cachedData.recoveryScore}% sleepScore=${cachedData.sleepScore}% hours=${cachedData.sleepHours} strain=${cachedData.strainScore / 10} hrv=${cachedData.hrv} rhr=${cachedData.restingHeartRate}`);
+          
+          return res.json({
+            recovery_score: cachedData.recoveryScore,
+            sleep_score: cachedData.sleepScore,
+            sleep_hours: cachedData.sleepHours || null,
+            strain: cachedData.strainScore,
+            resting_heart_rate: cachedData.restingHeartRate,
+            hrv: cachedData.hrv || null,
+            date: todayDate,
+            user_id: userId,
+            timestamp: new Date().toISOString(),
+            source: 'cache'
+          });
+        }
+      }
+      console.log(`[WHOOP TODAY] No fresh or cached data available for user: ${userId}`);
+      return res.status(404).json({
+        error: 'No WHOOP data available',
+        message: 'Please complete WHOOP OAuth authentication to fetch today\'s data',
+        date: todayDate
+      });
+      
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP TODAY] Error:', message);
+      res.status(500).json({ 
+        error: 'Failed to fetch WHOOP data',
+        details: message
+      });
+    }
+  });
+
+  // Secure WHOOP data endpoint for n8n automation
+  app.get('/api/whoop/n8n', async (req, res) => {
+    const token = req.headers['authorization'];
+
+    // Check for secret token passed by n8n
+    if (token !== `Bearer ${process.env.N8N_SECRET_TOKEN}`) {
+      return res.status(403).json({ error: 'Unauthorized: Invalid token' });
+    }
+
+    try {
+      console.log('[N8N ENDPOINT] Fetching WHOOP data for n8n automation...');
+      
+      // Use the enhanced token validation that includes automatic refresh
+      const defaultUserId = await getDefaultUserId();
+      const whoopData = await whoopApiService.getTodaysData(defaultUserId);
+      
+      // Store in database for caching
+      const todayDate = getTodayDate();
+      await storage.createOrUpdateWhoopData({
+        userId: defaultUserId,
+        date: todayDate,
+        recoveryScore: Math.round(whoopData.recovery_score || 0),
+        sleepScore: Math.round(whoopData.sleep_hours || 0), // Fixed: use sleep_hours instead of sleep_score
+        strainScore: Math.round((whoopData.strain || 0) * 10), // Store as integer * 10
+        restingHeartRate: Math.round(whoopData.resting_heart_rate || 0)
+      });
+
+      // Log daily stats to userProfile.json
+      const dailyEntry = {
+        date: todayDate,
+        recovery_score: whoopData.recovery_score,
+        strain_score: whoopData.strain,
+        sleep_hours: whoopData.sleep_hours,
+        hrv: whoopData.hrv
+      };
+      logDailyStats(dailyEntry);
+
+      // Return the response format optimized for n8n
+      const result = {
+        cycle_id: whoopData.cycle_id,
+        strain: whoopData.strain,
+        recovery_score: whoopData.recovery_score,
+        hrv: whoopData.hrv,
+        resting_heart_rate: whoopData.resting_heart_rate,
+        sleep_hours: whoopData.sleep_hours,
+        date: todayDate,
+        timestamp: new Date().toISOString(),
+        raw: whoopData.raw
+      };
+
+      console.log('[N8N ENDPOINT] WHOOP data retrieved successfully for n8n');
+      res.json(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[N8N ENDPOINT] n8n WHOOP fetch failed:', message);
+      
+      // Check if it's a token-related error and provide helpful message
+      if (message.includes('token') || message.includes('access')) {
+        return res.status(401).json({ 
+          error: 'WHOOP authentication failed',
+          message: 'Please visit /api/whoop/login to re-authenticate with WHOOP',
+          auth_url: '/api/whoop/login'
+        });
+      }
+      
+      res.status(500).json({ 
+        error: 'Failed to fetch WHOOP data',
+        message
+      });
+    }
+  });
+
+  // Token refresh test endpoint
+  app.post('/api/whoop/test-token-refresh', async (req, res) => {
+    try {
+      console.log('[TOKEN REFRESH TEST] Starting token refresh test...');
+      
+      // Get current token
+      const defaultUserId = await getDefaultUserId();
+      const currentToken = await whoopTokenStorage.getToken(defaultUserId);
+      if (!currentToken) {
+        return res.status(401).json({ error: 'No token found to test' });
+      }
+
+      console.log('[TOKEN REFRESH TEST] Current token expires at:', currentToken.expires_at);
+      console.log('[TOKEN REFRESH TEST] Current time:', Math.floor(Date.now() / 1000));
+      console.log('[TOKEN REFRESH TEST] Token valid:', whoopTokenStorage.isTokenValid(currentToken));
+      
+      // Simulate token expiration by temporarily setting expires_at to past
+      if (currentToken.expires_at) {
+        const expiredToken = {
+          ...currentToken,
+          expires_at: Math.floor(Date.now() / 1000) - 3600 // 1 hour ago
+        };
+        
+        await whoopTokenStorage.setToken(defaultUserId, expiredToken);
+        console.log('[TOKEN REFRESH TEST] Token manually expired for testing');
+      }
+      
+      // Test the automatic refresh via getValidWhoopToken
+      try {
+        const refreshedToken = await whoopApiService.getValidWhoopToken(defaultUserId);
+        console.log('[TOKEN REFRESH TEST] Token refresh successful');
+        
+        res.json({
+          success: true,
+          message: 'Token refresh test completed successfully',
+          original_expires_at: currentToken.expires_at,
+          new_expires_at: refreshedToken.expires_at,
+          refresh_worked: true
+        });
+      } catch (refreshError) {
+        const refreshMessage = refreshError instanceof Error ? refreshError.message : String(refreshError);
+        console.error('[TOKEN REFRESH TEST] Token refresh failed:', refreshMessage);
+        
+        // Restore original token
+        await whoopTokenStorage.setToken(defaultUserId, currentToken);
+        
+        res.json({
+          success: false,
+          message: 'Token refresh failed',
+          error: refreshMessage,
+          refresh_worked: false,
+          reason: refreshMessage.includes('refresh token') ? 'No refresh token available' : 'Refresh API failed'
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TOKEN REFRESH TEST] Test failed:', message);
+      res.status(500).json({ 
+        error: 'Token refresh test failed',
+        message
+      });
+    }
+  });
+
+  // Test endpoint to generate JWT token for testing (development only)
+  console.log('[ROUTE] GET /api/test/jwt');
+  app.get('/api/test/jwt', async (req, res) => {
+    try {
+      const { generateJWT } = await import('./jwtAuth');
+      const requestedUserId = req.query.userId as string;
+      const testUserId = requestedUserId ? `whoop_${requestedUserId}` : 'whoop_99999999';
+      const testToken = generateJWT(testUserId, 'user');
+      
+      console.log(`[TEST] Generated JWT token for test user: ${testUserId}`);
+      res.json({ 
+        token: testToken,
+        userId: testUserId,
+        message: 'Test JWT token generated successfully'
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TEST] JWT generation error:', message);
+      res.status(500).json({ error: 'Failed to generate test JWT token', details: message });
+    }
+  });
+
+  // Test endpoint to simulate WHOOP OAuth callback success
+  console.log('[ROUTE] GET /api/test/whoop-callback');
+  app.get('/api/test/whoop-callback', async (req, res) => {
+    try {
+      const testUserId = 'whoop_88888888';
+      
+      // Create user in database FIRST (before token) with conflict handling
+      const userEmail = `${testUserId}@fitscore.local`;
+      const adminWhoopId = process.env.ADMIN_WHOOP_ID;
+      const isAdmin = adminWhoopId && testUserId.replace('whoop_', '') === adminWhoopId;
+      
+      const userData = {
+        id: testUserId,
+        email: userEmail,
+        whoopUserId: testUserId.replace('whoop_', ''),
+        role: isAdmin ? 'admin' : 'user'
+      };
+      
+      console.log(`[TEST] Attempting to upsert user:`, userData);
+      try {
+        // Check if user exists first
+        const existingUser = await db.select().from(users).where(eq(users.id, testUserId)).limit(1);
+        if (existingUser.length === 0) {
+          // User doesn't exist, create new one
+          await db.insert(users).values(userData);
+          console.log(`[TEST] New user created in database: ${testUserId}`);
+        } else {
+          console.log(`[TEST] User already exists in database: ${testUserId}`);
+        }
+      } catch (userError) {
+        console.error(`[TEST] User upsert failed:`, userError);
+        // Continue execution even if user creation fails (user might already exist)
+      }
+      
+      // Then simulate token storage (after user exists)
+      await whoopTokenStorage.setToken(testUserId, {
+        access_token: 'test_access_token',
+        refresh_token: 'test_refresh_token', 
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+        user_id: testUserId
+      });
+      
+      // Generate JWT token for authentication with role
+      const { generateJWT } = await import('./jwtAuth');
+      const authToken = generateJWT(testUserId, userData.role);
+      
+      console.log(`[TEST] JWT token generated for simulated user: ${testUserId}`);
+      
+      // Redirect to dashboard with token like real callback
+      res.redirect(`/#token=${authToken}`);
+      
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TEST] Simulated callback error:', message);
+      res.status(500).json({ error: 'Test callback failed', details: message });
+    }
+  });
+
+  // WHOOP weekly averages endpoint
+  app.get('/api/whoop/weekly', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('Fetching weekly WHOOP averages...');
+      
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
+      
+      // Token validation using user-specific token
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const tokenData = await whoopTokenStorage.getToken(userId);
+      if (!tokenData?.access_token) {
+        return res.status(401).json({ error: 'Missing WHOOP access token for user' });
+      }
+
+      // Try WHOOP API first, fallback to cache if needed
+      let weeklyData;
+      const isTokenValid = whoopTokenStorage.isTokenValid(tokenData);
+
+      if (!isTokenValid) {
+        console.warn('WHOOP access token has expired. Using cache fallback only.');
+      }
+
+      try {
+        if (isTokenValid) {
+          weeklyData = await whoopApiService.getWeeklyAverages(userId);
+        } else {
+          throw new Error('Token expired, skip to cache');
+        }
+        
+        // If API succeeds but returns null values, try cache fallback
+        if (!weeklyData || (weeklyData.avgRecovery === null && weeklyData.avgStrain === null && weeklyData.avgSleep === null && weeklyData.avgHRV === null)) {
+          console.log('WHOOP API returned null values, trying cache fallback');
+          throw new Error('No data from WHOOP API');
+        }
+        
+        console.log('Weekly WHOOP averages retrieved successfully from API');
+      } catch (apiError) {
+        const apiMessage = apiError instanceof Error ? apiError.message : String(apiError);
+        console.log('Failed to get weekly data from WHOOP API, trying cache fallback', apiMessage ? `(${apiMessage})` : '');
+        
+        // Get 7 days of cached data as fallback using timezone-aware dates
+        const tz = process.env.USER_TZ || 'Europe/Zurich';
+        const cachedData = [];
+        for (let i = 0; i < 7; i++) {
+          const dateIso = DateTime.now().setZone(tz).minus({ days: i }).toISODate();
+          if (!dateIso) {
+            continue;
+          }
+          const dayData = await storage.getWhoopDataByUserAndDate(userId, dateIso);
+          if (dayData) cachedData.push(dayData);
+        }
+        
+        if (cachedData && cachedData.length > 0) {
+          // Calculate averages from cached data
+          const recoverySum = cachedData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0);
+          const strainSum = cachedData.reduce((sum, d) => sum + (d.strainScore || 0), 0);
+          const sleepSum = cachedData.reduce((sum, d) => sum + (d.sleepScore || 0), 0);
+          const hrvSum = cachedData.reduce((sum, d) => sum + (d.hrv || 0), 0);
+          
+          const count = cachedData.length;
+          weeklyData = {
+            avgRecovery: recoverySum > 0 ? Math.round(recoverySum / count) : null,
+            avgStrain: strainSum > 0 ? Math.round((strainSum / count) * 10) / 10 : null,
+            avgSleep: sleepSum > 0 ? Math.round(sleepSum / count) : null,
+            avgHRV: hrvSum > 0 ? Math.round(hrvSum / count) : null
+          };
+          const used = 'cache-only';
+          console.log(`[WHOOP WEEKLY] user=${userId} tz=${tz} used=${used} avg: rec=${weeklyData.avgRecovery}, strain=${weeklyData.avgStrain}, sleep=${weeklyData.avgSleep}, hrv=${weeklyData.avgHRV}`);
+        } else {
+          weeklyData = { avgRecovery: null, avgStrain: null, avgSleep: null, avgHRV: null };
+        }
+      }
+      
+      // Convert camelCase to snake_case for mobile app compatibility
+      const response = {
+        avg_recovery: weeklyData.avgRecovery,
+        avg_strain: weeklyData.avgStrain,
+        avg_sleep: weeklyData.avgSleep,
+        avg_hrv: weeklyData.avgHRV
+      };
+      res.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error in /api/whoop/weekly:', message);
+
+      const maybeAxiosError = error as {
+        response?: { status?: number; data?: unknown };
+        config?: { url?: string };
+      };
+
+      if (maybeAxiosError.response) {
+        console.error('WHOOP API Error Response:', {
+          status: maybeAxiosError.response.status,
+          data: maybeAxiosError.response.data,
+          endpoint: maybeAxiosError.config?.url,
+        });
+      }
+      
+      res.status(500).json({
+        error: 'Failed to fetch weekly WHOOP averages',
+        details: message
+      });
+    }
+  });
+
+  // WHOOP monthly-comparison endpoint (current week vs. month ago)
+  app.get('/api/whoop/monthly-comparison', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('[WHOOP MONTHLY-COMPARISON] Fetching current week vs. month ago comparison...');
+
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+
+      // Helper function to get or fetch data for a date
+      const getOrFetchData = async (dateStr: string) => {
+        // Try cache first
+        let data = await storage.getWhoopDataByUserAndDate(userId, dateStr);
+
+        if (!data) {
+          // Not in cache, try to fetch from WHOOP API
+          console.log(`[WHOOP MONTHLY-COMPARISON] No cached data for ${dateStr}, fetching from API...`);
+          try {
+            const apiData = await whoopApiService.getDataForDate(userId, dateStr);
+            if (apiData && (apiData.recoveryScore || apiData.sleepScore || apiData.strainScore)) {
+              // Cache the fetched data
+              await storage.upsertWhoopData({
+                userId,
+                date: dateStr,
+                recoveryScore: Math.round(apiData.recoveryScore || 0),
+                sleepScore: Math.round(apiData.sleepScore || 0),
+                strainScore: apiData.strainScore || 0,
+                hrv: apiData.hrv || 0,
+                restingHeartRate: Math.round(apiData.restingHeartRate || 0),
+              });
+
+              // Return the cached data after upserting
+              data = await storage.getWhoopDataByUserAndDate(userId, dateStr);
+            }
+          } catch (fetchError) {
+            console.log(`[WHOOP MONTHLY-COMPARISON] Failed to fetch data for ${dateStr}:`, fetchError instanceof Error ? fetchError.message : String(fetchError));
+          }
+        }
+
+        return data;
+      };
+
+      // Calculate averages for current 7 days (days 0-6)
+      const currentWeekData = [];
+      for (let i = 0; i < 7; i++) {
+        const dateIso = DateTime.now().setZone(tz).minus({ days: i }).toISODate();
+        if (dateIso) {
+          const dayData = await getOrFetchData(dateIso);
+          if (dayData) currentWeekData.push(dayData);
+        }
+      }
+
+      // Calculate averages for ~month ago (days 23-29, ~4 weeks ago)
+      const previousMonthData = [];
+      for (let i = 23; i <= 29; i++) {
+        const dateIso = DateTime.now().setZone(tz).minus({ days: i }).toISODate();
+        if (dateIso) {
+          const dayData = await getOrFetchData(dateIso);
+          if (dayData) previousMonthData.push(dayData);
+        }
+      }
+
+      // Calculate current week averages
+      const currentCount = currentWeekData.length;
+      const currentAvg = {
+        sleep: currentCount > 0 ? Math.round(currentWeekData.reduce((sum, d) => sum + (d.sleepScore || 0), 0) / currentCount) : null,
+        recovery: currentCount > 0 ? Math.round(currentWeekData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0) / currentCount) : null,
+        strain: currentCount > 0 ? Math.round((currentWeekData.reduce((sum, d) => sum + (d.strainScore || 0), 0) / currentCount) * 10) / 10 : null,
+        hrv: currentCount > 0 ? Math.round(currentWeekData.reduce((sum, d) => sum + (d.hrv || 0), 0) / currentCount) : null,
+      };
+
+      // Calculate previous month averages
+      const prevCount = previousMonthData.length;
+      const prevAvg = {
+        sleep: prevCount > 0 ? Math.round(previousMonthData.reduce((sum, d) => sum + (d.sleepScore || 0), 0) / prevCount) : null,
+        recovery: prevCount > 0 ? Math.round(previousMonthData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0) / prevCount) : null,
+        strain: prevCount > 0 ? Math.round((previousMonthData.reduce((sum, d) => sum + (d.strainScore || 0), 0) / prevCount) * 10) / 10 : null,
+        hrv: prevCount > 0 ? Math.round(previousMonthData.reduce((sum, d) => sum + (d.hrv || 0), 0) / prevCount) : null,
+      };
+
+      // Build response with averages and deltas (percentages for sleep/recovery; raw values for strain/HRV)
+      const response = {
+        avg_sleep: currentAvg.sleep,
+        avg_recovery: currentAvg.recovery,
+        avg_strain: currentAvg.strain,
+        avg_hrv: currentAvg.hrv,
+        sleep_delta: (currentAvg.sleep !== null && prevAvg.sleep !== null && prevAvg.sleep !== 0)
+          ? Math.round(((currentAvg.sleep - prevAvg.sleep) / prevAvg.sleep) * 100) : null,
+        recovery_delta: (currentAvg.recovery !== null && prevAvg.recovery !== null && prevAvg.recovery !== 0)
+          ? Math.round(((currentAvg.recovery - prevAvg.recovery) / prevAvg.recovery) * 100) : null,
+        strain_delta: (currentAvg.strain !== null && prevAvg.strain !== null)
+          ? Number((currentAvg.strain - prevAvg.strain).toFixed(1)) : null,
+        hrv_delta: (currentAvg.hrv !== null && prevAvg.hrv !== null)
+          ? Math.round(currentAvg.hrv - prevAvg.hrv) : null,
+      };
+
+      console.log(`[WHOOP MONTHLY-COMPARISON] user=${userId} currentWeek(${currentCount} days) vs prevMonth(${prevCount} days) deltas: sleep=${response.sleep_delta}, recovery=${response.recovery_delta}, strain=${response.strain_delta}, hrv=${response.hrv_delta}`);
+      res.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP MONTHLY-COMPARISON] Error:', message);
+      res.status(500).json({ error: 'Failed to fetch monthly comparison data', details: message });
+    }
+  });
+
+  // WHOOP yesterday endpoint
+  app.get('/api/whoop/yesterday', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('Fetching yesterday WHOOP data...');
+      
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
+      
+      // Token validation using user-specific token
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const tokenData = await whoopTokenStorage.getToken(userId);
+      if (!tokenData?.access_token) {
+        return res.status(401).json({ error: 'Missing WHOOP access token for user' });
+      }
+
+      // Try WHOOP API first, fallback to cache if needed
+      let yesterdayData;
+      const isTokenValid = whoopTokenStorage.isTokenValid(tokenData);
+
+      if (!isTokenValid) {
+        console.warn('WHOOP access token has expired. Using cache fallback only.');
+      }
+
+      try {
+        if (isTokenValid) {
+          yesterdayData = await whoopApiService.getYesterdaysData(userId);
+        } else {
+          throw new Error('Token expired, skip to cache');
+        }
+        
+        // If API succeeds but returns null values, try cache fallback
+        if (!yesterdayData || (yesterdayData.recovery_score === null && yesterdayData.strain === null && yesterdayData.sleep_score === null && yesterdayData.hrv === null)) {
+          console.log('WHOOP API returned null values for yesterday, trying cache fallback');
+          throw new Error('No data from WHOOP API');
+        }
+        
+        console.log('Yesterday WHOOP data retrieved successfully from API');
+      } catch (apiError) {
+        const apiMessage = apiError instanceof Error ? apiError.message : String(apiError);
+        console.log('Failed to get yesterday data from WHOOP API, trying cache fallback', apiMessage ? `(${apiMessage})` : '');
+        
+        // Get yesterday's cached data as fallback using timezone-aware dates
+        const tz = process.env.USER_TZ || 'Europe/Zurich';
+        const yesterday = DateTime.now().setZone(tz).minus({ days: 1 }).toISODate();
+        
+        if (yesterday) {
+          const dayData = await storage.getWhoopDataByUserAndDate(userId, yesterday);
+          if (dayData) {
+            yesterdayData = {
+              recovery_score: dayData.recoveryScore || null,
+              strain: dayData.strainScore || null,
+              sleep_score: dayData.sleepScore || null,
+              hrv: dayData.hrv || null
+            };
+            console.log(`[WHOOP YESTERDAY] user=${userId} tz=${tz} used=cache-only data:`, yesterdayData);
+          } else {
+            yesterdayData = { recovery_score: null, strain: null, sleep_score: null, hrv: null };
+          }
+        } else {
+          yesterdayData = { recovery_score: null, strain: null, sleep_score: null, hrv: null };
+        }
+      }
+      
+      res.json(yesterdayData);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error in /api/whoop/yesterday:', message);
+
+      const maybeAxiosError = error as {
+        response?: { status?: number; data?: unknown };
+        config?: { url?: string };
+      };
+
+      if (maybeAxiosError.response) {
+        res.status(maybeAxiosError.response.status || 500).json({
+          error: 'WHOOP API error',
+          status: maybeAxiosError.response.status,
+          data: maybeAxiosError.response.data,
+          endpoint: maybeAxiosError.config?.url,
+        });
+      }
+
+      res.status(500).json({ 
+        error: 'Failed to fetch yesterday WHOOP data',
+        details: message
+      });
+    }
+  });
+
+  // WHOOP yesterday-comparison endpoint (yesterday vs. 7 days ago)
+  app.get('/api/whoop/yesterday-comparison', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('[WHOOP YESTERDAY-COMPARISON] Fetching yesterday vs. last week comparison...');
+
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Fetch recent cycles directly from WHOOP API (like getWeeklyAverages does)
+      // cycles[0] = today (ongoing), cycles[1] = yesterday (completed), cycles[8] = 7 days ago
+      const BASE = 'https://api.prod.whoop.com/developer/v1';
+      const headers = await whoopApiService.authHeader(userId);
+      const cyclesResponse = await axios.get(`${BASE}/cycle?limit=10`, { headers });
+
+      if (!cyclesResponse.data?.records || cyclesResponse.data.records.length < 2) {
+        console.log('[WHOOP YESTERDAY-COMPARISON] Not enough cycles available');
+        return res.json({
+          sleep_score: null,
+          recovery_score: null,
+          strain: null,
+          hrv: null,
+          sleep_delta: null,
+          recovery_delta: null,
+          strain_delta: null,
+          hrv_delta: null,
+        });
+      }
+
+      const cycles = cyclesResponse.data.records;
+
+      // Yesterday's completed cycle is cycles[1]
+      const yesterdayCycle = cycles[1];
+      // Last week's cycle is cycles[8] if available
+      const lastWeekCycle = cycles.length >= 9 ? cycles[8] : null;
+
+      console.log(`[WHOOP YESTERDAY-COMPARISON] Using cycle[1] for yesterday: ${yesterdayCycle.id}, strain=${yesterdayCycle.score?.strain}`);
+      if (lastWeekCycle) {
+        console.log(`[WHOOP YESTERDAY-COMPARISON] Using cycle[8] for last week: ${lastWeekCycle.id}, strain=${lastWeekCycle.score?.strain}`);
+      }
+
+      // Get yesterday's data
+      const yesterdayRecovery = await whoopApiService.getRecovery(yesterdayCycle.id, userId);
+      let yesterdaySleepScore = null;
+      if (yesterdayRecovery?.sleep_id) {
+        try {
+          const sleepResponse = await axios.get(`${BASE}/activity/sleep/${yesterdayRecovery.sleep_id}`, { headers });
+          if (sleepResponse.status === 200 && sleepResponse.data?.score?.sleep_performance_percentage !== undefined) {
+            yesterdaySleepScore = Math.min(Math.max(sleepResponse.data.score.sleep_performance_percentage, 0), 100);
+          }
+        } catch (err) {
+          console.warn('[WHOOP YESTERDAY-COMPARISON] Failed to fetch yesterday sleep data');
+        }
+      }
+
+      // Get last week's data if available
+      let lastWeekRecovery = null;
+      let lastWeekSleepScore = null;
+      if (lastWeekCycle) {
+        lastWeekRecovery = await whoopApiService.getRecovery(lastWeekCycle.id, userId);
+        if (lastWeekRecovery?.sleep_id) {
+          try {
+            const sleepResponse = await axios.get(`${BASE}/activity/sleep/${lastWeekRecovery.sleep_id}`, { headers });
+            if (sleepResponse.status === 200 && sleepResponse.data?.score?.sleep_performance_percentage !== undefined) {
+              lastWeekSleepScore = Math.min(Math.max(sleepResponse.data.score.sleep_performance_percentage, 0), 100);
+            }
+          } catch (err) {
+            console.warn('[WHOOP YESTERDAY-COMPARISON] Failed to fetch last week sleep data');
+          }
+        }
+      }
+
+      // Extract values
+      const yesterdaySleep = yesterdaySleepScore;
+      const yesterdayRecoveryScore = yesterdayRecovery?.score?.recovery_score || null;
+      const yesterdayStrain = yesterdayCycle.score?.strain || null;
+      const yesterdayHRV = yesterdayRecovery?.score?.hrv_rmssd_milli || null;
+
+      const lastWeekSleep = lastWeekSleepScore;
+      const lastWeekRecoveryScore = lastWeekRecovery?.score?.recovery_score || null;
+      const lastWeekStrain = lastWeekCycle?.score?.strain || null;
+      const lastWeekHRV = lastWeekRecovery?.score?.hrv_rmssd_milli || null;
+
+      // Build response with deltas
+      const response = {
+        sleep_score: yesterdaySleep,
+        recovery_score: yesterdayRecoveryScore,
+        strain: yesterdayStrain,
+        hrv: yesterdayHRV,
+        sleep_delta: (yesterdaySleep !== null && lastWeekSleep !== null && lastWeekSleep !== 0)
+          ? Math.round(((yesterdaySleep - lastWeekSleep) / lastWeekSleep) * 100) : null,
+        recovery_delta: (yesterdayRecoveryScore !== null && lastWeekRecoveryScore !== null && lastWeekRecoveryScore !== 0)
+          ? Math.round(((yesterdayRecoveryScore - lastWeekRecoveryScore) / lastWeekRecoveryScore) * 100) : null,
+        strain_delta: (yesterdayStrain !== null && lastWeekStrain !== null)
+          ? Number((yesterdayStrain - lastWeekStrain).toFixed(1)) : null,
+        hrv_delta: (yesterdayHRV !== null && lastWeekHRV !== null)
+          ? Math.round(yesterdayHRV - lastWeekHRV) : null,
+      };
+
+      console.log(`[WHOOP YESTERDAY-COMPARISON] user=${userId} yesterday_strain=${response.strain} lastWeek_strain=${lastWeekStrain} delta=${response.strain_delta}`);
+      res.json(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP YESTERDAY-COMPARISON] Error:', message);
+      res.status(500).json({ error: 'Failed to fetch yesterday comparison data', details: message });
+    }
+  });
+
+  // WHOOP insights endpoint
+  app.get('/api/whoop/insights', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('Fetching WHOOP insights...');
+      
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
+      
+      // Token validation using user-specific token
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const tokenData = await whoopTokenStorage.getToken(userId);
+      if (!tokenData?.access_token) {
+        return res.status(401).json({ error: 'Missing WHOOP access token for user' });
+      }
+
+      if (!whoopTokenStorage.isTokenValid(tokenData)) {
+        console.warn('WHOOP access token has expired. Re-authentication required.');
+        return res.status(401).json({ 
+          error: 'WHOOP token expired',
+          message: 'Please visit /api/whoop/login to re-authenticate with WHOOP',
+          auth_url: '/api/whoop/login'
+        });
+      }
+      
+      // Try WHOOP API first, fallback to cache if needed
+      let insightsData;
+      try {
+        insightsData = await whoopApiService.getInsightsData(userId);
+        
+        // If API succeeds but returns null values, try cache fallback
+        if (!insightsData || (insightsData.sleep_hours === null && insightsData.resting_heart_rate === null)) {
+          console.log('WHOOP API returned null values for insights, trying cache fallback');
+          throw new Error('No data from WHOOP API');
+        }
+        
+        console.log('WHOOP insights retrieved successfully from API');
+      } catch (apiError) {
+        const apiMessage = apiError instanceof Error ? apiError.message : String(apiError);
+        console.log('Failed to get insights from WHOOP API, trying cache fallback', apiMessage ? `(${apiMessage})` : '');
+        
+        // Get today's cached data as fallback for insights
+        const tz = process.env.USER_TZ || 'Europe/Zurich';
+        const today = DateTime.now().setZone(tz).toISODate();
+        
+        if (today) {
+          const dayData = await storage.getWhoopDataByUserAndDate(userId, today);
+          if (dayData) {
+            insightsData = {
+              sleep_hours: dayData.sleepHours || null,
+              resting_heart_rate: dayData.restingHeartRate || null
+            };
+            console.log(`[WHOOP INSIGHTS] user=${userId} tz=${tz} used=cache-only data:`, insightsData);
+          } else {
+            insightsData = { sleep_hours: null, resting_heart_rate: null };
+          }
+        } else {
+          insightsData = { sleep_hours: null, resting_heart_rate: null };
+        }
+      }
+      
+      res.json(insightsData);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error in /api/whoop/insights:', message);
+
+      const maybeAxiosError = error as {
+        response?: { status?: number; data?: unknown };
+        config?: { url?: string };
+      };
+
+      if (maybeAxiosError.response) {
+        res.status(maybeAxiosError.response.status || 500).json({
+          error: 'WHOOP API error',
+          status: maybeAxiosError.response.status,
+          data: maybeAxiosError.response.data,
+          endpoint: maybeAxiosError.config?.url,
+        });
+      }
+
+      res.status(500).json({ 
+        error: 'Failed to fetch WHOOP insights',
+        details: message
+      });
+    }
+  });
+
+  // Cache management endpoints
+  app.delete('/api/cache/today', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const todayDate = todayKey(tz);
+      
+      await storage.deleteWhoopDataByUserAndDate(userId, todayDate);
+      
+      res.json({
+        deleted: true,
+        date: todayDate
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error deleting today cache:', message);
+      res.status(500).json({ error: 'Failed to delete cache', details: message });
+    }
+  });
+
+  app.delete('/api/cache/day/:date', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      const date = req.params.date;
+      
+      // Validate YYYY-MM-DD format
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'Invalid date format. Use YYYY-MM-DD' });
+      }
+      
+      await storage.deleteWhoopDataByUserAndDate(userId, date);
+      
+      res.json({
+        deleted: true,
+        date: date
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error deleting day cache:', message);
+      res.status(500).json({ error: 'Failed to delete cache', details: message });
+    }
+  });
+
+  // Raw WHOOP data endpoint for verification
+  app.get('/api/whoop/today/raw', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const sourceLive = req.query.source === 'live';
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      if (sourceLive) {
+        const tz = process.env.USER_TZ || 'Europe/Zurich';
+        const todayDate = todayKey(tz);
+        
+        // Get raw WHOOP data
+        const rawData = await whoopApiService.getTodaysData(userId);
+        
+        // Extract and structure the response
+        const result = {
+          raw: {
+            cycle: rawData.raw_data?.cycle || null,
+            recovery: rawData.raw_data?.recovery || null,
+            sleep: rawData.raw_data?.sleep || null
+          },
+          mapped: {
+            recovery_score: rawData.recovery_score,
+            sleep_score: rawData.sleep_score,
+            sleep_hours: rawData.sleep_hours,
+            strain: rawData.strain,
+            hrv: rawData.hrv,
+            resting_heart_rate: rawData.resting_heart_rate
+          },
+          date: todayDate
+        };
+        
+        res.json(result);
+      } else {
+        res.status(400).json({ error: 'source=live parameter required for raw endpoint' });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching raw WHOOP data:', message);
+      res.status(500).json({ error: 'Failed to fetch raw data', details: message });
+    }
+  });
+
+  // WHOOP summary analytics endpoint
+  app.get('/api/whoop/summary', requireJWTAuth, async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 7;
+      
+      // Validate days parameter
+      if (days < 1 || days > 365) {
+        return res.status(400).json({ 
+          error: 'Invalid days parameter. Must be between 1 and 365.' 
+        });
+      }
+
+      const averages = calculateAverages(days);
+      
+      console.log(`WHOOP summary calculated for last ${days} days:`, averages);
+      
+      res.json({
+        period_days: days,
+        ...averages
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error in /api/whoop/summary:', message);
+      res.status(500).json({ 
+        error: 'Failed to calculate WHOOP summary',
+        details: message
+      });
+    }
+  });
+
+  // Meal upload endpoint
+  app.post('/api/meals', upload.array('mealPhotos', 10), async (req: Request, res: Response) => {
+    try {
+      console.log('Processing meal uploads...');
+      
+      const files = req.files as Express.Multer.File[];
+      if (!files || !Array.isArray(files) || files.length === 0) {
+        return res.status(400).json({ error: 'No files uploaded' });
+      }
+      
+      const today = getTodayDate();
+      const uploadedMeals = [];
+      
+      const userId = getCurrentUserId(req) || 'default-user';
+      
+      for (const file of files) {
+        const meal = await storage.createMeal({
+          userId: userId,
+          filename: file.filename,
+          originalName: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size,
+          date: today
+        });
+        uploadedMeals.push(meal);
+      }
+      
+      console.log(`Uploaded ${uploadedMeals.length} meal images`);
+
+      // Auto-trigger FitScore calculation if 2+ meals uploaded today
+      try {
+        const { fitScoreService } = await import('./services/fitScoreService');
+        await fitScoreService.checkMealTrigger(userId, today);
+      } catch (error) {
+        console.warn('[MEAL UPLOAD] FitScore auto-trigger failed:', error);
+      }
+
+      res.json({
+        message: `Successfully uploaded ${uploadedMeals.length} meal images`,
+        meals: uploadedMeals
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error uploading meals:', message);
+      res.status(500).json({ error: 'Failed to upload meal images', details: message });
+    }
+  });
+
+  // Get today's meals endpoint
+  app.get('/api/meals/today', async (req, res) => {
+    try {
+      console.log('Fetching today\'s meals...');
+
+      const today = getTodayDate();
+      const meals = await storage.getMealsByDate(today);
+
+      // Return full URLs including domain
+      const baseUrl = req.protocol + '://' + req.get('host');
+      const mealUrls = meals.map(meal => `${baseUrl}/uploads/${meal.filename}`);
+
+      console.log(`Found ${meals.length} meals for today`);
+      res.json(mealUrls);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching meals:', message);
+      res.status(500).json({ error: 'Failed to fetch today\'s meals', details: message });
+    }
+  });
+
+  // Get yesterday's meals endpoint
+  app.get('/api/meals/yesterday', async (req, res) => {
+    try {
+      console.log('Fetching yesterday\'s meals...');
+
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+      const meals = await storage.getMealsByDate(yesterdayStr);
+
+      // Return full URLs including domain
+      const baseUrl = req.protocol + '://' + req.get('host');
+      const mealUrls = meals.map(meal => `${baseUrl}/uploads/${meal.filename}`);
+
+      console.log(`Found ${meals.length} meals for yesterday (${yesterdayStr})`);
+      res.json(mealUrls);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching yesterday\'s meals:', message);
+      res.status(500).json({ error: 'Failed to fetch yesterday\'s meals', details: message });
+    }
+  });
+
+  // Get all meals (for dashboard)
+  app.get('/api/meals', async (req, res) => {
+    try {
+      const meals = await storage.getAllMeals();
+      res.json(meals);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching all meals:', message);
+      res.status(500).json({ error: 'Failed to fetch meals', details: message });
+    }
+  });
+
+  // User-specific calendar today's events endpoint
+  app.get('/api/calendar/today', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('Fetching today\'s calendar events...');
+      
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      // Get user's calendars from database
+      const userCalendars = await storage.getUserCalendars(userId);
+      
+      if (userCalendars.length === 0) {
+        return res.json({
+          date: DateTime.now().setZone('Europe/Zurich').toISODate(),
+          events: [],
+          message: 'No calendars configured. Add a calendar in your profile to see events.'
+        });
+      }
+      
+      const calendarUrls = userCalendars
+        .filter(cal => cal.isActive)
+        .map(cal => cal.calendarUrl);
+      
+      // Use Europe/Zurich timezone for accurate date/time handling
+      const zurichTime = DateTime.now().setZone('Europe/Zurich');
+      const todayStart = zurichTime.startOf('day');
+      const todayEnd = zurichTime.endOf('day');
+      
+      const allEvents: any[] = [];
+      
+      // Fetch and parse each calendar
+      for (const calendarUrl of calendarUrls) {
+        try {
+          console.log(`Fetching calendar from: ${calendarUrl}`);
+          const response = await fetch(calendarUrl);
+          
+          if (!response.ok) {
+            console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
+            continue;
+          }
+          
+          const icsData = await response.text();
+          const parsedCal = ical.parseICS(icsData);
+          
+          // Filter events for today
+          Object.keys(parsedCal).forEach(key => {
+            const event = parsedCal[key];
+            
+            if (event.type === 'VEVENT' && event.start && event.summary) {
+              // Convert event times to Europe/Zurich timezone
+              const eventStart = DateTime.fromJSDate(new Date(event.start)).setZone('Europe/Zurich');
+              const eventEnd = event.end ? DateTime.fromJSDate(new Date(event.end)).setZone('Europe/Zurich') : eventStart;
+              
+              // Check if event is today and not in the past
+              const now = DateTime.now().setZone('Europe/Zurich');
+              const isToday = eventStart >= todayStart && eventStart <= todayEnd;
+              const isFutureOrActive = eventEnd >= now;
+              
+              if (isToday && isFutureOrActive) {
+                allEvents.push({
+                  title: event.summary,
+                  start: eventStart.toISO(), // Returns ISO string with timezone info
+                  location: event.location || null,
+                  startTime: eventStart.toFormat('HH:mm'), // 24-hour format for display
+                  endTime: eventEnd.toFormat('HH:mm')
+                });
+              }
+            }
+          });
+        } catch (error) {
+          console.error(`Error parsing calendar ${calendarUrl}:`, error);
+        }
+      }
+      
+      // Sort events by start time
+      allEvents.sort((a, b) => DateTime.fromISO(a.start).toMillis() - DateTime.fromISO(b.start).toMillis());
+      
+      const result = {
+        date: zurichTime.toISODate(), // Returns YYYY-MM-DD format
+        events: allEvents
+      };
+      
+      console.log(`Found ${allEvents.length} events for today`);
+      res.json(result);
+      
+    } catch (error) {
+      console.error('Error fetching calendar events:', error);
+      res.status(500).json({ 
+        error: 'Failed to fetch calendar events',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // User-specific calendar events endpoint with date range support
+  app.get('/api/calendar/events', requireJWTAuth, async (req, res) => {
+    try {
+      const { start, end } = req.query as { start?: string; end?: string };
+      
+      if (!start || !end) {
+        return res.status(400).json({ error: 'start and end date parameters are required' });
+      }
+
+      console.log(`Fetching calendar events from ${start} to ${end}...`);
+      
+      // Get current user ID from session
+      const userId = getCurrentUserId(req);
+      
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      
+      // Get user's calendars from database
+      const userCalendars = await storage.getUserCalendars(userId);
+      
+      if (userCalendars.length === 0) {
+        return res.json({
+          events: [],
+          range: { start, end },
+          message: 'No calendars configured. Add a calendar in your profile to see events.'
+        });
+      }
+      
+      const calendarUrls = userCalendars
+        .filter(cal => cal.isActive)
+        .map(cal => cal.calendarUrl);
+      
+      // Use Europe/Zurich timezone for date range
+      const rangeStart = DateTime.fromISO(start).setZone('Europe/Zurich').startOf('day');
+      const rangeEnd = DateTime.fromISO(end).setZone('Europe/Zurich').endOf('day');
+      
+      const allEvents: any[] = [];
+      
+      // Fetch and parse each calendar
+      for (const calendarUrl of calendarUrls) {
+        try {
+          console.log(`Fetching calendar from: ${calendarUrl}`);
+          const response = await fetch(calendarUrl);
+          
+          if (!response.ok) {
+            console.error(`Failed to fetch calendar: ${response.status} ${response.statusText}`);
+            continue;
+          }
+          
+          const icsData = await response.text();
+          const parsedCal = ical.parseICS(icsData);
+          
+          // Filter events for date range
+          Object.keys(parsedCal).forEach(key => {
+            const event = parsedCal[key];
+            
+            if (event.type === 'VEVENT' && event.start && event.summary) {
+              const eventStart = DateTime.fromJSDate(new Date(event.start)).setZone('Europe/Zurich');
+              const eventEnd = event.end ? DateTime.fromJSDate(new Date(event.end)).setZone('Europe/Zurich') : eventStart;
+              
+              // Check if event overlaps with the requested range
+              const eventOverlaps = eventStart <= rangeEnd && eventEnd >= rangeStart;
+              
+              if (eventOverlaps) {
+                allEvents.push({
+                  id: key,
+                  title: event.summary,
+                  start: eventStart.toISO(),
+                  end: eventEnd.toISO(),
+                  startTime: eventStart.toFormat('HH:mm'),
+                  endTime: eventEnd.toFormat('HH:mm'),
+                  location: event.location || null,
+                  date: eventStart.toISODate()
+                });
+              }
+            }
+          });
+        } catch (error) {
+          console.error(`Error parsing calendar ${calendarUrl}:`, error);
+        }
+      }
+      
+      // Sort events by start time
+      allEvents.sort((a, b) => DateTime.fromISO(a.start).toMillis() - DateTime.fromISO(b.start).toMillis());
+      
+      const result = {
+        events: allEvents,
+        range: {
+          start: rangeStart.toISODate(),
+          end: rangeEnd.toISODate()
+        }
+      };
+      
+      console.log(`Found ${allEvents.length} events in date range`);
+      res.json(result);
+      
+    } catch (error) {
+      console.error('Error fetching calendar events:', error);
+      res.status(500).json({ 
+        error: 'Failed to fetch calendar events',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Calendar Management Endpoints
+  
+  // Get user's calendars
+  app.get('/api/calendars', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+      const calendars = await storage.getUserCalendars(userId);
+
+      // Transform to match mobile app expectations (name instead of calendarName)
+      const transformedCalendars = calendars.map(cal => ({
+        id: cal.id,
+        calendar_url: cal.calendarUrl,
+        name: cal.calendarName, // Map calendarName to name
+        is_active: cal.isActive
+      }));
+
+      res.json(transformedCalendars);
+    } catch (error) {
+      console.error('Error fetching calendars:', error);
+      res.status(500).json({ error: 'Failed to fetch calendars' });
+    }
+  });
+
+  // Add new calendar
+  app.post('/api/calendars', requireJWTAuth, async (req, res) => {
+    try {
+      const { calendarUrl, calendarName } = req.body;
+      const userId = getCurrentUserId(req);
+      
+      console.log('[CALENDAR] Add request - URL:', calendarUrl, 'Name:', calendarName, 'UserId:', userId);
+      
+      if (!calendarUrl || !calendarName) {
+        console.log('[CALENDAR] Missing required fields');
+        return res.status(400).json({ error: 'Calendar URL and name are required' });
+      }
+      
+      if (!userId) {
+        console.log('[CALENDAR] User ID not found in JWT');
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      // Validate the calendar URL format
+      if (!calendarUrl.includes('calendar.google.com') && !calendarUrl.includes('.ics')) {
+        console.log('[CALENDAR] Invalid URL format');
+        return res.status(400).json({ error: 'Please provide a valid Google Calendar ICS URL' });
+      }
+      
+      const calendar = await storage.createUserCalendar({
+        userId: userId,
+        calendarUrl,
+        calendarName,
+        isActive: true
+      });
+      
+      console.log('[CALENDAR] Calendar created successfully:', calendar);
+      res.json(calendar);
+    } catch (error) {
+      console.error('Error creating calendar:', error);
+      res.status(500).json({ error: 'Failed to create calendar' });
+    }
+  });
+
+  // Delete calendar
+  app.delete('/api/calendars/:id', requireJWTAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteUserCalendar(id);
+      res.json({ message: 'Calendar deleted successfully' });
+    } catch (error) {
+      console.error('Error deleting calendar:', error);
+      res.status(500).json({ error: 'Failed to delete calendar' });
+    }
+  });
+
+  // Update calendar (toggle active status or change name)
+  app.patch('/api/calendars/:id', requireJWTAuth, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const updates = req.body;
+
+      const calendar = await storage.updateUserCalendar(id, updates);
+      res.json(calendar);
+    } catch (error) {
+      console.error('Error updating calendar:', error);
+      res.status(500).json({ error: 'Failed to update calendar' });
+    }
+  });
+
+  // Chat summarization endpoints
+  console.log('[ROUTE] POST /api/chat/summarize');
+  app.post('/api/chat/summarize', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[CHAT SUMMARIZE] Summarizing conversation for user: ${userId}`);
+
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      await chatSummarizationService.summarizeUserConversation(userId);
+
+      res.json({
+        message: 'Conversation summarized successfully',
+        userId
+      });
+    } catch (error) {
+      console.error('[CHAT SUMMARIZE] Error:', error);
+      res.status(500).json({
+        error: 'Failed to summarize conversation',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Admin endpoint to trigger summarization for all users (for cron jobs)
+  console.log('[ROUTE] POST /api/chat/summarize-all');
+  app.post('/api/chat/summarize-all', async (req, res) => {
+    try {
+      // Optional: Add admin authentication or API key check here
+      const authHeader = req.headers.authorization;
+      const adminKey = process.env.ADMIN_API_KEY || 'default-admin-key-change-me';
+
+      if (authHeader !== `Bearer ${adminKey}`) {
+        return res.status(401).json({ error: 'Unauthorized - admin key required' });
+      }
+
+      console.log('[CHAT SUMMARIZE ALL] Starting batch summarization');
+
+      await chatSummarizationService.summarizeAllUsers();
+
+      res.json({
+        message: 'Successfully summarized conversations for all active users'
+      });
+    } catch (error) {
+      console.error('[CHAT SUMMARIZE ALL] Error:', error);
+      res.status(500).json({
+        error: 'Failed to summarize all conversations',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Onboarding routes
+  console.log('[ROUTE] Importing onboarding routes');
+  const onboardingRoutes = (await import('./routes/onboarding')).default;
+  app.use('/api/onboarding', onboardingRoutes);
+  console.log('[ROUTE] GET /api/onboarding');
+  console.log('[ROUTE] POST /api/onboarding');
+  console.log('[ROUTE] GET /api/onboarding/questions');
+  console.log('[ROUTE] GET /api/onboarding/status');
+  console.log('[ROUTE] POST /api/onboarding/reset');
+
+  // Serve ai-plugin.json for Custom GPT integration
+  app.get('/ai-plugin.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    const pluginManifest = {
+      "schema_version": "v1",
+      "name_for_human": "FitScore Health Dashboard",
+      "name_for_model": "fitscore_health",
+      "description_for_human": "Access your WHOOP fitness data, meal tracking, and calendar integration through a comprehensive health dashboard.",
+      "description_for_model": "FitScore Health Dashboard provides access to WHOOP fitness metrics (recovery, sleep, strain, HRV), meal photo uploads, and Google Calendar integration. Use this to retrieve health data, track meals, and manage calendar events for health and productivity insights.",
+      "auth": {
+        "type": "user_http",
+        "authorization_type": "bearer",
+        "verification_tokens": {}
+      },
+      "api": {
+        "type": "openapi",
+        "url": `${req.protocol}://${req.get('host')}/openapi.yaml`
+      },
+      "logo_url": `${req.protocol}://${req.get('host')}/generated-icon.png`,
+      "contact_email": "support@fitscore.local",
+      "legal_info_url": `${req.protocol}://${req.get('host')}`
+    };
+    res.json(pluginManifest);
+  });
+
+  // Serve OpenAPI specification for Custom GPT integration
+  app.get('/openapi.yaml', (req, res) => {
+    res.setHeader('Content-Type', 'text/yaml');
+    res.sendFile(path.join(process.cwd(), 'openapi.yaml'));
+  });
+
+  // Static file serving
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+  const httpServer = createServer(app);
+  return httpServer;
+}

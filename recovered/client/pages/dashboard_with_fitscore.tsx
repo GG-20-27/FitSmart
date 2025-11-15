@@ -1,0 +1,892 @@
+import { useState, useEffect } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Heart, Zap, Moon, Activity, Clock, ExternalLink, TrendingUp, RefreshCw, RotateCcw, Calendar, Wind, User, LogOut, Crown } from 'lucide-react';
+import { HealthIcon } from '@/components/HealthIcon';
+import { formatTime } from '@/lib/utils';
+import { WhoopTodayResponse } from '@shared/schema';
+import { apiRequest, queryClient } from '@/lib/queryClient';
+import { useAuth } from '@/hooks/useAuth';
+import { Link } from 'wouter';
+
+interface WhoopAuthStatus {
+  authenticated: boolean;
+  message: string;
+  auth_url?: string;
+  expires_at?: number;
+}
+
+interface WhoopSummary {
+  avgRecovery: number | null;
+  avgStrain: number | null;
+  avgSleep: number | null;
+  avgHRV: number | null;
+}
+
+interface CountUpProps {
+  end: number;
+  duration?: number;
+  suffix?: string;
+  decimals?: number;
+}
+
+function CountUp({ end, duration = 1000, suffix = "", decimals = 0 }: CountUpProps) {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    let startTime: number;
+    let animationFrame: number;
+
+    const animate = (currentTime: number) => {
+      if (!startTime) startTime = currentTime;
+      const progress = Math.min((currentTime - startTime) / duration, 1);
+      
+      const easeOut = 1 - Math.pow(1 - progress, 3);
+      setCount(end * easeOut);
+
+      if (progress < 1) {
+        animationFrame = requestAnimationFrame(animate);
+      }
+    };
+
+    animationFrame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [end, duration]);
+
+  return (
+    <span>
+      {decimals > 0 ? count.toFixed(decimals) : Math.floor(count)}{suffix}
+    </span>
+  );
+}
+
+function CircularProgress({ value, max = 100, size = 120, strokeWidth = 8, color = "#3b82f6" }: {
+  value: number;
+  max?: number;
+  size?: number;
+  strokeWidth?: number;
+  color?: string;
+}) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const percentage = (value / max) * 100;
+  const strokeDashoffset = circumference - (percentage / 100) * circumference;
+
+  return (
+    <div className="relative inline-flex items-center justify-center">
+      <svg width={size} height={size} className="transform -rotate-90">
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          fill="none"
+          className="text-slate-700"
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          fill="none"
+          strokeDasharray={circumference}
+          strokeDashoffset={strokeDashoffset}
+          className="transition-all duration-1000 ease-out drop-shadow-sm"
+          style={{
+            filter: `drop-shadow(0 0 8px ${color}40)`
+          }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="text-2xl font-bold text-white">
+          <CountUp end={value} suffix="%" duration={1200} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function FitScoreLogo({ className = "", size = 64 }: { className?: string; size?: number }) {
+  return (
+    <div className={`relative flex items-center justify-center ${className}`} style={{ width: size, height: size }}>
+      <svg 
+        width={size} 
+        height={size} 
+        viewBox="0 0 100 100" 
+        fill="none" 
+        xmlns="http://www.w3.org/2000/svg"
+        className="drop-shadow-lg"
+      >
+        <defs>
+          <linearGradient id="logoGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#06B6D4" />
+            <stop offset="30%" stopColor="#3B82F6" />
+            <stop offset="70%" stopColor="#8B5CF6" />
+            <stop offset="100%" stopColor="#D946EF" />
+          </linearGradient>
+          <filter id="logoGlow">
+            <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+            <feMerge> 
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        
+        {/* Background circle with gradient fill matching the page background */}
+        <circle 
+          cx="50" 
+          cy="50" 
+          r="48" 
+          fill="rgba(30, 41, 59, 0.8)"
+          stroke="url(#logoGradient)"
+          strokeWidth="1"
+          filter="url(#logoGlow)"
+        />
+        
+        {/* Outer ring - dashed circle */}
+        <circle
+          cx="50"
+          cy="50"
+          r="40"
+          fill="none"
+          stroke="url(#logoGradient)"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray="120 15"
+          opacity="0.9"
+        />
+        
+        {/* Heartbeat line */}
+        <path
+          d="M15 50 L20 50 L25 35 L30 65 L35 20 L40 80 L45 50 L50 40 L55 60 L60 50 L65 45 L70 55 L75 50 L85 50"
+          fill="none"
+          stroke="url(#logoGradient)"
+          strokeWidth="2.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.95"
+        />
+        
+        {/* Center pulse dot */}
+        <circle
+          cx="50"
+          cy="50"
+          r="2.5"
+          fill="url(#logoGradient)"
+          opacity="1"
+        >
+          <animate
+            attributeName="r"
+            values="2.5;4;2.5"
+            dur="2s"
+            repeatCount="indefinite"
+          />
+          <animate
+            attributeName="opacity"
+            values="1;0.6;1"
+            dur="2s"
+            repeatCount="indefinite"
+          />
+        </circle>
+      </svg>
+    </div>
+  );
+}
+
+export default function Dashboard() {
+  const { user, logout, isLoggingOut } = useAuth();
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+  
+  // Since we're using JWT authentication, if user is authenticated, they can access WHOOP data
+  const { data: whoopData, isLoading: whoopLoading, refetch: refetchWhoop, error: whoopError } = useQuery<WhoopTodayResponse>({
+    queryKey: ['/api/whoop/today'],
+    enabled: !!user, // Enable if user is JWT authenticated
+    retry: (failureCount, error: any) => {
+      if (error?.response?.status === 401) {
+        console.log('[DASHBOARD] WHOOP authentication expired, user needs to reconnect');
+        // Force refresh auth status when 401 error occurs
+        queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+        return false;
+      }
+      return failureCount < 3;
+    },
+    refetchInterval: user ? 5 * 60 * 1000 : false, // Auto-refresh every 5 minutes if authenticated
+  });
+
+  // Set last sync when data changes
+  useEffect(() => {
+    if (whoopData) {
+      setLastSync(new Date());
+    }
+  }, [whoopData]);
+
+  const { data: whoopSummary, isLoading: summaryLoading } = useQuery<WhoopSummary>({
+    queryKey: ['/api/whoop/weekly'],
+    enabled: !!user, // Enable if user is JWT authenticated
+    retry: 3,
+    refetchInterval: 10 * 60 * 1000, // Refresh every 10 minutes
+  });
+
+  // Connect to WHOOP OAuth mutation
+  const connectWhoopMutation = useMutation({
+    mutationFn: async () => {
+      // Open WHOOP OAuth in new window
+      window.open('/api/whoop/login', '_blank', 'width=600,height=700');
+      return Promise.resolve();
+    },
+    onSuccess: () => {
+      console.log('WHOOP OAuth window opened');
+      // Refresh user data after a delay to check for new token
+      setTimeout(() => {
+        queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+        queryClient.invalidateQueries({ queryKey: ['/api/whoop/today'] });
+      }, 2000);
+    },
+  });
+
+  // For JWT auth, user is connected if they have a valid token (whoopData may be loading)
+  const isWhoopConnected = !!user;
+  const isLoading = whoopLoading;
+  const hasError = whoopError;
+
+  // Debug logging to understand why data isn't showing
+  useEffect(() => {
+    console.log('[DASHBOARD DEBUG] User:', user);
+    console.log('[DASHBOARD DEBUG] WHOOP Data:', whoopData);
+    console.log('[DASHBOARD DEBUG] Loading:', whoopLoading);
+    console.log('[DASHBOARD DEBUG] Error:', whoopError);
+    console.log('[DASHBOARD DEBUG] Token in localStorage:', localStorage.getItem('auth_token'));
+  }, [user, whoopData, whoopLoading, whoopError]);
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      <div className="container mx-auto px-3 sm:px-4 py-4 sm:py-6 lg:py-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 sm:mb-8 lg:mb-12 space-y-4 sm:space-y-0">
+          <div className="flex items-center space-x-3 sm:space-x-4">
+            <div className="flex-shrink-0">
+              <FitScoreLogo size={40} className="sm:w-12 sm:h-12" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white">FitScore Health Dashboard</h1>
+              <p className="text-slate-400 text-xs sm:text-sm lg:text-base hidden sm:block">Real-time WHOOP health analytics</p>
+              <p className="text-slate-400 text-xs sm:hidden">WHOOP Analytics</p>
+            </div>
+          </div>
+          
+          <div className="flex flex-row items-center justify-center lg:justify-end space-x-2 sm:space-x-3">
+            {/* Navigation Buttons */}
+            <Link href="/calendar">
+              <Button
+                variant="outline"
+                size="sm"
+                className="relative overflow-hidden border-transparent bg-gradient-to-r from-emerald-500 to-teal-600 text-white hover:from-emerald-600 hover:to-teal-700"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-teal-500 opacity-30 animate-pulse"></div>
+                <div className="relative flex items-center space-x-2">
+                  <Calendar className="h-4 w-4" />
+                  <span className="text-xs sm:text-sm font-medium hidden sm:inline">Calendar</span>
+                </div>
+              </Button>
+            </Link>
+            
+            <Link href="/profile">
+              <Button
+                variant="outline"
+                size="sm"
+                className="relative overflow-hidden border-transparent bg-gradient-to-r from-purple-500 to-indigo-600 text-white hover:from-purple-600 hover:to-indigo-700"
+              >
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-400 to-indigo-500 opacity-30 animate-pulse"></div>
+                <div className="relative flex items-center space-x-2">
+                  <User className="h-4 w-4" />
+                  <span className="text-xs sm:text-sm font-medium hidden sm:inline">Profile</span>
+                </div>
+              </Button>
+            </Link>
+            
+
+            
+            {/* Admin Panel - Only for admin users */}
+            {user?.role === 'admin' && (
+              <Link href="/admin">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="relative overflow-hidden border-transparent bg-gradient-to-r from-orange-500 to-red-600 text-white hover:from-orange-600 hover:to-red-700"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-r from-orange-400 to-red-500 opacity-30 animate-pulse"></div>
+                  <div className="relative flex items-center space-x-2">
+                    <Crown className="h-4 w-4" />
+                    <span className="text-xs sm:text-sm font-medium hidden sm:inline">Admin</span>
+                  </div>
+                </Button>
+              </Link>
+            )}
+            
+            {/* Logout Button */}
+            <Button
+              onClick={() => logout()}
+              variant="outline"
+              size="sm"
+              disabled={isLoggingOut}
+              className="relative overflow-hidden border-transparent bg-gradient-to-r from-red-500 to-pink-600 text-white hover:from-red-600 hover:to-pink-700"
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-red-400 to-pink-500 opacity-30 animate-pulse"></div>
+              <div className="relative flex items-center space-x-2">
+                {isLoggingOut ? (
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <LogOut className="h-4 w-4" />
+                )}
+                <span className="text-xs sm:text-sm font-medium hidden sm:inline">
+                  {isLoggingOut ? 'Logging out...' : 'Logout'}
+                </span>
+              </div>
+            </Button>
+          </div>
+        </div>
+
+        {/* Today's Health Metrics */}
+        <div className="text-center mb-6 sm:mb-8 lg:mb-12">
+          <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white mb-2">Today's Health Metrics</h2>
+          <p className="text-slate-400 text-sm sm:text-base lg:text-lg">Live data from your WHOOP device</p>
+          {lastSync && (
+            <div className="flex items-center justify-center mt-3 sm:mt-4 text-xs sm:text-sm text-slate-500">
+              <Clock className="h-3 w-3 sm:h-4 sm:w-4 mr-2" />
+              <span>Last sync: {formatTime(lastSync)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Authentication Status */}
+        {!isWhoopConnected && !isLoading && (
+          <div className="max-w-2xl mx-auto mb-6 sm:mb-8">
+            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+              <CardContent className="p-4 sm:p-6 text-center">
+                <div className="flex justify-center mb-4">
+                  <FitScoreLogo size={64} />
+                </div>
+                <h3 className="text-xl font-semibold text-white mb-2">Connect Your WHOOP</h3>
+                <p className="text-slate-400 mb-4">
+                  Connect your WHOOP account to view real-time health metrics and analytics.
+                </p>
+                <Button 
+                  onClick={() => connectWhoopMutation.mutate()}
+                  className="bg-gradient-to-r from-[#00D4FF] to-[#0099FF] hover:from-[#00C4EF] hover:to-[#0089EF] text-white shadow-[0_0_20px_rgba(0,212,255,0.3)] hover:shadow-[0_0_25px_rgba(0,212,255,0.4)] transition-all duration-200"
+                  disabled={connectWhoopMutation.isPending}
+                >
+                  {connectWhoopMutation.isPending ? (
+                    <div className="flex items-center space-x-2">
+                      <div className="w-4 h-4 border-2 border-[#00D4FF]/30 border-t-[#00D4FF] rounded-full animate-spin shadow-[0_0_10px_rgba(0,212,255,0.5)]"></div>
+                      <span>Connecting...</span>
+                    </div>
+                  ) : (
+                    <>
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Connect WHOOP
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Connection Controls - Show when connected */}
+        {isWhoopConnected && (
+          <div className="max-w-2xl mx-auto mb-6 sm:mb-8">
+            <Card className="bg-slate-800/50 border-slate-700 backdrop-blur-sm">
+              <CardContent className="p-3 sm:p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    <span className="text-slate-300 font-medium text-sm">WHOOP Connected</span>
+                  </div>
+                  <div className="flex space-x-2">
+                    <Button
+                      onClick={() => connectWhoopMutation.mutate()}
+                      disabled={connectWhoopMutation.isPending}
+                      variant="outline"
+                      size="sm"  
+                      className="bg-transparent border-0 bg-gradient-to-r from-[#00D4FF] to-[#0099FF] text-white hover:from-[#00C4EF] hover:to-[#0089EF] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-cyan-400/50 shadow-[0_0_20px_rgba(0,212,255,0.3)]"
+                    >
+                      {connectWhoopMutation.isPending ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Reconnecting...
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw className="w-4 h-4 mr-2" />
+                          Reconnect
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      onClick={() => {
+                        refetchWhoop();
+                        window.location.reload();
+                      }}
+                      disabled={whoopLoading}
+                      variant="outline"
+                      size="sm"
+                      className="bg-transparent border-2 border-[#00D4FF] text-[#00D4FF] hover:bg-gradient-to-r hover:from-[#00D4FF] hover:to-[#0099FF] hover:text-white hover:border-transparent transition-all duration-200 hover:shadow-[0_0_20px_rgba(0,212,255,0.3)]"
+                    >
+                      {whoopLoading ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+
+        {/* Main Metrics Cards */}
+        {isWhoopConnected && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8 sm:mb-12 lg:mb-16">
+          {/* Sleep Score Card */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-4 sm:p-6 text-center">
+              <div className="mb-3 sm:mb-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
+                  <Moon className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-purple-400">
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.sleep_score !== null && whoopData?.sleep_score !== undefined ? (
+                    <><CountUp end={Math.min(whoopData.sleep_score, 100)} duration={1200} />%</>
+                  ) : (
+                    <span className="text-slate-500">N/A</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Moon className="h-4 w-4 sm:h-5 sm:w-5 text-purple-400" />
+                <span className="text-slate-300 font-medium text-sm sm:text-base">Sleep Score</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Recovery Card */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-4 sm:p-6 text-center">
+              <div className="mb-3 sm:mb-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
+                  <Heart className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-blue-400">
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.recovery_score !== null && whoopData?.recovery_score !== undefined ? (
+                    <><CountUp end={whoopData.recovery_score} duration={1200} />%</>
+                  ) : (
+                    <span className="text-slate-500">N/A</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Heart className="h-4 w-4 sm:h-5 sm:w-5 text-blue-400" />
+                <span className="text-slate-300 font-medium text-sm sm:text-base">Recovery</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Strain Card */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-6 text-center">
+              <div className="mb-4">
+                <div className="w-16 h-16 bg-orange-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <Zap className="h-8 w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-orange-400">
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.strain !== null && whoopData?.strain !== undefined ? (
+                    <CountUp end={whoopData.strain} decimals={1} duration={1200} />
+                  ) : (
+                    <span className="text-slate-500">N/A</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Zap className="h-5 w-5 text-orange-400" />
+                <span className="text-slate-300 font-medium">Strain</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* HRV Card */}
+          <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+            <CardContent className="p-4 sm:p-6 text-center">
+              <div className="mb-3 sm:mb-4">
+                <div className="w-12 h-12 sm:w-16 sm:h-16 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-2 sm:mb-3">
+                  <Activity className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
+                </div>
+                <div className="text-2xl font-bold text-red-400">
+                  {whoopLoading ? (
+                    <span className="text-slate-400">Syncing...</span>
+                  ) : whoopData?.hrv !== null && whoopData?.hrv !== undefined ? (
+                    <><CountUp end={whoopData.hrv} duration={1200} /> ms</>
+                  ) : (
+                    <span className="text-slate-500">N/A</span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-center space-x-2">
+                <Activity className="h-4 w-4 sm:h-5 sm:w-5 text-red-400" />
+                <span className="text-slate-300 font-medium text-sm sm:text-base">HRV</span>
+              </div>
+            </CardContent>
+          </Card>
+          </div>
+        )}
+
+        {/* Weekly Averages Section */}
+        {isWhoopConnected && whoopSummary && (
+          <div className="mt-16">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
+                <TrendingUp className="h-8 w-8 mr-3 text-cyan-400" />
+                Weekly Averages
+              </h2>
+              <p className="text-slate-400">7-day trends and performance insights</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+              {/* Weekly Sleep Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-purple-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Moon className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-purple-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgSleep !== null && whoopSummary?.avgSleep !== undefined ? (
+                        <><CountUp end={whoopSummary.avgSleep} decimals={1} duration={1200} />%</>
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Moon className="h-5 w-5 text-purple-400" />
+                    <span className="text-slate-300 font-medium">Avg Sleep</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Weekly Recovery Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-blue-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Heart className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-blue-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgRecovery !== null && whoopSummary?.avgRecovery !== undefined ? (
+                        <><CountUp end={whoopSummary.avgRecovery} decimals={1} duration={1200} />%</>
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Heart className="h-5 w-5 text-blue-400" />
+                    <span className="text-slate-300 font-medium">Avg Recovery</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Weekly Strain Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-orange-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Zap className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-orange-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgStrain !== null && whoopSummary?.avgStrain !== undefined ? (
+                        <CountUp end={whoopSummary.avgStrain} decimals={1} duration={1200} />
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Zap className="h-5 w-5 text-orange-400" />
+                    <span className="text-slate-300 font-medium">Avg Strain</span>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Weekly HRV Average */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6 text-center">
+                  <div className="mb-4">
+                    <div className="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center mx-auto mb-3">
+                      <Activity className="h-8 w-8 text-white" />
+                    </div>
+                    <div className="text-2xl font-bold text-red-400">
+                      {summaryLoading ? (
+                        <span className="text-slate-400">Loading...</span>
+                      ) : whoopSummary?.avgHRV !== null && whoopSummary?.avgHRV !== undefined ? (
+                        <><CountUp end={whoopSummary.avgHRV} decimals={1} duration={1200} /> ms</>
+                      ) : (
+                        <span className="text-slate-500">N/A</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-center space-x-2">
+                    <Activity className="h-5 w-5 text-red-400" />
+                    <span className="text-slate-300 font-medium">Avg HRV</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        )}
+
+        {/* Additional Health Insights */}
+        {isWhoopConnected && whoopData && (
+          <div className="mt-16">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl font-bold text-white mb-2 flex items-center justify-center">
+                <TrendingUp className="h-8 w-8 mr-3 text-cyan-400" />
+                Other Insights from Today
+              </h2>
+              <p className="text-slate-400">Detailed physiological metrics and sleep analytics</p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 sm:mb-8">
+              {/* Sleep Hours */}
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-4">
+                    <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                      <Clock className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <p className="text-slate-400 text-sm">
+                        {whoopData.sleep_hours ? "Sleep Hours" : "Time in Bed"}
+                      </p>
+                      <p className="text-2xl font-bold text-purple-400">
+                        {whoopData.sleep_hours ? (
+                          <><CountUp end={whoopData.sleep_hours} decimals={1} duration={1000} /> hrs</>
+                        ) : whoopData.time_in_bed_hours ? (
+                          <><CountUp end={whoopData.time_in_bed_hours} decimals={1} duration={1000} /> hrs</>
+                        ) : (
+                          <span className="text-slate-500">N/A</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {whoopData.sleep_hours ? "Time actually asleep" : whoopData.time_in_bed_hours ? "Total time spent in bed" : "Sleep data not available"}
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Resting Heart Rate */}
+              {whoopData.resting_heart_rate && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-red-500 rounded-full flex items-center justify-center">
+                        <Heart className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Resting Heart Rate</p>
+                        <p className="text-2xl font-bold text-red-400">
+                          <CountUp end={whoopData.resting_heart_rate} duration={1000} /> bpm
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Your heart rate during rest periods
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+
+
+              {/* Sleep Efficiency */}
+              {whoopData.sleep_efficiency_pct && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-teal-500 rounded-full flex items-center justify-center">
+                        <Activity className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Sleep Efficiency</p>
+                        <p className="text-2xl font-bold text-teal-400">
+                          <CountUp end={whoopData.sleep_efficiency_pct} duration={1000} />%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Time asleep vs. time in bed
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Respiratory Rate */}
+              {whoopData.raw?.sleep?.score?.respiratory_rate && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-cyan-500 rounded-full flex items-center justify-center">
+                        <Wind className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Respiratory Rate</p>
+                        <p className="text-2xl font-bold text-cyan-400">
+                          <CountUp end={whoopData.raw.sleep.score.respiratory_rate} decimals={1} duration={1000} /> bpm
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Breaths per minute during sleep
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Sleep Consistency */}
+              {whoopData.raw?.sleep?.score?.sleep_consistency_percentage && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-violet-500 rounded-full flex items-center justify-center">
+                        <Clock className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Sleep Consistency</p>
+                        <p className="text-2xl font-bold text-violet-400">
+                          <CountUp end={whoopData.raw.sleep.score.sleep_consistency_percentage} duration={1000} />%
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Consistency of sleep schedule
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Sleep Cycles */}
+              {whoopData.raw?.sleep?.score?.stage_summary?.sleep_cycle_count && (
+                <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm hover:bg-slate-800/70 transition-all duration-300">
+                  <CardContent className="p-6">
+                    <div className="flex items-center space-x-3 mb-4">
+                      <div className="w-12 h-12 bg-amber-500 rounded-full flex items-center justify-center">
+                        <RotateCcw className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <p className="text-slate-400 text-sm">Sleep Cycles</p>
+                        <p className="text-2xl font-bold text-amber-400">
+                          <CountUp end={whoopData.raw.sleep.score.stage_summary.sleep_cycle_count} duration={1000} />
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500">
+                      Complete sleep cycles completed
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+
+
+
+            </div>
+
+            {/* Sleep Stages Breakdown */}
+            {whoopData.sleep_stages && (
+              <Card className="bg-slate-800/50 border-slate-700/50 backdrop-blur-sm">
+                <CardContent className="p-6">
+                  <div className="flex items-center space-x-3 mb-6">
+                    <div className="w-12 h-12 bg-purple-500 rounded-full flex items-center justify-center">
+                      <Moon className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Sleep Stages Breakdown</h3>
+                      <p className="text-slate-400 text-sm">Time spent in each sleep stage</p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    {/* Light Sleep */}
+                    <div className="text-center p-4 bg-slate-700/30 rounded-lg">
+                      <div className="text-2xl font-bold text-blue-400 mb-2">
+                        <CountUp 
+                          end={whoopData.sleep_stages.light_sleep_minutes || 0} 
+                          duration={1000} 
+                        /> min
+                      </div>
+                      <p className="text-slate-300 text-sm font-medium">Light Sleep</p>
+                      <p className="text-xs text-slate-500">Easy to wake from</p>
+                    </div>
+
+                    {/* Deep Sleep */}
+                    <div className="text-center p-4 bg-slate-700/30 rounded-lg">
+                      <div className="text-2xl font-bold text-purple-400 mb-2">
+                        <CountUp 
+                          end={whoopData.sleep_stages.deep_sleep_minutes || 0} 
+                          duration={1000} 
+                        /> min
+                      </div>
+                      <p className="text-slate-300 text-sm font-medium">Deep Sleep</p>
+                      <p className="text-xs text-slate-500">Physical recovery</p>
+                    </div>
+
+                    {/* REM Sleep */}
+                    <div className="text-center p-4 bg-slate-700/30 rounded-lg">
+                      <div className="text-2xl font-bold text-green-400 mb-2">
+                        <CountUp 
+                          end={whoopData.sleep_stages.rem_sleep_minutes || 0} 
+                          duration={1000} 
+                        /> min
+                      </div>
+                      <p className="text-slate-300 text-sm font-medium">REM Sleep</p>
+                      <p className="text-xs text-slate-500">Mental recovery</p>
+                    </div>
+
+                    {/* Awake Time */}
+                    <div className="text-center p-4 bg-slate-700/30 rounded-lg">
+                      <div className="text-2xl font-bold text-orange-400 mb-2">
+                        <CountUp 
+                          end={whoopData.sleep_stages.awake_minutes || 0} 
+                          duration={1000} 
+                        /> min
+                      </div>
+                      <p className="text-slate-300 text-sm font-medium">Awake</p>
+                      <p className="text-xs text-slate-500">Time spent awake</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
