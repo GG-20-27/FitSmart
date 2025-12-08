@@ -8,6 +8,8 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { apiRequest, clearAuthToken, getAuthToken } from '../api/client';
@@ -220,8 +222,10 @@ export default function ProfileScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
-      <Text style={styles.header}>Profile Settings</Text>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" />
+      <ScrollView style={styles.container}>
+        <Text style={styles.header}>Profile Settings</Text>
 
       {/* WHOOP Connection Status */}
       <View style={styles.section}>
@@ -335,10 +339,15 @@ export default function ProfileScreen() {
         <Text style={styles.footerText}>Pull to refresh</Text>
       </View>
     </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: colors.bgPrimary,
+  },
   container: {
     flex: 1,
     backgroundColor: colors.bgPrimary,

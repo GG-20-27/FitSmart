@@ -1,7 +1,7 @@
 import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { Text, View, StyleSheet, ActivityIndicator, TouchableOpacity, Linking, Image } from 'react-native';
 import Constants from 'expo-constants';
 import DashboardScreen from './src/screens/DashboardScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
@@ -10,7 +10,7 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import GoalsScreen from './src/screens/GoalsScreen';
 import OnboardingNavigator from './src/navigation/OnboardingNavigator';
 import { getDetailedStatus } from './src/api/onboarding';
-import { API_BASE_URL } from './src/api/client';
+import { API_BASE_URL, setAuthToken, hasUserToken, clearAuthToken } from './src/api/client';
 import { navigationTheme } from './src/ui/navigationTheme';
 import { colors, spacing, radii, typography } from './src/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -87,11 +87,7 @@ function MainTabs() {
         },
         tabBarActiveTintColor: colors.accent,
         tabBarInactiveTintColor: colors.surfaceMute,
-        tabBarLabelStyle: {
-          ...typography.small,
-          fontSize: 11,
-          marginTop: 4,
-        },
+        tabBarShowLabel: false,
         tabBarIcon: ({ focused, color, size }) => {
           let iconName: keyof typeof Ionicons.glyphMap = 'home';
 
@@ -101,9 +97,7 @@ function MainTabs() {
             iconName = focused ? 'trophy' : 'trophy-outline';
           } else if (route.name === 'Calendar') {
             iconName = focused ? 'calendar' : 'calendar-outline';
-          } else if (route.name === 'Profile') {
-            iconName = focused ? 'person' : 'person-outline';
-          } else if (route.name === 'Coach') {
+          } else if (route.name === 'FitCoach') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           }
 
@@ -114,16 +108,47 @@ function MainTabs() {
       <Tab.Screen name="Home" component={DashboardScreen} />
       <Tab.Screen name="Goals" component={GoalsScreen} />
       <Tab.Screen name="Calendar" component={CalendarScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
-      <Tab.Screen name="Coach" component={ChatScreen} />
+      <Tab.Screen name="FitCoach" component={ChatScreen} />
+      <Tab.Screen
+        name="Profile"
+        component={ProfileScreen}
+        options={{ tabBarButton: () => null }}
+      />
     </Tab.Navigator>
   );
 }
 
 export default function App() {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Handle deep links for OAuth callback
+  const handleDeepLink = async (url: string) => {
+    console.log('[APP] Received deep link:', url);
+
+    // Parse the URL to extract token
+    // Expected format: fitsmart://auth?token=xxx
+    if (url.includes('auth') && url.includes('token=')) {
+      const tokenMatch = url.match(/token=([^&]+)/);
+      if (tokenMatch && tokenMatch[1]) {
+        const token = tokenMatch[1];
+        console.log('[APP] Extracted token from deep link');
+
+        // Store the token
+        await setAuthToken(token);
+        console.log('[APP] Token stored successfully');
+
+        // Refresh to show main app
+        setOnboardingComplete(true);
+        setLoading(false);
+        return;
+      }
+    }
+
+    // Not a token URL, check onboarding status
+    checkOnboardingStatus();
+  };
 
   useEffect(() => {
     // Log startup info
@@ -135,34 +160,46 @@ export default function App() {
     console.log('🔧 App Version:', Constants.expoConfig?.version || '1.0.0');
     console.log('📦 Platform:', Constants.platform?.ios ? 'iOS' : Constants.platform?.android ? 'Android' : 'Unknown');
     console.log('='.repeat(60));
-    
-    checkOnboardingStatus();
+
+    // Check for initial URL (app opened via deep link)
+    Linking.getInitialURL().then((url) => {
+      if (url) {
+        handleDeepLink(url);
+      } else {
+        checkOnboardingStatus();
+      }
+    });
+
+    // Listen for deep links while app is running
+    const subscription = Linking.addEventListener('url', (event) => {
+      handleDeepLink(event.url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
   }, [refreshKey]);
 
   const checkOnboardingStatus = async () => {
     try {
       setLoading(true);
-      
-      // Add timeout to prevent hanging on network issues
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Connection timeout')), 10000)
-      );
-      
-      const status = await Promise.race([
-        getDetailedStatus(),
-        timeoutPromise
-      ]) as any;
-      
-      console.log('[APP] Onboarding status:', status);
 
-      // Check if user has completed at least Phase 1
-      // For now, we'll show main app if phase 1 is complete
-      setOnboardingComplete(status.phase1?.complete || status.isComplete);
+      // Check if user has manually authenticated (not dev fallback)
+      const hasToken = await hasUserToken();
+      if (hasToken) {
+        console.log('[APP] Found stored auth token, showing main app');
+        setOnboardingComplete(true);
+        setLoading(false);
+        return;
+      }
+
+      console.log('[APP] No stored token, showing welcome screen');
+      setOnboardingComplete(false);
     } catch (error) {
-      console.error('[APP] Failed to check onboarding status:', error);
+      console.error('[APP] Failed to check auth status:', error);
       console.log('[APP] Error details:', error instanceof Error ? error.message : 'Unknown error');
-      
-      // On error, default to showing onboarding (better than blank screen)
+
+      // On error, default to showing welcome (need to authenticate)
       setOnboardingComplete(false);
     } finally {
       setLoading(false);
@@ -178,8 +215,12 @@ export default function App() {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={[styles.subtitle, { marginTop: spacing.md }]}>Loading...</Text>
+        <Image
+          source={require('./assets/logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <Text style={styles.welcomeText}>Welcome to FitSmart</Text>
       </View>
     );
   }
@@ -200,6 +241,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.bgPrimary,
     padding: spacing.xl,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    marginBottom: spacing.xl,
+  },
+  welcomeText: {
+    ...typography.h2,
+    color: colors.textPrimary,
+    textAlign: 'center',
   },
   title: typography.h1,
   subtitle: {

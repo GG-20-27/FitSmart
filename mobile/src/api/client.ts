@@ -60,18 +60,25 @@ export async function clearAuthToken() {
   await SecureStore.deleteItemAsync(AUTH_TOKEN_KEY);
 }
 
+// Check if user has a manually acquired token (not dev fallback)
+export async function hasUserToken(): Promise<boolean> {
+  try {
+    const token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
+    return !!token;
+  } catch {
+    return false;
+  }
+}
+
 export async function getAuthToken(): Promise<string | null> {
   try {
     let token = await SecureStore.getItemAsync(AUTH_TOKEN_KEY);
 
-    if (DEV_STATIC_JWT && token !== DEV_STATIC_JWT) {
-      if (!token) {
-        console.log('[API] No stored token found. Seeding SecureStore with EXPO_PUBLIC_STATIC_JWT');
-      } else {
-        console.log('[API] Overwriting stored token with EXPO_PUBLIC_STATIC_JWT');
-      }
-      await SecureStore.setItemAsync(AUTH_TOKEN_KEY, DEV_STATIC_JWT);
-      token = DEV_STATIC_JWT;
+    // Only use dev fallback if explicitly requested for API calls
+    // Don't auto-seed anymore to allow welcome screen to show
+    if (!token && DEV_STATIC_JWT) {
+      console.log('[API] No stored token, using DEV_STATIC_JWT for API request');
+      return DEV_STATIC_JWT;
     }
 
     return token;

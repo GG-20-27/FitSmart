@@ -18,7 +18,7 @@ import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
 import { getCurrentUserId, requireAdmin } from './authMiddleware';
-import { requireJWTAuth } from './jwtAuth';
+import { requireJWTAuth, jwtAuthMiddleware } from './jwtAuth';
 import { db } from './db';
 import { users, fitScores, userGoals } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
@@ -181,6 +181,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept']
   }));
+
+  // Apply JWT middleware globally to extract userId from token for all requests
+  app.use(jwtAuthMiddleware);
   
   // Handle pre-flight requests for all routes
   app.options('*', cors());
@@ -583,9 +586,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`[IMAGE UPLOAD] Processing ${images.length} images`);
 
-      // Upload images to ImgBB
-      const IMGBB_API_KEY = process.env.IMGBB_API_KEY || '84c0b2a7c88733fb5ad2ad1f8c5eef2e'; // Free API key
-      const uploadedUrls: string[] = [];
+      const IMGBB_API_KEY = process.env.IMGBB_API_KEY;
+
+      if (!IMGBB_API_KEY) {
+        console.warn("IMGBB_API_KEY is not set. Image upload features may not work.");
+      }
 
       for (let i = 0; i < images.length; i++) {
         const base64Image = images[i];
@@ -1592,9 +1597,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       console.log(`[WHOOP AUTH] Using static JWT token for redirect to user: ${whoopUserId} with role: ${userData.role}`);
-      
-      // Redirect to dashboard with the same static JWT token
-      res.redirect(`/#token=${staticJwtToken}`);
+
+      // Check if request is from mobile app (via User-Agent or query param)
+      const userAgent = req.headers['user-agent'] || '';
+      const isMobile = userAgent.includes('Expo') ||
+                       userAgent.includes('FitScore') ||
+                       userAgent.includes('iPhone') ||
+                       userAgent.includes('Android') ||
+                       req.query.mobile === 'true';
+
+      if (isMobile) {
+        // Direct redirect to mobile app - WebBrowser.openAuthSessionAsync will catch this
+        console.log(`[WHOOP AUTH] Redirecting to mobile app with token`);
+        res.redirect(`fitsmart://auth?token=${staticJwtToken}`);
+      } else {
+        // Redirect to web dashboard
+        res.redirect(`/#token=${staticJwtToken}`);
+      }
       
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2336,10 +2355,28 @@ ${trainingTip}. ${nutritionTip}.`;
         
         try {
           console.log(`[WHOOP TODAY] About to call whoopApiService.getTodaysData for user: ${userId}`);
+
+          // Check if WHOOP token exists for this user
+          const tokenCheck = await whoopTokenStorage.getToken(userId);
+          if (!tokenCheck) {
+            console.error(`[WHOOP TODAY] ❌ No WHOOP token found for user: ${userId}`);
+            console.error(`[WHOOP TODAY] User needs to complete WHOOP OAuth authentication`);
+          } else {
+            console.log(`[WHOOP TODAY] ✅ Found WHOOP token for user: ${userId}, expires: ${tokenCheck.expires_at ? new Date(tokenCheck.expires_at * 1000) : 'no expiration'}`);
+          }
+
           freshData = await whoopApiService.getTodaysData(userId);
-          
-          if (freshData && typeof freshData.recovery_score === 'number') {
-            const recoveryScore = freshData.recovery_score;
+          console.log(`[WHOOP TODAY] getTodaysData returned:`, JSON.stringify(freshData, null, 2).substring(0, 500));
+
+          // Accept data if we have any valid WHOOP data (cycle_id, recovery_score, or strain)
+          const hasValidData = freshData && (
+            freshData.cycle_id ||
+            typeof freshData.recovery_score === 'number' ||
+            typeof freshData.strain === 'number'
+          );
+
+          if (hasValidData) {
+            const recoveryScore = freshData.recovery_score || 0;
             const sleepScore = typeof freshData.sleep_score === 'number' ? freshData.sleep_score : 0;
             const strain = typeof freshData.strain === 'number' ? freshData.strain : 0;
             const restingHeartRate = typeof freshData.resting_heart_rate === 'number' ? freshData.resting_heart_rate : 0;
@@ -2721,12 +2758,60 @@ ${trainingTip}. ${nutritionTip}.`;
         }
       }
       
-      // Convert camelCase to snake_case for mobile app compatibility
+      // Get last month's data for comparison
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const now = DateTime.now().setZone(tz);
+      const monthAgoStart = now.minus({ days: 37 });
+      const monthAgoEnd = now.minus({ days: 30 });
+
+      let lastMonthData = { avgRecovery: 0, avgStrain: 0, avgSleep: 0, avgHRV: 0 };
+      const lastMonthCachedData = [];
+
+      for (let i = 30; i <= 37; i++) {
+        const dateIso = now.minus({ days: i }).toISODate();
+        if (!dateIso) continue;
+        const dayData = await storage.getWhoopDataByUserAndDate(userId, dateIso);
+        if (dayData) lastMonthCachedData.push(dayData);
+      }
+
+      if (lastMonthCachedData.length > 0) {
+        const count = lastMonthCachedData.length;
+        lastMonthData = {
+          avgRecovery: Math.round(lastMonthCachedData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0) / count),
+          avgStrain: Math.round((lastMonthCachedData.reduce((sum, d) => sum + (d.strainScore || 0), 0) / count) * 10) / 10,
+          avgSleep: Math.round(lastMonthCachedData.reduce((sum, d) => sum + (d.sleepScore || 0), 0) / count),
+          avgHRV: Math.round(lastMonthCachedData.reduce((sum, d) => sum + (d.hrv || 0), 0) / count)
+        };
+      }
+
+      // Calculate deltas
+      const sleepDelta = weeklyData.avgSleep && lastMonthData.avgSleep
+        ? Math.round(weeklyData.avgSleep - lastMonthData.avgSleep) : 0;
+      const recoveryDelta = weeklyData.avgRecovery && lastMonthData.avgRecovery
+        ? Math.round(weeklyData.avgRecovery - lastMonthData.avgRecovery) : 0;
+      const strainDelta = weeklyData.avgStrain && lastMonthData.avgStrain
+        ? Math.round((weeklyData.avgStrain - lastMonthData.avgStrain) * 10) / 10 : 0;
+      const hrvDelta = weeklyData.avgHRV && lastMonthData.avgHRV
+        ? Math.round(weeklyData.avgHRV - lastMonthData.avgHRV) : 0;
+
+      // Return structure matching mobile app's WeeklyMetrics type
       const response = {
-        avg_recovery: weeklyData.avgRecovery,
-        avg_strain: weeklyData.avgStrain,
-        avg_sleep: weeklyData.avgSleep,
-        avg_hrv: weeklyData.avgHRV
+        start_date: now.minus({ days: 6 }).toISODate(),
+        end_date: now.toISODate(),
+        averages: {
+          sleep_score_percent: weeklyData.avgSleep || 0,
+          recovery_score_percent: weeklyData.avgRecovery || 0,
+          strain_score: weeklyData.avgStrain || 0,
+          hrv_ms: weeklyData.avgHRV || 0
+        },
+        comparison: {
+          vs_last_month: {
+            sleep_percent_delta: sleepDelta,
+            recovery_percent_delta: recoveryDelta,
+            strain_delta: strainDelta,
+            hrv_ms_delta: hrvDelta
+          }
+        }
       };
       res.json(response);
     } catch (error) {
@@ -2748,6 +2833,78 @@ ${trainingTip}. ${nutritionTip}.`;
       
       res.status(500).json({
         error: 'Failed to fetch weekly WHOOP averages',
+        details: message
+      });
+    }
+  });
+
+  // WHOOP last week endpoint - returns metrics from 8 days ago (for yesterday vs last week comparison)
+  app.get('/api/whoop/lastweek', requireJWTAuth, async (req, res) => {
+    try {
+      console.log('[WHOOP LASTWEEK] Fetching metrics from 8 days ago...');
+
+      const userId = getCurrentUserId(req);
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required' });
+      }
+
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const now = DateTime.now().setZone(tz);
+      // Get data from 8 days ago (to compare with yesterday which is 1 day ago)
+      const lastWeekDate = now.minus({ days: 8 }).toISODate();
+
+      if (!lastWeekDate) {
+        return res.status(500).json({ error: 'Failed to calculate date' });
+      }
+
+      // Try cache first
+      let data = await storage.getWhoopDataByUserAndDate(userId, lastWeekDate);
+
+      if (!data) {
+        // Try to fetch from WHOOP API
+        console.log(`[WHOOP LASTWEEK] No cached data for ${lastWeekDate}, fetching from API...`);
+        try {
+          const apiData = await whoopApiService.getDataForDate(userId, lastWeekDate);
+          if (apiData && (apiData.recoveryScore || apiData.sleepScore || apiData.strainScore)) {
+            // Cache the fetched data
+            await storage.upsertWhoopData({
+              userId,
+              date: lastWeekDate,
+              recoveryScore: Math.round(apiData.recoveryScore || 0),
+              sleepScore: Math.round(apiData.sleepScore || 0),
+              strainScore: apiData.strainScore || 0,
+              hrv: apiData.hrv || 0,
+              restingHeartRate: Math.round(apiData.restingHeartRate || 0),
+            });
+            data = await storage.getWhoopDataByUserAndDate(userId, lastWeekDate);
+          }
+        } catch (fetchError) {
+          console.log(`[WHOOP LASTWEEK] Failed to fetch from API:`, fetchError instanceof Error ? fetchError.message : String(fetchError));
+        }
+      }
+
+      if (!data) {
+        console.log(`[WHOOP LASTWEEK] No data available for ${lastWeekDate}`);
+        return res.json({
+          sleep_score: null,
+          recovery_score: null,
+          strain: null,
+          hrv: null
+        });
+      }
+
+      console.log(`[WHOOP LASTWEEK] Returning data for ${lastWeekDate}`);
+      res.json({
+        sleep_score: data.sleepScore || null,
+        recovery_score: data.recoveryScore || null,
+        strain: data.strainScore || null,
+        hrv: data.hrv || null
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP LASTWEEK] Error:', message);
+      res.status(500).json({
+        error: 'Failed to fetch last week WHOOP data',
         details: message
       });
     }
@@ -3724,6 +3881,30 @@ ${trainingTip}. ${nutritionTip}.`;
       console.error('[CHAT SUMMARIZE ALL] Error:', error);
       res.status(500).json({
         error: 'Failed to summarize all conversations',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      });
+    }
+  });
+
+  // Delete all chat history for user
+  console.log('[ROUTE] DELETE /api/chat/history');
+  app.delete('/api/chat/history', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      console.log(`[CHAT DELETE] Deleting all chat history for user: ${userId}`);
+
+      // Delete chat history
+      await db.delete(chatHistory).where(eq(chatHistory.userId, userId));
+
+      // Delete chat summaries
+      await db.delete(chatSummaries).where(eq(chatSummaries.userId, userId));
+
+      console.log(`[CHAT DELETE] Successfully deleted all chat history for user: ${userId}`);
+      res.json({ success: true, message: 'All chat history deleted' });
+    } catch (error) {
+      console.error('[CHAT DELETE] Error:', error);
+      res.status(500).json({
+        error: 'Failed to delete chat history',
         details: error instanceof Error ? error.message : 'Unknown error'
       });
     }

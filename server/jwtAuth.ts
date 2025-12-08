@@ -61,27 +61,42 @@ export function getCurrentUserId(req: Request): string | null {
 
 // JWT-based authentication middleware for protected routes
 export function requireJWTAuth(req: Request, res: Response, next: NextFunction) {
+  // First, extract userId from JWT token if not already set
+  const authHeader = req.headers.authorization;
+
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7);
+    const payload = verifyJWT(token);
+
+    if (payload) {
+      // Set userId and role on request
+      (req as any).userId = payload.whoopId;
+      (req as any).role = payload.role;
+      console.log(`[JWT AUTH] Extracted userId from token: ${payload.whoopId}`);
+    }
+  }
+
   const userId = getCurrentUserId(req);
-  
+
   console.log(`[JWT AUTH] Checking authentication for path: ${req.path}, userId: ${userId}`);
-  
+
   if (!userId) {
     console.log(`[JWT AUTH] No userId found, authentication required`);
-    
+
     // For API requests, return JSON error
     if (req.path.startsWith('/api/')) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'Authentication required',
         message: 'Please authenticate with WHOOP to access this resource',
         redirect_url: '/api/whoop/login'
       });
     }
-    
+
     // For page requests, redirect to WHOOP OAuth
     console.log(`[JWT AUTH] Redirecting page request to WHOOP OAuth login`);
     return res.redirect('/api/whoop/login');
   }
-  
+
   console.log(`[JWT AUTH] Authentication successful for user: ${userId}`);
   next();
 }

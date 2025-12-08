@@ -1,5 +1,5 @@
 // mobile/src/screens/ChatScreen.tsx
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useState, useEffect, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,7 +19,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { API_BASE_URL, getAuthToken } from '../api/client';
+
+// Route params type
+type ChatScreenParams = {
+  prefilledMessage?: string;
+  autoSubmit?: boolean;
+};
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -150,10 +157,13 @@ function ListeningWave() {
 }
 
 // Animated Message Component with Streaming Text Effect
-function AnimatedMessage({ message }: { message: Message }) {
+function AnimatedMessage({ message, isNewMessage = false }: { message: Message; isNewMessage?: boolean }) {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [displayedText, setDisplayedText] = useState('');
   const [copied, setCopied] = useState(false);
+
+  // Check if message contains a question (for gradient outline)
+  const hasQuestion = !message.isUser && message.text && message.text.includes('?');
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -162,8 +172,8 @@ function AnimatedMessage({ message }: { message: Message }) {
       useNativeDriver: true,
     }).start();
 
-    // Streaming text effect for AI messages
-    if (!message.isUser && message.text) {
+    // Only animate new AI messages, not loaded history
+    if (!message.isUser && message.text && isNewMessage) {
       const text = message.text;
       let currentIndex = 0;
 
@@ -173,13 +183,13 @@ function AnimatedMessage({ message }: { message: Message }) {
       // Use requestAnimationFrame for smoother, faster streaming
       let animationFrameId: number;
       let lastTimestamp = 0;
-      const charsPerFrame = 3; // Stream 3 chars at once for natural speed
+      const charsPerFrame = 9; // TRIPLED: Stream 9 chars at once for faster speed
 
       const animate = (timestamp: number) => {
         if (!lastTimestamp) lastTimestamp = timestamp;
         const elapsed = timestamp - lastTimestamp;
 
-        // Update every ~16ms (60fps) with 3 chars = ~180 chars/second
+        // Update every ~16ms (60fps) with 9 chars = ~540 chars/second
         if (elapsed > 16) {
           lastTimestamp = timestamp;
           currentIndex = Math.min(currentIndex + charsPerFrame, text.length);
@@ -194,10 +204,10 @@ function AnimatedMessage({ message }: { message: Message }) {
       animationFrameId = requestAnimationFrame(animate);
       return () => cancelAnimationFrame(animationFrameId);
     } else {
-      // User messages appear instantly
+      // User messages and loaded history appear instantly
       setDisplayedText(message.text);
     }
-  }, [message.text, message.isUser]);
+  }, [message.text, message.isUser, isNewMessage]);
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(message.text);
@@ -208,7 +218,11 @@ function AnimatedMessage({ message }: { message: Message }) {
   return (
     <Animated.View style={{ opacity: fadeAnim }}>
       <View style={[styles.messageRow, message.isUser && styles.userMessageRow]}>
-        <View style={[styles.messageBubble, message.isUser ? styles.userBubbleStyle : styles.assistantBubbleStyle]}>
+        <View style={[
+          styles.messageBubble,
+          message.isUser ? styles.userBubbleStyle : styles.assistantBubbleStyle,
+          hasQuestion && styles.questionBubbleStyle
+        ]}>
           {message.images && message.images.length > 0 && (
             <ScrollView horizontal style={styles.messageImagesContainer}>
               {message.images.map((uri, idx) => (
@@ -329,6 +343,7 @@ async function postCoachMessage(message: string, images: string[] | undefined, j
 }
 
 export default function ChatScreen() {
+  const route = useRoute<RouteProp<{ params: ChatScreenParams }, 'params'>>();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -339,9 +354,13 @@ export default function ChatScreen() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('default');
+  const hasHandledPrefill = useRef(false);
+  const [pendingAutoSend, setPendingAutoSend] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
   const [showSessionMenu, setShowSessionMenu] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+  const [newMessageIds, setNewMessageIds] = useState<Set<string>>(new Set()); // Track new messages for animation
+  const [userScrolled, setUserScrolled] = useState(false); // Track if user has scrolled
   const insets = useSafeAreaInsets();
   const scrollViewRef = React.useRef<ScrollView>(null);
 
@@ -372,6 +391,70 @@ export default function ChatScreen() {
     loadChatData();
   }, []);
 
+  // Reset prefill handler when screen loses focus
+  useFocusEffect(
+    useCallback(() => {
+      // On focus, check for prefilled message
+      const params = route.params;
+      if (params?.prefilledMessage && !hasHandledPrefill.current) {
+        hasHandledPrefill.current = true;
+        setInputText(params.prefilledMessage);
+
+        // If autoSubmit is true, trigger auto-send
+        if (params.autoSubmit) {
+          setPendingAutoSend(params.prefilledMessage);
+        }
+      }
+
+      return () => {
+        // Reset when leaving screen so it can handle new params next time
+        hasHandledPrefill.current = false;
+      };
+    }, [route.params])
+  );
+
+  // Handle auto-send when pendingAutoSend is set
+  useEffect(() => {
+    if (pendingAutoSend && !isSending) {
+      const messageToSend = pendingAutoSend;
+      setPendingAutoSend(null);
+
+      // Trigger send after a brief delay to ensure UI is ready
+      const timer = setTimeout(async () => {
+        const userMsg: Message = {
+          _id: generateId(),
+          text: messageToSend,
+          createdAt: new Date(),
+          isUser: true,
+        };
+
+        setMessages(prev => [...prev, userMsg]);
+        setNewMessageIds(prev => new Set(prev).add(userMsg._id));
+        setInputText('');
+        setIsSending(true);
+        setUserScrolled(false);
+
+        try {
+          const reply = await sendMessageToAPI(messageToSend);
+          const assistantMsg: Message = {
+            _id: generateId(),
+            text: reply,
+            createdAt: new Date(),
+            isUser: false,
+          };
+          setMessages(prev => [...prev, assistantMsg]);
+          setNewMessageIds(prev => new Set(prev).add(assistantMsg._id));
+        } catch (error) {
+          console.error('Failed to send auto message:', error);
+          Alert.alert('Error', 'Failed to send message');
+        } finally {
+          setIsSending(false);
+        }
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [pendingAutoSend, isSending]);
+
   // Save current session whenever messages change
   useEffect(() => {
     const saveCurrentSession = async () => {
@@ -385,6 +468,7 @@ export default function ChatScreen() {
         );
 
         // Update existing session in chatSessions if it exists
+        // OR create it if this is the first message in a new session
         if (messages.length > 0) {
           setChatSessions(prev => {
             const existingIndex = prev.findIndex(s => s.id === currentSessionId);
@@ -397,8 +481,17 @@ export default function ChatScreen() {
                 lastMessageAt: new Date()
               };
               return updated;
+            } else {
+              // Create new session entry (only once per conversation)
+              const newSession: ChatSession = {
+                id: currentSessionId,
+                title: 'New Chat', // Will be updated when user finishes
+                messages: [...messages],
+                createdAt: new Date(),
+                lastMessageAt: new Date()
+              };
+              return [newSession, ...prev];
             }
-            return prev;
           });
         }
       } catch (error) {
@@ -426,8 +519,13 @@ export default function ChatScreen() {
     }
   }, [chatSessions]);
 
-  const appendMessage = useCallback((message: Message) => {
+  const appendMessage = useCallback((message: Message, isNew: boolean = true) => {
     setMessages((prev) => [...prev, message]);
+    if (isNew) {
+      setNewMessageIds((prev) => new Set(prev).add(message._id));
+      // Reset user scrolled state when new message arrives
+      setUserScrolled(false);
+    }
   }, []);
 
   const handleSend = useCallback(async () => {
@@ -711,7 +809,7 @@ export default function ChatScreen() {
     }
   }, []);
 
-  // Save current chat as new session with auto-generated title
+  // Save current chat - update title for existing session
   const saveCurrentChat = useCallback(async () => {
     if (messages.length === 0) return;
 
@@ -719,23 +817,38 @@ export default function ChatScreen() {
     const title = await generateChatTitle(messages);
     setIsGeneratingTitle(false);
 
-    const newSession: ChatSession = {
-      id: `session_${Date.now()}`,
-      title,
-      messages: [...messages],
-      createdAt: new Date(),
-      lastMessageAt: new Date()
-    };
-
-    setChatSessions(prev => [newSession, ...prev]);
-    setCurrentSessionId(newSession.id);
-  }, [messages, generateChatTitle]);
+    // Update existing session with generated title
+    setChatSessions(prev => {
+      const existingIndex = prev.findIndex(s => s.id === currentSessionId);
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          title,
+          messages: [...messages],
+          lastMessageAt: new Date()
+        };
+        return updated;
+      }
+      // If somehow not found, create new (shouldn't happen normally)
+      return [{
+        id: currentSessionId,
+        title,
+        messages: [...messages],
+        createdAt: new Date(),
+        lastMessageAt: new Date()
+      }, ...prev];
+    });
+  }, [messages, currentSessionId, generateChatTitle]);
 
   // Load a chat session
   const loadChatSession = useCallback((session: ChatSession) => {
+    // Clear new message IDs so loaded messages don't animate
+    setNewMessageIds(new Set());
     setMessages(session.messages);
     setCurrentSessionId(session.id);
     setShowHistoryModal(false);
+    setUserScrolled(false);
   }, []);
 
   // Start new chat
@@ -787,6 +900,46 @@ export default function ChatScreen() {
   const handleLongPress = useCallback((session: ChatSession) => {
     setSelectedSession(session);
     setShowSessionMenu(true);
+  }, []);
+
+  // Clear all chat history
+  const clearAllHistory = useCallback(async () => {
+    Alert.alert(
+      'Clear All History',
+      'Are you sure you want to delete all chat history? This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete All',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Delete from backend database
+              const jwt = await getAuthToken();
+              if (jwt) {
+                await fetch(`${API_BASE_URL.replace(/\/$/, '')}/api/chat/history`, {
+                  method: 'DELETE',
+                  headers: {
+                    Authorization: `Bearer ${jwt}`,
+                  },
+                });
+              }
+
+              // Clear local storage
+              await AsyncStorage.removeItem(CHAT_SESSIONS_KEY);
+              await AsyncStorage.removeItem(CURRENT_SESSION_KEY);
+              setChatSessions([]);
+              setMessages([]);
+              setCurrentSessionId(`session_${Date.now()}`);
+              setShowHistoryModal(false);
+            } catch (error) {
+              console.error('Failed to clear history:', error);
+              Alert.alert('Error', 'Failed to clear history');
+            }
+          }
+        }
+      ]
+    );
   }, []);
 
   return (
@@ -841,38 +994,73 @@ export default function ChatScreen() {
                 <Text style={styles.emptyText}>No saved chats yet</Text>
               ) : (
                 chatSessions.map((session) => {
-                  // Truncate title to 25 chars max
-                  const displayTitle = session.title.length > 25
-                    ? session.title.substring(0, 25) + '...'
-                    : session.title;
-
-                  // Get last message preview (last assistant or user message)
-                  const lastMessage = session.messages[session.messages.length - 1];
-                  const lastMessagePreview = lastMessage
-                    ? lastMessage.text.substring(0, 40) + (lastMessage.text.length > 40 ? '...' : '')
-                    : '';
+                  // Strip markdown symbols from title
+                  const cleanTitle = session.title.replace(/[*_#`~\[\]]/g, '').trim();
+                  const displayTitle = cleanTitle.length > 25
+                    ? cleanTitle.substring(0, 25) + '...'
+                    : cleanTitle;
 
                   return (
-                    <TouchableOpacity
-                      key={session.id}
-                      style={styles.sessionItem}
-                      onPress={() => loadChatSession(session)}
-                      onLongPress={() => handleLongPress(session)}
-                      delayLongPress={500}
-                    >
-                      <View style={styles.sessionContent}>
-                        <Text style={styles.sessionTitle} numberOfLines={1} ellipsizeMode="tail">
-                          {displayTitle}
-                        </Text>
-                        <Text style={styles.sessionPreview} numberOfLines={1} ellipsizeMode="tail">
-                          {lastMessagePreview}
-                        </Text>
-                        <Text style={styles.sessionDate}>
-                          {session.messages.length} messages
-                        </Text>
+                    <View key={session.id} style={styles.sessionItemContainer}>
+                      <TouchableOpacity
+                        style={styles.sessionItem}
+                        onPress={() => loadChatSession(session)}
+                      >
+                        <View style={styles.sessionContent}>
+                          <Text style={styles.sessionTitle} numberOfLines={1} ellipsizeMode="tail">
+                            {displayTitle}
+                          </Text>
+                          <Text style={styles.sessionDate}>
+                            {session.messages.length} messages
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                      <View style={styles.sessionActions}>
+                        <TouchableOpacity
+                          style={styles.sessionActionButton}
+                          onPress={() => {
+                            Alert.prompt(
+                              'Rename Chat',
+                              'Enter a new name for this chat',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                  text: 'Save',
+                                  onPress: (newTitle) => {
+                                    if (newTitle && newTitle.trim()) {
+                                      renameSession(session.id, newTitle.trim());
+                                    }
+                                  }
+                                }
+                              ],
+                              'plain-text',
+                              session.title
+                            );
+                          }}
+                        >
+                          <Ionicons name="pencil-outline" size={18} color={colors.textMuted} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.sessionActionButton}
+                          onPress={() => {
+                            Alert.alert(
+                              'Delete Chat',
+                              'Are you sure you want to delete this chat?',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                  text: 'Delete',
+                                  style: 'destructive',
+                                  onPress: () => deleteSession(session.id)
+                                }
+                              ]
+                            );
+                          }}
+                        >
+                          <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+                        </TouchableOpacity>
                       </View>
-                      <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-                    </TouchableOpacity>
+                    </View>
                   );
                 })
               )}
@@ -881,10 +1069,10 @@ export default function ChatScreen() {
         </TouchableOpacity>
       </Modal>
 
-      {/* Session Preview Bottom Sheet */}
+      {/* Session Preview Modal */}
       <Modal
         visible={showSessionMenu}
-        animationType="slide"
+        animationType="fade"
         transparent={true}
         onRequestClose={() => {
           setShowSessionMenu(false);
@@ -995,10 +1183,21 @@ export default function ChatScreen() {
         style={styles.messagesContainer}
         contentContainerStyle={styles.messagesContent}
         keyboardShouldPersistTaps="handled"
-        onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+        onContentSizeChange={() => {
+          // Only auto-scroll if user hasn't manually scrolled
+          if (!userScrolled) {
+            scrollViewRef.current?.scrollToEnd({ animated: true });
+          }
+        }}
+        onScrollBeginDrag={() => setUserScrolled(true)}
+        scrollEventThrottle={16}
       >
         {messages.map((message) => (
-          <AnimatedMessage key={message._id} message={message} />
+          <AnimatedMessage
+            key={message._id}
+            message={message}
+            isNewMessage={newMessageIds.has(message._id)}
+          />
         ))}
         {isSending && <TypingIndicator />}
       </ScrollView>
@@ -1123,8 +1322,11 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: 'transparent',
     borderLeftWidth: 3,
-    borderLeftColor: colors.accent, // Subtle accent border for warmth
+    borderLeftColor: colors.accent, // Mint green line
     paddingLeft: spacing.md,
+  },
+  questionBubbleStyle: {
+    // No extra border styling - uses mint left line from assistantBubbleStyle
   },
   userMessageText: {
     ...typography.body,
@@ -1372,15 +1574,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     paddingTop: spacing.md,
   },
-  sessionItem: {
+  sessionItemContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.bgSecondary,
     borderRadius: radii.md,
     marginBottom: spacing.md,
-    paddingVertical: spacing.lg,
-    paddingHorizontal: spacing.lg,
     overflow: 'hidden',
+  },
+  sessionItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.lg,
+    paddingLeft: spacing.lg,
+    paddingRight: spacing.sm,
+  },
+  sessionActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingRight: spacing.sm,
+  },
+  sessionActionButton: {
+    padding: spacing.sm,
   },
   sessionContent: {
     flex: 1,
@@ -1422,18 +1638,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.accent,
   },
-  // Bottom sheet preview modal
+  // Session menu modal (centered)
   bottomSheetOverlay: {
     flex: 1,
     backgroundColor: `${colors.bgPrimary}D9`, // 85% opacity for blur effect
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing.xl,
   },
   bottomSheetContainer: {
     backgroundColor: colors.bgSecondary,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
-    paddingBottom: 40,
-    maxHeight: '70%',
+    borderRadius: radii.xl,
+    paddingBottom: spacing.lg,
+    maxHeight: '80%',
+    width: '100%',
+    maxWidth: 400,
     ...shadows.card,
   },
   chatPreview: {

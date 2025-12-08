@@ -4,11 +4,12 @@ module.exports = {
     slug: "fitscoreai",
     version: "1.0.0",
     orientation: "portrait",
-    icon: "./assets/chatgpt-icon.png",
+    icon: "./assets/logo.png",
     userInterfaceStyle: "dark",
     splash: {
       backgroundColor: "#0f172a"
     },
+    scheme: "fitsmart",
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.fitscoreai.app",
@@ -21,13 +22,13 @@ module.exports = {
     },
     android: {
       adaptiveIcon: {
-        foregroundImage: "./assets/chatgpt-icon.png",
+        foregroundImage: "./assets/logo.png",
         backgroundColor: "#0f172a"
       },
       package: "com.fitscoreai.app"
     },
     web: {
-      favicon: "./assets/chatgpt-icon.png"
+      favicon: "./assets/logo.png"
     },
     assetBundlePatterns: [
       "**/*"
@@ -50,7 +51,8 @@ module.exports = {
       }
     },
     plugins: [
-      "expo-asset"
+      "expo-asset",
+      "expo-web-browser"
     ],
     // Force tunnel mode for development
     packagerOpts: {

@@ -145,12 +145,30 @@ export default function GoalsScreen() {
     );
   };
 
-  // Navigate to coach with context
+  // Navigate to FitCoach with context
   const reviewWithCoach = () => {
-    navigation.navigate('Coach', {
-      prefilledMessage: 'Review my current goals and give me feedback for what is good and what should I still add/remove',
+    navigation.navigate('FitCoach', {
+      prefilledMessage: 'Please review my goals and suggest any improvements according to my injury and long-term goal context. Take into count also my health data metrics.',
       autoSubmit: true,
     });
+  };
+
+  // State for edit goals modal
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
+
+  // Edit goal handler
+  const editGoal = (goal: Goal) => {
+    setEditingGoal(goal);
+    setShowEditModal(true);
+  };
+
+  // Save edited goal
+  const saveEditedGoal = (updatedGoal: Goal) => {
+    const updatedGoals = goals.map(g => g.id === updatedGoal.id ? updatedGoal : g);
+    saveGoals(updatedGoals);
+    setShowEditModal(false);
+    setEditingGoal(null);
   };
 
   return (
@@ -194,11 +212,27 @@ export default function GoalsScreen() {
 
           <TouchableOpacity
             style={[styles.actionButton, styles.coachButton]}
-            onPress={reviewWithCoach}
+            onPress={() => {
+              if (goals.length === 0) {
+                Alert.alert('No Goals', 'Create a goal first before editing.');
+                return;
+              }
+              Alert.alert(
+                'Edit Goals',
+                'Select a goal to edit:',
+                [
+                  ...goals.map(goal => ({
+                    text: `${goal.emoji} ${goal.title}`,
+                    onPress: () => editGoal(goal),
+                  })),
+                  { text: 'Cancel', style: 'cancel' },
+                ]
+              );
+            }}
             activeOpacity={0.7}
           >
-            <Ionicons name="chatbubbles-outline" size={20} color={colors.accent} />
-            <Text style={styles.actionButtonText}>Review with Coach</Text>
+            <Ionicons name="create-outline" size={20} color={colors.accent} />
+            <Text style={styles.actionButtonText}>Edit Goals</Text>
           </TouchableOpacity>
         </View>
 
@@ -236,13 +270,13 @@ export default function GoalsScreen() {
         {goals.length > 0 && (
           <Card style={styles.coachPanel}>
             <View style={styles.coachPanelHeader}>
-              <Text style={styles.coachPanelEmoji}>🤖</Text>
+              <Ionicons name="chatbubbles" size={28} color={colors.accent} />
               <View style={styles.coachPanelContent}>
                 <Text style={styles.coachPanelTitle}>
                   Want help refining your weekly goals?
                 </Text>
                 <Text style={styles.coachPanelText}>
-                  Ask FitSmart Coach to review your current progress.
+                  Ask FitCoach to review your current progress.
                 </Text>
               </View>
             </View>
@@ -250,7 +284,7 @@ export default function GoalsScreen() {
               style={styles.coachPanelButton}
               onPress={reviewWithCoach}
             >
-              <Text style={styles.coachPanelButtonText}>Chat with Coach</Text>
+              <Text style={styles.coachPanelButtonText}>Review Goals with FitCoach</Text>
               <Ionicons name="arrow-forward" size={16} color={colors.accent} />
             </TouchableOpacity>
           </Card>
@@ -266,6 +300,19 @@ export default function GoalsScreen() {
           setShowAddModal(false);
         }}
       />
+
+      {/* Edit Goal Modal */}
+      {editingGoal && (
+        <EditGoalModal
+          visible={showEditModal}
+          goal={editingGoal}
+          onClose={() => {
+            setShowEditModal(false);
+            setEditingGoal(null);
+          }}
+          onSave={saveEditedGoal}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -478,8 +525,12 @@ function AddGoalModal({
             {/* Emoji Picker */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Icon</Text>
-              <View style={styles.emojiRow}>
-                {['🎯', '💪', '🏃', '🥗', '💤', '🧠', '📈'].map((e) => (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.emojiScrollContent}
+              >
+                {['🎯', '💪', '🏃', '🥗', '💤', '🧠', '📈', '🏋️', '🚴', '🧘', '💧', '🥤', '🍎', '⚡', '🔥', '🌟', '✅', '🏆', '❤️', '🩺'].map((e) => (
                   <TouchableOpacity
                     key={e}
                     style={[
@@ -491,7 +542,7 @@ function AddGoalModal({
                     <Text style={styles.emojiButtonText}>{e}</Text>
                   </TouchableOpacity>
                 ))}
-              </View>
+              </ScrollView>
             </View>
 
             {/* Category Picker */}
@@ -551,6 +602,176 @@ function AddGoalModal({
               style={styles.createButtonGradient}
             >
               <Text style={styles.createButtonText}>Create Goal</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// Edit Goal Modal Component
+function EditGoalModal({
+  visible,
+  goal,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  goal: Goal;
+  onClose: () => void;
+  onSave: (goal: Goal) => void;
+}) {
+  const [title, setTitle] = useState(goal.title);
+  const [emoji, setEmoji] = useState(goal.emoji);
+  const [category, setCategory] = useState<GoalCategory>(goal.category);
+  const [habits, setHabits] = useState<string[]>(
+    goal.microhabits.map(h => h.text).concat(['', '', '']).slice(0, 3)
+  );
+
+  // Reset form when goal changes
+  useEffect(() => {
+    setTitle(goal.title);
+    setEmoji(goal.emoji);
+    setCategory(goal.category);
+    setHabits(goal.microhabits.map(h => h.text).concat(['', '', '']).slice(0, 3));
+  }, [goal]);
+
+  const handleSave = () => {
+    if (!title.trim()) {
+      Alert.alert('Error', 'Please enter a goal title');
+      return;
+    }
+
+    const validHabits = habits.filter(h => h.trim().length > 0);
+    if (validHabits.length === 0) {
+      Alert.alert('Error', 'Please add at least one habit');
+      return;
+    }
+
+    const updatedGoal: Goal = {
+      ...goal,
+      title: title.trim(),
+      emoji,
+      category,
+      microhabits: validHabits.map((h, i) => ({
+        text: h.trim(),
+        done: goal.microhabits[i]?.done || false,
+        impact: Math.round(100 / validHabits.length),
+      })),
+    };
+
+    // Recalculate progress
+    const completedCount = updatedGoal.microhabits.filter(h => h.done).length;
+    updatedGoal.progress = Math.round((completedCount / updatedGoal.microhabits.length) * 100);
+
+    onSave(updatedGoal);
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Edit Goal</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Ionicons name="close" size={28} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalScroll}>
+            {/* Title Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Goal Title</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="e.g., Sleep 8 hours daily"
+                placeholderTextColor={colors.textMuted}
+                value={title}
+                onChangeText={setTitle}
+              />
+            </View>
+
+            {/* Emoji Picker */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Icon</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.emojiScrollContent}
+              >
+                {['🎯', '💪', '🏃', '🥗', '💤', '🧠', '📈', '🏋️', '🚴', '🧘', '💧', '🥤', '🍎', '⚡', '🔥', '🌟', '✅', '🏆', '❤️', '🩺'].map((e) => (
+                  <TouchableOpacity
+                    key={e}
+                    style={[
+                      styles.emojiButton,
+                      emoji === e && styles.emojiButtonSelected,
+                    ]}
+                    onPress={() => setEmoji(e)}
+                  >
+                    <Text style={styles.emojiButtonText}>{e}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+
+            {/* Category Picker */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Category</Text>
+              <View style={styles.categoryRow}>
+                {(['Recovery', 'Training', 'Nutrition', 'Mindset'] as GoalCategory[]).map((cat) => (
+                  <TouchableOpacity
+                    key={cat}
+                    style={[
+                      styles.categoryButton,
+                      category === cat && {
+                        backgroundColor: categoryColors[cat] + '30',
+                        borderColor: categoryColors[cat],
+                      },
+                    ]}
+                    onPress={() => setCategory(cat)}
+                  >
+                    <Text
+                      style={[
+                        styles.categoryButtonText,
+                        category === cat && { color: categoryColors[cat] },
+                      ]}
+                    >
+                      {cat}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Habits Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Daily Habits (1-3)</Text>
+              {habits.map((habit, index) => (
+                <TextInput
+                  key={index}
+                  style={styles.textInput}
+                  placeholder={`Habit ${index + 1}`}
+                  placeholderTextColor={colors.textMuted}
+                  value={habit}
+                  onChangeText={(text) => {
+                    const newHabits = [...habits];
+                    newHabits[index] = text;
+                    setHabits(newHabits);
+                  }}
+                />
+              ))}
+            </View>
+          </ScrollView>
+
+          <TouchableOpacity style={styles.createButton} onPress={handleSave}>
+            <LinearGradient
+              colors={['#27E9B5', '#6B5BFD']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.createButtonGradient}
+            >
+              <Text style={styles.createButtonText}>Save Changes</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -826,9 +1047,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     marginBottom: spacing.md,
   },
-  coachPanelEmoji: {
-    fontSize: 28,
-  },
   coachPanelContent: {
     flex: 1,
   },
@@ -915,6 +1133,11 @@ const styles = StyleSheet.create({
   emojiRow: {
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  emojiScrollContent: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingRight: spacing.lg,
   },
   emojiButton: {
     width: 48,

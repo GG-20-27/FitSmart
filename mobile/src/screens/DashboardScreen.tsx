@@ -16,9 +16,9 @@ import { apiRequest } from '../api/client';
 import { colors, spacing, radii, typography, state } from '../theme';
 import { Card } from '../ui/components';
 import { Ionicons } from '@expo/vector-icons';
-import Svg, { Circle, Path, LinearGradient, Stop, Defs } from 'react-native-svg';
+import Svg, { Circle, LinearGradient, Stop, Defs } from 'react-native-svg';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 type FitScoreForecast = {
   forecast: number;
@@ -47,10 +47,69 @@ type YesterdayMetrics = {
   hrv?: number;
 };
 
+type WeeklyMetrics = {
+  start_date: string;
+  end_date: string;
+  averages: {
+    sleep_score_percent: number;
+    recovery_score_percent: number;
+    strain_score: number;
+    hrv_ms: number;
+  };
+  comparison: {
+    vs_last_month: {
+      sleep_percent_delta: number;
+      recovery_percent_delta: number;
+      strain_delta: number;
+      hrv_ms_delta: number;
+    };
+  };
+};
+
+type LastWeekMetrics = {
+  sleep_score?: number;
+  recovery_score?: number;
+  strain?: number;
+  hrv?: number;
+};
+
 type CalendarEvent = {
   title: string;
   start: string;
   location?: string;
+};
+
+// Color threshold helpers based on WHOOP spec
+const getRecoveryColor = (value: number): string => {
+  if (value >= 67) return state.ready; // Green
+  if (value >= 34) return '#F5A623'; // Yellow
+  return state.rest; // Red
+};
+
+const getSleepColor = (value: number): string => {
+  if (value >= 80) return state.ready; // Green
+  if (value >= 50) return '#F5A623'; // Yellow
+  return state.rest; // Red
+};
+
+const getStrainColor = (strain: number, recoveryScore?: number): string => {
+  // Strain color depends on recovery zone
+  if (!recoveryScore || recoveryScore >= 67) {
+    // High recovery - can handle higher strain
+    if (strain <= 14) return state.ready;
+    if (strain <= 18) return '#F5A623';
+    return state.rest;
+  } else if (recoveryScore >= 34) {
+    // Medium recovery
+    if (strain <= 10) return state.ready;
+    if (strain <= 15) return '#F5A623';
+    return state.rest;
+  } else {
+    // Low recovery
+    if (strain <= 7) return state.ready;
+    if (strain <= 12) return '#F5A623';
+    return state.rest;
+  }
 };
 
 // Pulse ring animation component
@@ -116,45 +175,49 @@ function FitScorePulseRing({ score }: { score: number }) {
   );
 }
 
-// Metric Card with trend indicator
+// Metric Card with colored border and trend indicator
 function MetricCard({
   icon,
   label,
   value,
   delta,
+  deltaLabel = 'vs. yesterday',
+  borderColor,
+  valueColor,
+  neutralDelta = false,
   onPress,
-  isStrain,
 }: {
   icon: string;
   label: string;
   value: string;
   delta?: number;
+  deltaLabel?: string;
+  borderColor?: string;
+  valueColor?: string;
+  neutralDelta?: boolean;
   onPress?: () => void;
-  isStrain?: boolean;
 }) {
-  // For strain, no color coding (neutral). For other metrics, use color coding
-  const deltaColor = isStrain
-    ? colors.textMuted
-    : (delta && delta > 0 ? state.ready : delta && delta < 0 ? state.rest : colors.textMuted);
+  // If neutralDelta is true, always use grey for delta (for strain/HRV where higher isn't necessarily better)
+  const deltaColor = neutralDelta ? colors.textMuted : (delta && delta > 0 ? state.ready : delta && delta < 0 ? state.rest : colors.textMuted);
   const deltaIcon = delta && delta > 0 ? 'arrow-up' : delta && delta < 0 ? 'arrow-down' : 'remove';
 
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.7} disabled={!onPress}>
-      <Card style={styles.metricCard}>
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7} disabled={!onPress} style={styles.metricCardWrapper}>
+      <View style={[styles.metricCard, borderColor && { borderLeftColor: borderColor, borderLeftWidth: 3 }]}>
         <View style={styles.metricHeader}>
-          <Ionicons name={icon as any} size={22} color={colors.accent} />
+          <Ionicons name={icon as any} size={20} color={colors.accent} />
           <Text style={styles.metricLabel}>{label}</Text>
         </View>
-        <Text style={styles.metricValue}>{value}</Text>
+        <Text style={[styles.metricValue, valueColor && { color: valueColor }]}>{value}</Text>
         {delta !== undefined && (
           <View style={styles.metricDelta}>
             <Ionicons name={deltaIcon as any} size={12} color={deltaColor} />
             <Text style={[styles.metricDeltaText, { color: deltaColor }]}>
-              vs. yesterday: {delta > 0 ? '+' : ''}{delta}%
+              {deltaLabel}: {delta > 0 ? '+' : ''}{delta}{label.includes('HRV') || label.includes('Strain') ? '' : '%'}
             </Text>
           </View>
         )}
-      </Card>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -164,7 +227,8 @@ export default function DashboardScreen() {
   const [forecast, setForecast] = useState<FitScoreForecast | null>(null);
   const [todayMetrics, setTodayMetrics] = useState<DailyMetrics | null>(null);
   const [yesterdayMetrics, setYesterdayMetrics] = useState<YesterdayMetrics | null>(null);
-  const [nextEvent, setNextEvent] = useState<CalendarEvent | null>(null);
+  const [lastWeekMetrics, setLastWeekMetrics] = useState<LastWeekMetrics | null>(null);
+  const [weeklyMetrics, setWeeklyMetrics] = useState<WeeklyMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -172,27 +236,24 @@ export default function DashboardScreen() {
     try {
       setLoading(true);
 
-      const [forecastData, todayData, yesterdayData] = await Promise.all([
-        apiRequest<FitScoreForecast>('/api/fitscore/forecast'),
-        apiRequest<DailyMetrics>('/api/whoop/today'),
+      const [forecastData, todayData, yesterdayData, weeklyData] = await Promise.all([
+        apiRequest<FitScoreForecast>('/api/fitscore/forecast').catch(() => null),
+        apiRequest<DailyMetrics>('/api/whoop/today').catch(() => null),
         apiRequest<YesterdayMetrics>('/api/whoop/yesterday').catch(() => null),
+        apiRequest<WeeklyMetrics>('/api/whoop/weekly').catch(() => null),
       ]);
 
       setForecast(forecastData);
       setTodayMetrics(todayData);
       setYesterdayMetrics(yesterdayData);
+      setWeeklyMetrics(weeklyData);
 
-      // Try to load today's calendar event
+      // Try to load last week's metrics for yesterday comparison
       try {
-        const today = new Date().toISOString().split('T')[0];
-        const calendarData = await apiRequest<{ events: CalendarEvent[] }>(
-          `/api/calendar/events?start=${today}&end=${today}`
-        );
-        if (calendarData.events && calendarData.events.length > 0) {
-          setNextEvent(calendarData.events[0]);
-        }
+        const lastWeekData = await apiRequest<LastWeekMetrics>('/api/whoop/lastweek');
+        setLastWeekMetrics(lastWeekData);
       } catch (error) {
-        console.log('No calendar events available');
+        console.log('No last week metrics available');
       }
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
@@ -239,111 +300,196 @@ export default function DashboardScreen() {
     return 'Today';
   };
 
+  // Calculate delta for absolute values (strain, HRV)
+  const calculateAbsoluteDelta = (today: number | undefined, yesterday: number | undefined): number | undefined => {
+    if (today === undefined || yesterday === undefined) return undefined;
+    return Math.round((today - yesterday) * 10) / 10;
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Home</Text>
-      </View>
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        {/* Profile Button - Circular Avatar */}
+        <TouchableOpacity
+          style={styles.profileButton}
+          onPress={() => navigation.navigate('Profile' as never)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.profileButtonInner}>
+            <Ionicons name="person" size={20} color={colors.bgPrimary} />
+          </View>
+        </TouchableOpacity>
+
         {/* FitScore Forecast Header */}
         <View style={styles.forecastSection}>
           <Text style={styles.forecastTitle}>Today's FitScore Forecast</Text>
 
-        {forecast && (
-          <>
-            <FitScorePulseRing score={forecast.forecast} />
-            <Text style={styles.forecastInsight}>{forecast.insight}</Text>
-            <Text style={styles.updatedTime}>
-              Updated: {formatUpdatedTime(forecast.updatedAt)}
-            </Text>
-          </>
-        )}
+          {forecast && (
+            <>
+              <FitScorePulseRing score={forecast.forecast} />
+              <Text style={styles.forecastInsight}>{forecast.insight}</Text>
+              <Text style={styles.updatedTime}>
+                Updated: {formatUpdatedTime(forecast.updatedAt)}
+              </Text>
+            </>
+          )}
 
-        {!forecast && !loading && (
-          <View style={styles.forecastPlaceholder}>
-            <Text style={styles.placeholderText}>Loading forecast...</Text>
+          {!forecast && !loading && (
+            <View style={styles.forecastPlaceholder}>
+              <Text style={styles.placeholderText}>Loading forecast...</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Today's Metric Cards */}
+        <View style={styles.metricsSection}>
+          <View style={styles.metricRow}>
+            <MetricCard
+              icon="moon-outline"
+              label="Sleep"
+              value={todayMetrics?.sleep_score ? `${todayMetrics.sleep_score}%` : 'N/A'}
+              delta={calculateDelta(todayMetrics?.sleep_score, yesterdayMetrics?.sleep_score)}
+              borderColor={todayMetrics?.sleep_score ? getSleepColor(todayMetrics.sleep_score) : undefined}
+              valueColor={todayMetrics?.sleep_score ? getSleepColor(todayMetrics.sleep_score) : undefined}
+            />
+            <MetricCard
+              icon="heart-outline"
+              label="Recovery"
+              value={todayMetrics?.recovery_score ? `${todayMetrics.recovery_score}%` : 'N/A'}
+              delta={calculateDelta(todayMetrics?.recovery_score, yesterdayMetrics?.recovery_score)}
+              borderColor={todayMetrics?.recovery_score ? getRecoveryColor(todayMetrics.recovery_score) : undefined}
+              valueColor={todayMetrics?.recovery_score ? getRecoveryColor(todayMetrics.recovery_score) : undefined}
+            />
           </View>
-        )}
-      </View>
+          <View style={styles.metricRow}>
+            <MetricCard
+              icon="flame-outline"
+              label="Strain"
+              value={todayMetrics?.strain ? `${todayMetrics.strain.toFixed(1)}` : 'N/A'}
+              delta={calculateAbsoluteDelta(todayMetrics?.strain, yesterdayMetrics?.strain)}
+              borderColor={todayMetrics?.strain ? getStrainColor(todayMetrics.strain, todayMetrics?.recovery_score) : undefined}
+              valueColor={todayMetrics?.strain ? getStrainColor(todayMetrics.strain, todayMetrics?.recovery_score) : undefined}
+              neutralDelta={true}
+            />
+            <MetricCard
+              icon="pulse-outline"
+              label="HRV"
+              value={todayMetrics?.hrv ? `${Math.round(todayMetrics.hrv)} ms` : 'N/A'}
+              delta={calculateAbsoluteDelta(todayMetrics?.hrv, yesterdayMetrics?.hrv)}
+              borderColor={colors.textMuted}
+              valueColor={colors.textMuted}
+              neutralDelta={true}
+            />
+          </View>
+        </View>
 
-      {/* Daily Metric Cards */}
-      <View style={styles.metricsSection}>
-        <View style={styles.metricRow}>
-          <MetricCard
-            icon="moon-outline"
-            label="Sleep"
-            value={todayMetrics?.sleep_hours ? `${todayMetrics.sleep_hours.toFixed(1)}h` : 'N/A'}
-            delta={calculateDelta(todayMetrics?.sleep_score, yesterdayMetrics?.sleep_score)}
-          />
-          <MetricCard
-            icon="fitness-outline"
-            label="Recovery"
-            value={todayMetrics?.recovery_score ? `${todayMetrics.recovery_score}%` : 'N/A'}
-            delta={calculateDelta(todayMetrics?.recovery_score, yesterdayMetrics?.recovery_score)}
-          />
+        {/* Yesterday's Metrics */}
+        <Text style={styles.sectionTitle}>YESTERDAY'S METRICS</Text>
+        <View style={styles.metricsSection}>
+          <View style={styles.metricRow}>
+            <MetricCard
+              icon="moon-outline"
+              label="Sleep"
+              value={yesterdayMetrics?.sleep_score ? `${yesterdayMetrics.sleep_score}%` : 'N/A'}
+              delta={calculateDelta(yesterdayMetrics?.sleep_score, lastWeekMetrics?.sleep_score)}
+              deltaLabel="vs. last week"
+              borderColor={yesterdayMetrics?.sleep_score ? getSleepColor(yesterdayMetrics.sleep_score) : undefined}
+              valueColor={yesterdayMetrics?.sleep_score ? getSleepColor(yesterdayMetrics.sleep_score) : undefined}
+            />
+            <MetricCard
+              icon="heart-outline"
+              label="Recovery"
+              value={yesterdayMetrics?.recovery_score ? `${yesterdayMetrics.recovery_score}%` : 'N/A'}
+              delta={calculateDelta(yesterdayMetrics?.recovery_score, lastWeekMetrics?.recovery_score)}
+              deltaLabel="vs. last week"
+              borderColor={yesterdayMetrics?.recovery_score ? getRecoveryColor(yesterdayMetrics.recovery_score) : undefined}
+              valueColor={yesterdayMetrics?.recovery_score ? getRecoveryColor(yesterdayMetrics.recovery_score) : undefined}
+            />
+          </View>
+          <View style={styles.metricRow}>
+            <MetricCard
+              icon="flame-outline"
+              label="Strain"
+              value={yesterdayMetrics?.strain ? `${yesterdayMetrics.strain.toFixed(1)}` : 'N/A'}
+              delta={calculateAbsoluteDelta(yesterdayMetrics?.strain, lastWeekMetrics?.strain)}
+              deltaLabel="vs. last week"
+              borderColor={yesterdayMetrics?.strain ? getStrainColor(yesterdayMetrics.strain, yesterdayMetrics?.recovery_score) : undefined}
+              valueColor={yesterdayMetrics?.strain ? getStrainColor(yesterdayMetrics.strain, yesterdayMetrics?.recovery_score) : undefined}
+              neutralDelta={true}
+            />
+            <MetricCard
+              icon="pulse-outline"
+              label="HRV"
+              value={yesterdayMetrics?.hrv ? `${Math.round(yesterdayMetrics.hrv)} ms` : 'N/A'}
+              delta={calculateAbsoluteDelta(yesterdayMetrics?.hrv, lastWeekMetrics?.hrv)}
+              deltaLabel="vs. last week"
+              borderColor={colors.textMuted}
+              valueColor={colors.textMuted}
+              neutralDelta={true}
+            />
+          </View>
         </View>
-        <View style={styles.metricRow}>
-          <MetricCard
-            icon="flame-outline"
-            label="Strain"
-            value={todayMetrics?.strain ? `${todayMetrics.strain.toFixed(1)}` : 'N/A'}
-            delta={calculateDelta(todayMetrics?.strain, yesterdayMetrics?.strain)}
-            isStrain={true}
-          />
-          <MetricCard
-            icon="pulse-outline"
-            label="HRV"
-            value={todayMetrics?.hrv ? `${Math.round(todayMetrics.hrv)} ms` : 'N/A'}
-            delta={calculateDelta(todayMetrics?.hrv, yesterdayMetrics?.hrv)}
-          />
-        </View>
-      </View>
 
-      {/* Coach Insight Tile */}
-      <Card style={styles.coachInsight}>
-        <View style={styles.coachHeader}>
-          <Ionicons name="chatbubble-ellipses-outline" size={28} color={colors.accent} />
-          <Text style={styles.coachTitle}>Coach Insight</Text>
+        {/* Weekly Averages */}
+        <Text style={styles.sectionTitle}>WEEKLY AVERAGES</Text>
+        <View style={styles.metricsSection}>
+          <View style={styles.metricRow}>
+            <MetricCard
+              icon="moon-outline"
+              label="Avg Sleep"
+              value={weeklyMetrics?.averages?.sleep_score_percent ? `${weeklyMetrics.averages.sleep_score_percent}%` : 'N/A'}
+              delta={weeklyMetrics?.comparison?.vs_last_month?.sleep_percent_delta}
+              deltaLabel="vs. last month"
+              borderColor={weeklyMetrics?.averages?.sleep_score_percent ? getSleepColor(weeklyMetrics.averages.sleep_score_percent) : undefined}
+              valueColor={weeklyMetrics?.averages?.sleep_score_percent ? getSleepColor(weeklyMetrics.averages.sleep_score_percent) : undefined}
+            />
+            <MetricCard
+              icon="heart-outline"
+              label="Avg Recovery"
+              value={weeklyMetrics?.averages?.recovery_score_percent ? `${weeklyMetrics.averages.recovery_score_percent}%` : 'N/A'}
+              delta={weeklyMetrics?.comparison?.vs_last_month?.recovery_percent_delta}
+              deltaLabel="vs. last month"
+              borderColor={weeklyMetrics?.averages?.recovery_score_percent ? getRecoveryColor(weeklyMetrics.averages.recovery_score_percent) : undefined}
+              valueColor={weeklyMetrics?.averages?.recovery_score_percent ? getRecoveryColor(weeklyMetrics.averages.recovery_score_percent) : undefined}
+            />
+          </View>
+          <View style={styles.metricRow}>
+            <MetricCard
+              icon="flame-outline"
+              label="Avg Strain"
+              value={weeklyMetrics?.averages?.strain_score ? `${weeklyMetrics.averages.strain_score.toFixed(1)}` : 'N/A'}
+              delta={weeklyMetrics?.comparison?.vs_last_month?.strain_delta}
+              deltaLabel="vs. last month"
+              borderColor={weeklyMetrics?.averages?.strain_score ? getStrainColor(weeklyMetrics.averages.strain_score) : undefined}
+              valueColor={weeklyMetrics?.averages?.strain_score ? getStrainColor(weeklyMetrics.averages.strain_score) : undefined}
+              neutralDelta={true}
+            />
+            <MetricCard
+              icon="pulse-outline"
+              label="Avg HRV"
+              value={weeklyMetrics?.averages?.hrv_ms ? `${Math.round(weeklyMetrics.averages.hrv_ms)} ms` : 'N/A'}
+              delta={weeklyMetrics?.comparison?.vs_last_month?.hrv_ms_delta}
+              deltaLabel="vs. last month"
+              borderColor={colors.textMuted}
+              valueColor={colors.textMuted}
+              neutralDelta={true}
+            />
+          </View>
         </View>
-        <Text style={styles.coachText}>
-          {forecast?.insight || 'Your daily insight will appear here based on your metrics.'}
-        </Text>
+
+        {/* FitCoach CTA */}
         <TouchableOpacity
           style={styles.chatButton}
-          onPress={() => navigation.navigate('Coach' as never)}
+          onPress={() => navigation.navigate('FitCoach' as never)}
         >
-          <Text style={styles.chatButtonText}>Chat with Coach</Text>
+          <Text style={styles.chatButtonText}>Chat with FitCoach</Text>
           <Ionicons name="arrow-forward" size={18} color={colors.bgPrimary} />
         </TouchableOpacity>
-      </Card>
-
-      {/* Calendar Preview */}
-      {nextEvent && (
-        <Card style={styles.calendarPreview}>
-          <View style={styles.calendarHeader}>
-            <Ionicons name="calendar-outline" size={24} color={colors.accent} />
-            <Text style={styles.calendarTitle}>Next Event</Text>
-          </View>
-          <View style={styles.eventDetails}>
-            <Text style={styles.eventTitle}>{nextEvent.title}</Text>
-            <View style={styles.eventMeta}>
-              <Ionicons name="time-outline" size={16} color={colors.textMuted} />
-              <Text style={styles.eventTime}>{formatTime(nextEvent.start)}</Text>
-              {nextEvent.location && (
-                <>
-                  <Ionicons name="location-outline" size={16} color={colors.textMuted} style={{ marginLeft: spacing.md }} />
-                  <Text style={styles.eventLocation}>{nextEvent.location}</Text>
-                </>
-              )}
-            </View>
-          </View>
-        </Card>
-      )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -354,17 +500,19 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.bgPrimary,
   },
-  header: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    backgroundColor: colors.bgPrimary,
-    borderBottomWidth: 0,
+  profileButton: {
+    width: 36,
+    height: 36,
+    alignSelf: 'flex-start',
+    marginBottom: spacing.md,
   },
-  headerTitle: {
-    ...typography.h1,
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.textPrimary,
+  profileButtonInner: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   container: {
     flex: 1,
@@ -373,7 +521,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-    paddingBottom: spacing.xxl + 60, // Extra padding for tab bar
+    paddingBottom: spacing.xxl + 80,
   },
   forecastSection: {
     alignItems: 'center',
@@ -381,7 +529,7 @@ const styles = StyleSheet.create({
   },
   forecastTitle: {
     ...typography.h2,
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '600',
     marginBottom: spacing.lg,
     textAlign: 'center',
@@ -405,19 +553,19 @@ const styles = StyleSheet.create({
   },
   forecastInsight: {
     ...typography.body,
-    fontSize: 15,
+    fontSize: 14,
     textAlign: 'center',
     color: colors.textPrimary,
     marginBottom: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    lineHeight: 22,
+    paddingHorizontal: spacing.md,
+    lineHeight: 20,
   },
   updatedTime: {
     ...typography.small,
     color: colors.textMuted,
   },
   forecastPlaceholder: {
-    height: 200,
+    height: 180,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -425,16 +573,33 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textMuted,
   },
+  sectionTitle: {
+    ...typography.small,
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.textMuted,
+    letterSpacing: 1,
+    marginBottom: spacing.md,
+    marginTop: spacing.md,
+  },
   metricsSection: {
-    marginBottom: spacing.lg,
+    marginBottom: spacing.sm,
   },
   metricRow: {
     flexDirection: 'row',
     gap: spacing.sm,
     marginBottom: spacing.sm,
   },
+  metricCardWrapper: {
+    flex: 1,
+  },
   metricCard: {
     flex: 1,
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    borderLeftWidth: 0,
+    borderLeftColor: 'transparent',
   },
   metricHeader: {
     flexDirection: 'row',
@@ -444,11 +609,13 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     ...typography.bodyMuted,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '500',
   },
   metricValue: {
-    ...typography.h2,
-    fontSize: 32,
+    fontSize: 28,
+    fontWeight: '700',
+    color: colors.textPrimary,
     marginBottom: spacing.xs,
   },
   metricDelta: {
@@ -458,24 +625,7 @@ const styles = StyleSheet.create({
   },
   metricDeltaText: {
     ...typography.small,
-    fontSize: 11,
-  },
-  coachInsight: {
-    marginBottom: spacing.lg,
-  },
-  coachHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  coachTitle: {
-    ...typography.title,
-  },
-  coachText: {
-    ...typography.body,
-    lineHeight: 24,
-    marginBottom: spacing.lg,
+    fontSize: 10,
   },
   chatButton: {
     flexDirection: 'row',
@@ -486,41 +636,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     borderRadius: radii.md,
     gap: spacing.sm,
+    marginTop: spacing.lg,
+    marginBottom: spacing.xl,
   },
   chatButtonText: {
     ...typography.body,
     color: colors.bgPrimary,
     fontWeight: '600',
-  },
-  calendarPreview: {
-    marginBottom: spacing.xl,
-  },
-  calendarHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  calendarTitle: {
-    ...typography.title,
-  },
-  eventDetails: {
-    gap: spacing.sm,
-  },
-  eventTitle: {
-    ...typography.body,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
-  },
-  eventMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  eventTime: {
-    ...typography.bodyMuted,
-  },
-  eventLocation: {
-    ...typography.bodyMuted,
   },
 });

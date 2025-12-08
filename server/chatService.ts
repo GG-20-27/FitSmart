@@ -299,20 +299,9 @@ export class ChatService {
                                     lowerMessage.includes('just estimate calories') ||
                                     lowerMessage.includes('only calories');
 
-      // Check if user is asking about FitScore OR uploaded meal images (auto-trigger)
-      // Exception: if user says "only estimate calories", don't trigger FitScore
-      const isFitScoreQuery = (hasMealImages && !onlyCaloriesRequested) || // AUTOMATIC TRIGGER: meal images = FitScore (unless exception)
-                              lowerMessage.includes('fitscore') || lowerMessage.includes('fit score') ||
-                              (lowerMessage.includes('how') && (lowerMessage.includes('did i do') || lowerMessage.includes('am i doing'))) ||
-                              (lowerMessage.includes('what') && lowerMessage.includes('my') && (lowerMessage.includes('score') || lowerMessage.includes('fitness')));
-
-      // If user asks for yesterday, inform them it's coming soon
-      // Yesterday FitScore temporarily disabled - focus on perfecting today's FitScore MVP
-      if (lowerMessage.includes('yesterday') && isFitScoreQuery) {
-        return {
-          reply: "Yesterday's FitScore analysis is coming soon! For now, I can calculate your FitScore for today. Would you like me to do that instead?"
-        };
-      }
+      // DISABLED: FitScore calculation in chat - will be implemented in dedicated FitScore screen
+      // This was causing slow responses and "thinking" forever issues
+      const isFitScoreQuery = false; // Disabled for now
 
       let contextData = '';
       let fitScoreData: string = '';

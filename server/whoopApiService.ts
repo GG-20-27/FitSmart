@@ -1,7 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { whoopTokenStorage } from './whoopTokenStorage';
 
-const BASE = 'https://api.prod.whoop.com/developer/v1';
+const BASE = 'https://api.prod.whoop.com/developer/v2';
 const WHOOP_OAUTH_BASE = 'https://api.prod.whoop.com/oauth';
 
 // Error types for better error handling
@@ -364,16 +364,18 @@ export class WhoopApiService {
     try {
       const headers = await this.authHeader(userId);
       console.log(`Fetching recovery for cycle ${cycleId}...`);
-      
+
+      // Use WHOOP API v2 endpoint to get recovery for specific cycle
       const response = await axios.get(`${BASE}/cycle/${cycleId}/recovery`, { headers });
-      
-      if (response.status === 200) {
-        console.log('Recovery data found for cycle:', cycleId);
+
+      if (response.status === 200 && response.data) {
+        console.log('Recovery data found:', JSON.stringify(response.data.score, null, 2));
         return response.data;
       }
+      console.log('No recovery data found');
       return null;
     } catch (error: any) {
-      console.error(`Failed to fetch recovery for cycle ${cycleId}:`, error.response?.status, error.response?.data);
+      console.error(`Failed to fetch recovery:`, error.response?.status, error.response?.data);
       if (error.response?.status === 404) {
         console.log(`No recovery data available for cycle ${cycleId}`);
         return null;
@@ -641,7 +643,7 @@ export class WhoopApiService {
       console.log('Fetching body measurements...');
       
       const headers = await this.authHeader(userId);
-      const response = await axios.get(`${BASE}/user/measurement`, { 
+      const response = await axios.get(`${BASE}/body_measurement`, {
         headers,
         timeout: 10000
       });
