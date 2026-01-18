@@ -11,7 +11,8 @@ export interface MealData {
   imageUri: string;
   date: string;
   uploadedAt: string;
-  analysisResult?: string;
+  nutritionScore?: number;
+  analysis?: string;
 }
 
 export interface TrainingDataEntry {
@@ -25,6 +26,10 @@ export interface TrainingDataEntry {
   comment?: string;
   skipped: boolean;
   createdAt: string;
+  score?: number;
+  analysis?: string;
+  breakdown?: TrainingAnalysisBreakdown;
+  recoveryZone?: 'green' | 'yellow' | 'red';
 }
 
 export interface UploadMealResponse {
@@ -35,6 +40,40 @@ export interface UploadMealResponse {
 export interface SaveTrainingResponse {
   message: string;
   training: TrainingDataEntry;
+}
+
+export interface TrainingAnalysisBreakdown {
+  strainAppropriatenessScore: number;
+  sessionQualityScore: number;
+  goalAlignmentScore: number;
+  injurySafetyModifier: number;
+}
+
+export interface AnalyzedTrainingSession {
+  sessionId: number;
+  type: string;
+  duration: number;
+  intensity?: string;
+  goal?: string;
+  comment?: string;
+  skipped: boolean;
+  score: number;
+  breakdown: TrainingAnalysisBreakdown;
+  analysis: string;
+  recoveryZone: 'green' | 'yellow' | 'red';
+}
+
+export interface TrainingAnalysisResponse {
+  date: string;
+  sessions: AnalyzedTrainingSession[];
+  averageScore: number;
+  whoopData: {
+    recoveryScore?: number;
+    strainScore?: number;
+    sleepScore?: number;
+    hrv?: number;
+  };
+  userGoal?: string;
 }
 
 /**
@@ -168,6 +207,24 @@ export async function deleteTrainingData(id: number): Promise<void> {
   await apiRequest(`/api/training/${id}`, {
     method: 'DELETE',
   });
+}
+
+/**
+ * Analyze training sessions for a specific date
+ * Returns training scores with breakdown and analysis
+ */
+export async function analyzeTraining(date: string): Promise<TrainingAnalysisResponse> {
+  console.log(`[API] Analyzing training for date: ${date}`);
+
+  const response = await apiRequest<TrainingAnalysisResponse>(
+    `/api/training/analyze/${date}`,
+    {
+      method: 'POST',
+    }
+  );
+
+  console.log(`[API] Training analysis complete: average score ${response.averageScore}/10`);
+  return response;
 }
 
 /**

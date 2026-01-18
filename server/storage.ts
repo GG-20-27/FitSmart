@@ -11,6 +11,7 @@ export interface IStorage {
   getMealsByDate(date: string): Promise<Meal[]>;
   getAllMeals(): Promise<Meal[]>;
   getMealsByUserAndDate(userId: string, date: string): Promise<Meal[]>;
+  updateMeal(id: number, data: Partial<InsertMeal>): Promise<Meal>;
   deleteMeal(id: number): Promise<void>;
 
   // Training data operations
@@ -66,6 +67,15 @@ export class DatabaseStorage implements IStorage {
   async getMealsByUserAndDate(userId: string, date: string): Promise<Meal[]> {
     return await db.select().from(meals)
       .where(and(eq(meals.userId, userId), eq(meals.date, date)));
+  }
+
+  async updateMeal(id: number, data: Partial<InsertMeal>): Promise<Meal> {
+    const [updated] = await db
+      .update(meals)
+      .set(data)
+      .where(eq(meals.id, id))
+      .returning();
+    return updated;
   }
 
   async deleteMeal(id: number): Promise<void> {

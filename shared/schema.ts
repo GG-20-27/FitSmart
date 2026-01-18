@@ -47,6 +47,8 @@ export const trainingData = pgTable("training_data", {
   intensity: text("intensity"), // Low, Moderate, High
   comment: text("comment"), // Optional user comment
   skipped: boolean("skipped").default(false).notNull(), // Whether training was skipped
+  analysisResult: text("analysis_result"), // AI analysis result stored as JSON
+  trainingScore: real("training_score"), // Calculated training score (1-10)
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

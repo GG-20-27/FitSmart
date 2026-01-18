@@ -21,7 +21,8 @@ async function runMigrations() {
   const migrations = [
     '2026-add-meal-metadata.sql',
     '2026-create-training-data.sql',
-    '2026-fix-meal-type-constraint.sql'
+    '2026-fix-meal-type-constraint.sql',
+    '2026-add-training-analysis.sql'
   ];
 
   try {

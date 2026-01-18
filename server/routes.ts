@@ -14,6 +14,8 @@ import { userService } from "./userService";
 import { chatService, ChatErrorType } from "./chatService";
 import { chatSummarizationService } from "./chatSummarizationService";
 import { whisperService } from "./whisperService.ts";
+import { openAIService } from "./services/openAiService";
+import { trainingScoreService } from "./services/trainingScoreService";
 import ical from "ical";
 import { DateTime } from "luxon";
 import axios from "axios";
@@ -3536,20 +3538,45 @@ ${trainingTip}. ${nutritionTip}.`;
         date: uploadDate,
         mealType: mealType,
         mealNotes: mealNotes || null,
-        analysisResult: null, // Will be populated by AI analysis later
+        analysisResult: null, // Will be populated below
       });
 
       console.log(`Uploaded meal: ${mealType} for date ${uploadDate}`);
 
+      const baseUrl = req.protocol + '://' + req.get('host');
+      const imageUrl = `${baseUrl}/uploads/${meal.filename}`;
+
+      // Analyze meal with AI
+      console.log('[MEAL UPLOAD] Analyzing meal with AI...');
+      const analysis = await openAIService.analyzeMealImage(
+        imageUrl,
+        mealType,
+        mealNotes || undefined
+      );
+
+      // Update meal with analysis result
+      const analysisData = {
+        nutrition_subscore: analysis.nutrition_subscore,
+        ai_analysis: analysis.ai_analysis
+      };
+
+      const updatedMeal = await storage.updateMeal(meal.id, {
+        analysisResult: JSON.stringify(analysisData)
+      });
+
+      console.log(`[MEAL UPLOAD] Analysis complete: score ${analysis.nutrition_subscore}/10`);
+
       res.json({
         message: 'Meal uploaded successfully',
         meal: {
-          id: meal.id,
-          mealType: meal.mealType,
-          mealNotes: meal.mealNotes,
-          imageUri: `/uploads/${meal.filename}`,
-          date: meal.date,
-          uploadedAt: meal.uploadedAt,
+          id: updatedMeal.id,
+          mealType: updatedMeal.mealType,
+          mealNotes: updatedMeal.mealNotes,
+          imageUri: imageUrl,
+          date: updatedMeal.date,
+          uploadedAt: updatedMeal.uploadedAt,
+          nutritionScore: analysis.nutrition_subscore,
+          analysis: analysis.ai_analysis,
         }
       });
     } catch (error) {
@@ -3624,15 +3651,32 @@ ${trainingTip}. ${nutritionTip}.`;
       const meals = await storage.getMealsByUserAndDate(userId, date);
 
       const baseUrl = req.protocol + '://' + req.get('host');
-      const mealsWithUrls = meals.map(meal => ({
-        id: meal.id,
-        mealType: meal.mealType,
-        mealNotes: meal.mealNotes,
-        imageUri: `${baseUrl}/uploads/${meal.filename}`,
-        date: meal.date,
-        uploadedAt: meal.uploadedAt,
-        analysisResult: meal.analysisResult,
-      }));
+      const mealsWithUrls = meals.map(meal => {
+        // Parse analysis result if it exists
+        let nutritionScore: number | undefined;
+        let analysis: string | undefined;
+
+        if (meal.analysisResult) {
+          try {
+            const parsed = JSON.parse(meal.analysisResult);
+            nutritionScore = parsed.nutrition_subscore;
+            analysis = parsed.ai_analysis;
+          } catch (e) {
+            console.error(`Failed to parse analysis for meal ${meal.id}:`, e);
+          }
+        }
+
+        return {
+          id: meal.id,
+          mealType: meal.mealType,
+          mealNotes: meal.mealNotes,
+          imageUri: `${baseUrl}/uploads/${meal.filename}`,
+          date: meal.date,
+          uploadedAt: meal.uploadedAt,
+          nutritionScore,
+          analysis,
+        };
+      });
 
       console.log(`Found ${meals.length} meals for user ${userId} on ${date}`);
       res.json(mealsWithUrls);
@@ -3645,7 +3689,7 @@ ${trainingTip}. ${nutritionTip}.`;
 
   // ========== Training Data Endpoints ==========
 
-  // Create training data
+  // Create training data with immediate analysis
   app.post('/api/training', requireJWTAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req) || 'default-user';
@@ -3655,9 +3699,12 @@ ${trainingTip}. ${nutritionTip}.`;
         return res.status(400).json({ error: 'Training type and duration are required' });
       }
 
+      const trainingDate = date || getTodayDate();
+
+      // Create training entry first
       const trainingEntry = await storage.createTrainingData({
         userId,
-        date: date || getTodayDate(),
+        date: trainingDate,
         type,
         duration: parseInt(duration),
         goal: goal || null,
@@ -3666,11 +3713,122 @@ ${trainingTip}. ${nutritionTip}.`;
         skipped: skipped || false,
       });
 
-      console.log(`Created training: ${type} for ${date || getTodayDate()}`);
-      res.json({
-        message: 'Training data saved successfully',
-        training: trainingEntry,
-      });
+      console.log(`[TRAINING] Created: ${type} for ${trainingDate}`);
+
+      // Analyze training session immediately (similar to meal analysis)
+      try {
+        // Get WHOOP data for the date
+        const whoopData = await whoopApiService.getDataForDate(userId, trainingDate);
+        console.log(`[TRAINING] WHOOP data retrieved for ${trainingDate}:`, JSON.stringify(whoopData, null, 2));
+        console.log(`[TRAINING] - Recovery: ${whoopData?.recoveryScore}%`);
+        console.log(`[TRAINING] - Strain: ${whoopData?.strainScore}`);
+        console.log(`[TRAINING] - Sleep: ${whoopData?.sleepScore}%`);
+        console.log(`[TRAINING] - HRV: ${whoopData?.hrv}ms`);
+
+        // Get user goals for goal alignment
+        const goals = await db
+          .select()
+          .from(userGoals)
+          .where(eq(userGoals.userId, userId))
+          .orderBy(desc(userGoals.createdAt));
+
+        const fitnessGoal = goals.find(g =>
+          g.category && ['fitness', 'training', 'health', 'strength', 'endurance'].some(
+            cat => g.category.toLowerCase().includes(cat)
+          )
+        )?.title || goals[0]?.title;
+
+        console.log(`[TRAINING] User fitness goal: ${fitnessGoal || 'none'}`);
+
+        // Calculate training score
+        const scoreResult = trainingScoreService.calculateTrainingScore({
+          type,
+          duration: parseInt(duration),
+          intensity: intensity || undefined,
+          goal: goal || undefined,
+          comment: comment || undefined,
+          skipped: skipped || false,
+          recoveryScore: whoopData?.recoveryScore || undefined,
+          strainScore: whoopData?.strainScore || undefined,
+          fitnessGoal: fitnessGoal || undefined,
+        });
+
+        console.log(`[TRAINING] Score calculated: ${scoreResult.score}/10`);
+        console.log(`[TRAINING] Score breakdown:`);
+        console.log(`[TRAINING] - Strain Appropriateness: ${scoreResult.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0 (${whoopData?.strainScore ? 'using strain=' + whoopData.strainScore : 'no strain data'})`);
+        console.log(`[TRAINING] - Session Quality: ${scoreResult.breakdown.sessionQualityScore.toFixed(1)}/3.0`);
+        console.log(`[TRAINING] - Goal Alignment: ${scoreResult.breakdown.goalAlignmentScore.toFixed(1)}/2.0`);
+        console.log(`[TRAINING] - Injury Safety: ${scoreResult.breakdown.injurySafetyModifier.toFixed(1)}/1.0`);
+
+        // Get GPT analysis
+        const gptAnalysis = await openAIService.analyzeTrainingSession({
+          trainingType: type,
+          duration: parseInt(duration),
+          intensity: intensity || undefined,
+          goal: goal || undefined,
+          comment: comment || undefined,
+          score: scoreResult.score,
+          breakdown: scoreResult.breakdown,
+          recoveryScore: whoopData?.recoveryScore || undefined,
+          strainScore: whoopData?.strainScore || undefined,
+          sleepScore: whoopData?.sleepScore || undefined,
+          recoveryZone: scoreResult.recoveryZone,
+          userGoal: fitnessGoal || undefined,
+        });
+
+        console.log(`[TRAINING] GPT analysis complete`);
+        console.log(`[TRAINING] GPT analysis text: ${gptAnalysis.training_analysis.substring(0, 100)}...`);
+
+        // Store analysis result
+        const analysisData = {
+          score: scoreResult.score,
+          breakdown: scoreResult.breakdown,
+          analysis: gptAnalysis.training_analysis,
+          recoveryZone: scoreResult.recoveryZone,
+          whoopData: {
+            recoveryScore: whoopData?.recoveryScore,
+            strainScore: whoopData?.strainScore,
+            sleepScore: whoopData?.sleepScore,
+          },
+        };
+
+        console.log(`[TRAINING] Storing analysis data:`, {
+          score: analysisData.score,
+          breakdown: analysisData.breakdown,
+          recoveryZone: analysisData.recoveryZone,
+          hasAnalysis: !!analysisData.analysis,
+          whoopData: analysisData.whoopData,
+        });
+
+        // Update training entry with analysis
+        const updatedTraining = await storage.updateTrainingData(trainingEntry.id, {
+          analysisResult: JSON.stringify(analysisData),
+          trainingScore: scoreResult.score,
+        });
+
+        console.log(`[TRAINING] Analysis stored for training ${trainingEntry.id}`);
+
+        // Return training with parsed analysis
+        res.json({
+          message: 'Training data saved and analyzed successfully',
+          training: {
+            ...updatedTraining,
+            score: scoreResult.score,
+            analysis: gptAnalysis.training_analysis,
+            breakdown: scoreResult.breakdown,
+            recoveryZone: scoreResult.recoveryZone,
+          },
+        });
+
+      } catch (analysisError) {
+        // If analysis fails, still return the training entry
+        console.error('[TRAINING] Analysis failed:', analysisError);
+        res.json({
+          message: 'Training data saved successfully (analysis pending)',
+          training: trainingEntry,
+        });
+      }
+
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Error creating training data:', message);
@@ -3678,7 +3836,7 @@ ${trainingTip}. ${nutritionTip}.`;
     }
   });
 
-  // Get training data for specific date
+  // Get training data for specific date with parsed analysis
   app.get('/api/training/date/:date', requireJWTAuth, async (req, res) => {
     try {
       const { date } = req.params;
@@ -3686,8 +3844,45 @@ ${trainingTip}. ${nutritionTip}.`;
 
       const trainingData = await storage.getTrainingDataByUserAndDate(userId, date);
 
-      console.log(`Found ${trainingData.length} training sessions for user ${userId} on ${date}`);
-      res.json(trainingData);
+      // Parse analysis results for each training session
+      const trainingSessions = trainingData.map(training => {
+        let score: number | undefined;
+        let analysis: string | undefined;
+        let breakdown: any | undefined;
+        let recoveryZone: 'green' | 'yellow' | 'red' | undefined;
+
+        if (training.analysisResult) {
+          try {
+            const parsed = JSON.parse(training.analysisResult);
+            score = parsed.score;
+            analysis = parsed.analysis;
+            breakdown = parsed.breakdown;
+            recoveryZone = parsed.recoveryZone;
+            console.log(`[TRAINING FETCH] Parsed training ${training.id}:`, {
+              hasScore: !!score,
+              hasAnalysis: !!analysis,
+              hasBreakdown: !!breakdown,
+              breakdown: breakdown,
+              recoveryZone,
+            });
+          } catch (e) {
+            console.error(`Failed to parse analysis for training ${training.id}:`, e);
+          }
+        } else {
+          console.log(`[TRAINING FETCH] Training ${training.id} has no analysisResult`);
+        }
+
+        return {
+          ...training,
+          score,
+          analysis,
+          breakdown,
+          recoveryZone,
+        };
+      });
+
+      console.log(`Found ${trainingSessions.length} training sessions for user ${userId} on ${date}`);
+      res.json(trainingSessions);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching training data:', message);
@@ -3736,6 +3931,101 @@ ${trainingTip}. ${nutritionTip}.`;
       const message = error instanceof Error ? error.message : String(error);
       console.error('Error deleting training data:', message);
       res.status(500).json({ error: 'Failed to delete training data', details: message });
+    }
+  });
+
+  // Analyze training sessions for a specific date
+  app.post('/api/training/analyze/:date', requireJWTAuth, async (req, res) => {
+    try {
+      const { date } = req.params;
+      const userId = getCurrentUserId(req) || 'default-user';
+
+      console.log(`[TRAINING ANALYSIS] Starting analysis for user ${userId} on ${date}`);
+
+      // Get training data for the date
+      const trainingData = await storage.getTrainingDataByUserAndDate(userId, date);
+
+      if (trainingData.length === 0) {
+        return res.status(404).json({
+          error: 'No training data found for this date',
+          message: 'Please log your training session first'
+        });
+      }
+
+      // Get WHOOP data for the date
+      const whoopData = await whoopApiService.getDataForDate(userId, date);
+      console.log(`[TRAINING ANALYSIS] WHOOP data:`, whoopData);
+
+      // Get user goals for goal alignment
+      const goals = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.userId, userId))
+        .orderBy(desc(userGoals.createdAt));
+
+      // Get primary fitness goal (most recent goal with fitness-related category)
+      const fitnessGoal = goals.find(g =>
+        g.category && ['fitness', 'training', 'health', 'strength', 'endurance'].some(
+          cat => g.category.toLowerCase().includes(cat)
+        )
+      )?.title || goals[0]?.title;
+
+      console.log(`[TRAINING ANALYSIS] User fitness goal: ${fitnessGoal || 'none'}`);
+
+      // Calculate training score for each session
+      const analyzedSessions = trainingData.map(session => {
+        const scoreResult = trainingScoreService.calculateTrainingScore({
+          type: session.type,
+          duration: session.duration,
+          intensity: session.intensity || undefined,
+          goal: session.goal || undefined,
+          comment: session.comment || undefined,
+          skipped: session.skipped,
+          recoveryScore: whoopData?.recoveryScore || undefined,
+          strainScore: whoopData?.strainScore || undefined,
+          fitnessGoal: fitnessGoal || undefined,
+        });
+
+        return {
+          sessionId: session.id,
+          type: session.type,
+          duration: session.duration,
+          intensity: session.intensity,
+          goal: session.goal,
+          comment: session.comment,
+          skipped: session.skipped,
+          score: scoreResult.score,
+          breakdown: scoreResult.breakdown,
+          analysis: scoreResult.analysis,
+          recoveryZone: scoreResult.recoveryZone,
+        };
+      });
+
+      // Calculate average training score for the day
+      const averageScore = analyzedSessions.reduce((sum, s) => sum + s.score, 0) / analyzedSessions.length;
+
+      console.log(`[TRAINING ANALYSIS] Completed analysis: average score ${averageScore.toFixed(1)}/10`);
+
+      res.json({
+        date,
+        sessions: analyzedSessions,
+        averageScore: Math.round(averageScore * 10) / 10,
+        whoopData: {
+          recoveryScore: whoopData?.recoveryScore,
+          strainScore: whoopData?.strainScore,
+          sleepScore: whoopData?.sleepScore,
+          hrv: whoopData?.hrv,
+        },
+        userGoal: fitnessGoal,
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TRAINING ANALYSIS] Error:', message);
+      res.status(500).json({
+        error: 'Failed to analyze training data',
+        details: message
+      });
     }
   });
 
