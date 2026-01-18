@@ -9,6 +9,7 @@ import ChatScreen from './src/screens/ChatScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import GoalsScreen from './src/screens/GoalsScreen';
 import OnboardingNavigator from './src/navigation/OnboardingNavigator';
+import InsightsNavigator from './src/navigation/InsightsNavigator';
 import { getDetailedStatus } from './src/api/onboarding';
 import { API_BASE_URL, setAuthToken, hasUserToken, clearAuthToken } from './src/api/client';
 import { navigationTheme } from './src/ui/navigationTheme';
@@ -95,6 +96,8 @@ function MainTabs() {
             iconName = focused ? 'home' : 'home-outline';
           } else if (route.name === 'Goals') {
             iconName = focused ? 'trophy' : 'trophy-outline';
+          } else if (route.name === 'Insights') {
+            iconName = focused ? 'bulb' : 'bulb-outline';
           } else if (route.name === 'Calendar') {
             iconName = focused ? 'calendar' : 'calendar-outline';
           } else if (route.name === 'FitCoach') {
@@ -107,6 +110,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Home" component={DashboardScreen} />
       <Tab.Screen name="Goals" component={GoalsScreen} />
+      <Tab.Screen name="Insights" component={InsightsNavigator} />
       <Tab.Screen name="Calendar" component={CalendarScreen} />
       <Tab.Screen name="FitCoach" component={ChatScreen} />
       <Tab.Screen

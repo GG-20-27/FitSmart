@@ -2758,43 +2758,52 @@ ${trainingTip}. ${nutritionTip}.`;
         }
       }
       
-      // Get last month's data for comparison
+      // Get weekly average from a month ago for comparison
       const tz = process.env.USER_TZ || 'Europe/Zurich';
       const now = DateTime.now().setZone(tz);
-      const monthAgoStart = now.minus({ days: 37 });
-      const monthAgoEnd = now.minus({ days: 30 });
 
-      let lastMonthData = { avgRecovery: 0, avgStrain: 0, avgSleep: 0, avgHRV: 0 };
-      const lastMonthCachedData = [];
-
-      for (let i = 30; i <= 37; i++) {
+      // Get data from the same 7-day period one month ago (days 28-34)
+      const monthAgoWeekData = [];
+      for (let i = 28; i <= 34; i++) {
         const dateIso = now.minus({ days: i }).toISODate();
         if (!dateIso) continue;
         const dayData = await storage.getWhoopDataByUserAndDate(userId, dateIso);
-        if (dayData) lastMonthCachedData.push(dayData);
+        if (dayData) monthAgoWeekData.push(dayData);
       }
 
-      if (lastMonthCachedData.length > 0) {
-        const count = lastMonthCachedData.length;
-        lastMonthData = {
-          avgRecovery: Math.round(lastMonthCachedData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0) / count),
-          avgStrain: Math.round((lastMonthCachedData.reduce((sum, d) => sum + (d.strainScore || 0), 0) / count) * 10) / 10,
-          avgSleep: Math.round(lastMonthCachedData.reduce((sum, d) => sum + (d.sleepScore || 0), 0) / count),
-          avgHRV: Math.round(lastMonthCachedData.reduce((sum, d) => sum + (d.hrv || 0), 0) / count)
+      // Only calculate deltas if we have enough comparison data (at least 4 days from a month ago)
+      let sleepDelta = undefined;
+      let recoveryDelta = undefined;
+      let strainDelta = undefined;
+      let hrvDelta = undefined;
+
+      if (monthAgoWeekData.length >= 4) {
+        const count = monthAgoWeekData.length;
+        const monthAgoAvg = {
+          avgRecovery: Math.round(monthAgoWeekData.reduce((sum, d) => sum + (d.recoveryScore || 0), 0) / count),
+          avgStrain: Math.round((monthAgoWeekData.reduce((sum, d) => sum + (d.strainScore || 0), 0) / count) * 10) / 10,
+          avgSleep: Math.round(monthAgoWeekData.reduce((sum, d) => sum + (d.sleepScore || 0), 0) / count),
+          avgHRV: Math.round(monthAgoWeekData.reduce((sum, d) => sum + (d.hrv || 0), 0) / count)
         };
-      }
 
-      // Calculate deltas
-      const sleepDelta = weeklyData.avgSleep && lastMonthData.avgSleep
-        ? Math.round(weeklyData.avgSleep - lastMonthData.avgSleep) : 0;
-      const recoveryDelta = weeklyData.avgRecovery && lastMonthData.avgRecovery
-        ? Math.round(weeklyData.avgRecovery - lastMonthData.avgRecovery) : 0;
-      const strainDelta = weeklyData.avgStrain && lastMonthData.avgStrain
-        ? Math.round((weeklyData.avgStrain - lastMonthData.avgStrain) * 10) / 10 : 0;
-      const hrvDelta = weeklyData.avgHRV && lastMonthData.avgHRV
-        ? Math.round(weeklyData.avgHRV - lastMonthData.avgHRV) : 0;
+        console.log(`[WHOOP WEEKLY] Month ago week (days 28-34) avg: sleep=${monthAgoAvg.avgSleep}%, recovery=${monthAgoAvg.avgRecovery}%, strain=${monthAgoAvg.avgStrain}, hrv=${monthAgoAvg.avgHRV}ms (${count} days)`);
+        console.log(`[WHOOP WEEKLY] Current week (days 0-6) avg: sleep=${weeklyData.avgSleep}%, recovery=${weeklyData.avgRecovery}%, strain=${weeklyData.avgStrain}, hrv=${weeklyData.avgHRV}ms`);
+
+        // Calculate deltas (percentage points for sleep/recovery, absolute for strain/HRV)
+        sleepDelta = weeklyData.avgSleep && monthAgoAvg.avgSleep
+          ? Math.round(weeklyData.avgSleep - monthAgoAvg.avgSleep) : undefined;
+        recoveryDelta = weeklyData.avgRecovery && monthAgoAvg.avgRecovery
+          ? Math.round(weeklyData.avgRecovery - monthAgoAvg.avgRecovery) : undefined;
+        strainDelta = weeklyData.avgStrain && monthAgoAvg.avgStrain
+          ? Math.round((weeklyData.avgStrain - monthAgoAvg.avgStrain) * 10) / 10 : undefined;
+        hrvDelta = weeklyData.avgHRV && monthAgoAvg.avgHRV
+          ? Math.round(weeklyData.avgHRV - monthAgoAvg.avgHRV) : undefined;
+      } else {
+        console.log(`[WHOOP WEEKLY] Not enough data from a month ago (${monthAgoWeekData.length} days) - skipping deltas`);
+      }
 
       // Return structure matching mobile app's WeeklyMetrics type
+      // Comparing current week (days 0-6) vs. same week from a month ago (days 28-34)
       const response = {
         start_date: now.minus({ days: 6 }).toISODate(),
         end_date: now.toISODate(),
@@ -3043,28 +3052,30 @@ ${trainingTip}. ${nutritionTip}.`;
         console.warn('WHOOP access token has expired. Using cache fallback only.');
       }
 
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const now = DateTime.now().setZone(tz);
+
       try {
         if (isTokenValid) {
           yesterdayData = await whoopApiService.getYesterdaysData(userId);
         } else {
           throw new Error('Token expired, skip to cache');
         }
-        
+
         // If API succeeds but returns null values, try cache fallback
         if (!yesterdayData || (yesterdayData.recovery_score === null && yesterdayData.strain === null && yesterdayData.sleep_score === null && yesterdayData.hrv === null)) {
           console.log('WHOOP API returned null values for yesterday, trying cache fallback');
           throw new Error('No data from WHOOP API');
         }
-        
+
         console.log('Yesterday WHOOP data retrieved successfully from API');
       } catch (apiError) {
         const apiMessage = apiError instanceof Error ? apiError.message : String(apiError);
         console.log('Failed to get yesterday data from WHOOP API, trying cache fallback', apiMessage ? `(${apiMessage})` : '');
-        
+
         // Get yesterday's cached data as fallback using timezone-aware dates
-        const tz = process.env.USER_TZ || 'Europe/Zurich';
-        const yesterday = DateTime.now().setZone(tz).minus({ days: 1 }).toISODate();
-        
+        const yesterday = now.minus({ days: 1 }).toISODate();
+
         if (yesterday) {
           const dayData = await storage.getWhoopDataByUserAndDate(userId, yesterday);
           if (dayData) {
@@ -3082,8 +3093,55 @@ ${trainingTip}. ${nutritionTip}.`;
           yesterdayData = { recovery_score: null, strain: null, sleep_score: null, hrv: null };
         }
       }
-      
-      res.json(yesterdayData);
+
+      // Get data from 8 days ago for comparison (yesterday vs last week)
+      const lastWeekDate = now.minus({ days: 8 }).toISODate();
+      let lastWeekData = null;
+
+      if (lastWeekDate) {
+        lastWeekData = await storage.getWhoopDataByUserAndDate(userId, lastWeekDate);
+      }
+
+      // Calculate deltas (yesterday vs last week)
+      let sleepDelta = undefined;
+      let recoveryDelta = undefined;
+      let strainDelta = undefined;
+      let hrvDelta = undefined;
+
+      if (lastWeekData && yesterdayData) {
+        if (yesterdayData.sleep_score != null && lastWeekData.sleepScore != null) {
+          sleepDelta = Math.round(yesterdayData.sleep_score - lastWeekData.sleepScore);
+        }
+        if (yesterdayData.recovery_score != null && lastWeekData.recoveryScore != null) {
+          recoveryDelta = Math.round(yesterdayData.recovery_score - lastWeekData.recoveryScore);
+        }
+        if (yesterdayData.strain != null && lastWeekData.strainScore != null) {
+          strainDelta = Math.round((yesterdayData.strain - lastWeekData.strainScore) * 10) / 10;
+        }
+        if (yesterdayData.hrv != null && lastWeekData.hrv != null) {
+          hrvDelta = Math.round(yesterdayData.hrv - lastWeekData.hrv);
+        }
+      }
+
+      console.log(`[WHOOP YESTERDAY] user=${userId} yesterday vs last week deltas: sleep=${sleepDelta}, recovery=${recoveryDelta}, strain=${strainDelta}, hrv=${hrvDelta}`);
+
+      // Return structure matching weekly format
+      const response = {
+        sleep_score: yesterdayData?.sleep_score || null,
+        recovery_score: yesterdayData?.recovery_score || null,
+        strain: yesterdayData?.strain || null,
+        hrv: yesterdayData?.hrv || null,
+        comparison: {
+          vs_last_week: {
+            sleep_percent_delta: sleepDelta,
+            recovery_percent_delta: recoveryDelta,
+            strain_delta: strainDelta,
+            hrv_ms_delta: hrvDelta
+          }
+        }
+      };
+
+      res.json(response);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('Error in /api/whoop/yesterday:', message);
@@ -3433,46 +3491,66 @@ ${trainingTip}. ${nutritionTip}.`;
     }
   });
 
-  // Meal upload endpoint
-  app.post('/api/meals', upload.array('mealPhotos', 10), async (req: Request, res: Response) => {
+  // Meal upload endpoint - accepts single meal with image, type, and notes
+  app.post('/api/meals', (req, res, next) => {
+    console.log('[MEAL UPLOAD] Received POST to /api/meals');
+    console.log('[MEAL UPLOAD] Content-Type:', req.headers['content-type']);
+    next();
+  }, upload.single('mealPhoto'), (err: any, req: Request, res: Response, next: Function) => {
+    if (err) {
+      console.error('[MEAL UPLOAD] Multer error:', err.message);
+      console.error('[MEAL UPLOAD] Error code:', err.code);
+      return res.status(500).json({
+        error: 'File upload failed',
+        message: err.message,
+        code: err.code
+      });
+    }
+    next();
+  }, requireJWTAuth, async (req: Request, res: Response) => {
     try {
-      console.log('Processing meal uploads...');
-      
-      const files = req.files as Express.Multer.File[];
-      if (!files || !Array.isArray(files) || files.length === 0) {
-        return res.status(400).json({ error: 'No files uploaded' });
-      }
-      
-      const today = getTodayDate();
-      const uploadedMeals = [];
-      
-      const userId = getCurrentUserId(req) || 'default-user';
-      
-      for (const file of files) {
-        const meal = await storage.createMeal({
-          userId: userId,
-          filename: file.filename,
-          originalName: file.originalname,
-          mimetype: file.mimetype,
-          size: file.size,
-          date: today
-        });
-        uploadedMeals.push(meal);
-      }
-      
-      console.log(`Uploaded ${uploadedMeals.length} meal images`);
+      console.log('[MEAL UPLOAD] Processing meal upload...');
+      console.log('[MEAL UPLOAD] File:', req.file ? 'Present' : 'Missing');
+      console.log('[MEAL UPLOAD] Body:', req.body);
 
-      // Auto-trigger FitScore calculation if 2+ meals uploaded today
-      try {
-        const { fitScoreService } = await import('./services/fitScoreService');
-        await fitScoreService.checkMealTrigger(userId, today);
-      } catch (error) {
-        console.warn('[MEAL UPLOAD] FitScore auto-trigger failed:', error);
+      const file = req.file as Express.Multer.File;
+      if (!file) {
+        return res.status(400).json({ error: 'No file uploaded' });
       }
+
+      const { mealType, mealNotes, date } = req.body;
+
+      if (!mealType) {
+        return res.status(400).json({ error: 'Meal type is required' });
+      }
+
+      const userId = getCurrentUserId(req) || 'default-user';
+      const uploadDate = date || getTodayDate();
+
+      const meal = await storage.createMeal({
+        userId: userId,
+        filename: file.filename,
+        originalName: file.originalname,
+        mimetype: file.mimetype,
+        size: file.size,
+        date: uploadDate,
+        mealType: mealType,
+        mealNotes: mealNotes || null,
+        analysisResult: null, // Will be populated by AI analysis later
+      });
+
+      console.log(`Uploaded meal: ${mealType} for date ${uploadDate}`);
 
       res.json({
-        message: `Successfully uploaded ${uploadedMeals.length} meal images`,
-        meals: uploadedMeals
+        message: 'Meal uploaded successfully',
+        meal: {
+          id: meal.id,
+          mealType: meal.mealType,
+          mealNotes: meal.mealNotes,
+          imageUri: `/uploads/${meal.filename}`,
+          date: meal.date,
+          uploadedAt: meal.uploadedAt,
+        }
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -3534,6 +3612,130 @@ ${trainingTip}. ${nutritionTip}.`;
       const message = error instanceof Error ? error.message : String(error);
       console.error('Error fetching all meals:', message);
       res.status(500).json({ error: 'Failed to fetch meals', details: message });
+    }
+  });
+
+  // Get meals for specific date
+  app.get('/api/meals/date/:date', requireJWTAuth, async (req, res) => {
+    try {
+      const { date } = req.params;
+      const userId = getCurrentUserId(req) || 'default-user';
+
+      const meals = await storage.getMealsByUserAndDate(userId, date);
+
+      const baseUrl = req.protocol + '://' + req.get('host');
+      const mealsWithUrls = meals.map(meal => ({
+        id: meal.id,
+        mealType: meal.mealType,
+        mealNotes: meal.mealNotes,
+        imageUri: `${baseUrl}/uploads/${meal.filename}`,
+        date: meal.date,
+        uploadedAt: meal.uploadedAt,
+        analysisResult: meal.analysisResult,
+      }));
+
+      console.log(`Found ${meals.length} meals for user ${userId} on ${date}`);
+      res.json(mealsWithUrls);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching meals:', message);
+      res.status(500).json({ error: 'Failed to fetch meals', details: message });
+    }
+  });
+
+  // ========== Training Data Endpoints ==========
+
+  // Create training data
+  app.post('/api/training', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req) || 'default-user';
+      const { date, type, duration, goal, intensity, comment, skipped } = req.body;
+
+      if (!type || duration === undefined) {
+        return res.status(400).json({ error: 'Training type and duration are required' });
+      }
+
+      const trainingEntry = await storage.createTrainingData({
+        userId,
+        date: date || getTodayDate(),
+        type,
+        duration: parseInt(duration),
+        goal: goal || null,
+        intensity: intensity || null,
+        comment: comment || null,
+        skipped: skipped || false,
+      });
+
+      console.log(`Created training: ${type} for ${date || getTodayDate()}`);
+      res.json({
+        message: 'Training data saved successfully',
+        training: trainingEntry,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error creating training data:', message);
+      res.status(500).json({ error: 'Failed to save training data', details: message });
+    }
+  });
+
+  // Get training data for specific date
+  app.get('/api/training/date/:date', requireJWTAuth, async (req, res) => {
+    try {
+      const { date } = req.params;
+      const userId = getCurrentUserId(req) || 'default-user';
+
+      const trainingData = await storage.getTrainingDataByUserAndDate(userId, date);
+
+      console.log(`Found ${trainingData.length} training sessions for user ${userId} on ${date}`);
+      res.json(trainingData);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error fetching training data:', message);
+      res.status(500).json({ error: 'Failed to fetch training data', details: message });
+    }
+  });
+
+  // Update training data
+  app.put('/api/training/:id', requireJWTAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { type, duration, goal, intensity, comment, skipped } = req.body;
+
+      const updates: any = {};
+      if (type !== undefined) updates.type = type;
+      if (duration !== undefined) updates.duration = parseInt(duration);
+      if (goal !== undefined) updates.goal = goal;
+      if (intensity !== undefined) updates.intensity = intensity;
+      if (comment !== undefined) updates.comment = comment;
+      if (skipped !== undefined) updates.skipped = skipped;
+
+      const updated = await storage.updateTrainingData(parseInt(id), updates);
+
+      console.log(`Updated training ${id}`);
+      res.json({
+        message: 'Training data updated successfully',
+        training: updated,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error updating training data:', message);
+      res.status(500).json({ error: 'Failed to update training data', details: message });
+    }
+  });
+
+  // Delete training data
+  app.delete('/api/training/:id', requireJWTAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      await storage.deleteTrainingData(parseInt(id));
+
+      console.log(`Deleted training ${id}`);
+      res.json({ message: 'Training data deleted successfully' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error deleting training data:', message);
+      res.status(500).json({ error: 'Failed to delete training data', details: message });
     }
   });
 

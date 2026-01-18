@@ -1,5 +1,9 @@
+console.log('[STARTUP] Starting server initialization...');
+
 // CRITICAL: Load environment variables FIRST before any other imports
 import "./loadEnv";
+
+console.log('[STARTUP] Environment loaded, importing dependencies...');
 
 // Fallback for manual injection in Replit (optional safety net)
 if (!process.env.N8N_SECRET_TOKEN) {
@@ -7,12 +11,21 @@ if (!process.env.N8N_SECRET_TOKEN) {
   console.log('[INFO] Set default N8N_SECRET_TOKEN to: fitgpt-secret-2025');
 }
 
+console.log('[STARTUP] Importing express...');
 import express, { type Request, Response, NextFunction } from "express";
+
+console.log('[STARTUP] Importing routes...');
 import { registerRoutes } from "./routes";
-import { setupVite, serveStatic, log } from "./vite";
+
+console.log('[STARTUP] Importing services...');
 import { whoopApiService } from "./whoopApiService";
 import { userService } from "./userService";
 import { jwtAuthMiddleware } from "./jwtAuth";
+
+console.log('[STARTUP] All imports complete');
+
+// Simple logging utility
+const log = (message: string) => console.log(`[${new Date().toISOString()}] ${message}`);
 
 const app = express();
 
@@ -127,15 +140,6 @@ app.use((req, res, next) => {
     res.status(status).json({ message });
     throw err;
   });
-
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
 
   // Serve the app on port 3001 (or PORT env variable)
   // this serves both the API and the client.

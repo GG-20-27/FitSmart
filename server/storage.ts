@@ -1,23 +1,31 @@
-import { users, meals, whoopData, userCalendars, type User, type InsertUser, type Meal, type InsertMeal, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar } from "@shared/schema";
+import { users, meals, trainingData, whoopData, userCalendars, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar } from "@shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
-  
+
   // Meal operations
   createMeal(meal: InsertMeal): Promise<Meal>;
   getMealsByDate(date: string): Promise<Meal[]>;
   getAllMeals(): Promise<Meal[]>;
-  
+  getMealsByUserAndDate(userId: string, date: string): Promise<Meal[]>;
+  deleteMeal(id: number): Promise<void>;
+
+  // Training data operations
+  createTrainingData(data: InsertTrainingData): Promise<TrainingData>;
+  getTrainingDataByUserAndDate(userId: string, date: string): Promise<TrainingData[]>;
+  updateTrainingData(id: number, data: Partial<InsertTrainingData>): Promise<TrainingData>;
+  deleteTrainingData(id: number): Promise<void>;
+
   // WHOOP data operations
   getWhoopDataByDate(date: string): Promise<WhoopData | undefined>;
   getWhoopDataByUserAndDate(userId: string, date: string): Promise<WhoopData | undefined>;
   createOrUpdateWhoopData(data: InsertWhoopData): Promise<WhoopData>;
   upsertWhoopData(data: InsertWhoopData): Promise<WhoopData>;
   deleteWhoopDataByUserAndDate(userId: string, date: string): Promise<void>;
-  
+
   // Calendar operations
   getUserCalendars(userId: string): Promise<UserCalendar[]>;
   createUserCalendar(data: InsertUserCalendar): Promise<UserCalendar>;
@@ -53,6 +61,42 @@ export class DatabaseStorage implements IStorage {
 
   async getAllMeals(): Promise<Meal[]> {
     return await db.select().from(meals);
+  }
+
+  async getMealsByUserAndDate(userId: string, date: string): Promise<Meal[]> {
+    return await db.select().from(meals)
+      .where(and(eq(meals.userId, userId), eq(meals.date, date)));
+  }
+
+  async deleteMeal(id: number): Promise<void> {
+    await db.delete(meals).where(eq(meals.id, id));
+  }
+
+  // Training data operations
+  async createTrainingData(insertData: InsertTrainingData): Promise<TrainingData> {
+    const [data] = await db
+      .insert(trainingData)
+      .values(insertData)
+      .returning();
+    return data;
+  }
+
+  async getTrainingDataByUserAndDate(userId: string, date: string): Promise<TrainingData[]> {
+    return await db.select().from(trainingData)
+      .where(and(eq(trainingData.userId, userId), eq(trainingData.date, date)));
+  }
+
+  async updateTrainingData(id: number, data: Partial<InsertTrainingData>): Promise<TrainingData> {
+    const [updated] = await db
+      .update(trainingData)
+      .set(data)
+      .where(eq(trainingData.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteTrainingData(id: number): Promise<void> {
+    await db.delete(trainingData).where(eq(trainingData.id, id));
   }
 
   async getWhoopDataByDate(date: string): Promise<WhoopData | undefined> {

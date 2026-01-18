@@ -1,4 +1,6 @@
 node_modules
+node_modules.backup
+*.backup
 dist
 .DS_Store
 server/public

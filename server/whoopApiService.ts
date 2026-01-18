@@ -630,7 +630,12 @@ export class WhoopApiService {
       console.log('No recent workouts found');
       return null;
     } catch (error) {
-      console.error('Error fetching workout data:', error);
+      // 404 errors are expected - these endpoints may not be available for all users
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        console.log('Workout data endpoint not available (404) - skipping');
+      } else {
+        console.error('Error fetching workout data:', error instanceof Error ? error.message : String(error));
+      }
       return null;
     }
   }
@@ -641,22 +646,27 @@ export class WhoopApiService {
     }
     try {
       console.log('Fetching body measurements...');
-      
+
       const headers = await this.authHeader(userId);
       const response = await axios.get(`${BASE}/body_measurement`, {
         headers,
         timeout: 10000
       });
-      
+
       if (response.data) {
         console.log('Body measurements retrieved successfully');
         return response.data;
       }
-      
+
       console.log('No body measurements found');
       return null;
     } catch (error) {
-      console.error('Error fetching body measurements:', error);
+      // 404 errors are expected - these endpoints may not be available for all users
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        console.log('Body measurements endpoint not available (404) - skipping');
+      } else {
+        console.error('Error fetching body measurements:', error instanceof Error ? error.message : String(error));
+      }
       return null;
     }
   }

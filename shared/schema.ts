@@ -32,6 +32,22 @@ export const meals = pgTable("meals", {
   size: integer("size").notNull(),
   uploadedAt: timestamp("uploaded_at").defaultNow().notNull(),
   date: text("date").notNull(), // YYYY-MM-DD format
+  mealType: text("meal_type"), // Breakfast, Brunch, Lunch, Dinner, Snack #1, Snack #2
+  mealNotes: text("meal_notes"), // Optional notes about the meal
+  analysisResult: text("analysis_result"), // AI analysis result stored as JSON
+});
+
+export const trainingData = pgTable("training_data", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  type: text("type").notNull(), // Training type (e.g., "Morning Run", "Strength Training")
+  duration: integer("duration").notNull(), // Duration in minutes
+  goal: text("goal"), // Training goal (e.g., "Endurance", "Strength")
+  intensity: text("intensity"), // Low, Moderate, High
+  comment: text("comment"), // Optional user comment
+  skipped: boolean("skipped").default(false).notNull(), // Whether training was skipped
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const whoopData = pgTable("whoop_data", {
@@ -112,6 +128,11 @@ export const insertMealSchema = createInsertSchema(meals).omit({
   uploadedAt: true,
 });
 
+export const insertTrainingDataSchema = createInsertSchema(trainingData).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertWhoopDataSchema = createInsertSchema(whoopData).omit({
   lastSync: true,
 });
@@ -152,6 +173,8 @@ export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertMeal = z.infer<typeof insertMealSchema>;
 export type Meal = typeof meals.$inferSelect;
+export type InsertTrainingData = z.infer<typeof insertTrainingDataSchema>;
+export type TrainingData = typeof trainingData.$inferSelect;
 export type InsertWhoopData = z.infer<typeof insertWhoopDataSchema>;
 export type WhoopData = typeof whoopData.$inferSelect;
 export type InsertWhoopToken = z.infer<typeof insertWhoopTokenSchema>;

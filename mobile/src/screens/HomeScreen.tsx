@@ -19,13 +19,31 @@ type WhoopYesterdayResponse = {
   recovery_score?: number | null;
   strain?: number | null;
   hrv?: number | null;
+  comparison?: {
+    vs_last_week?: {
+      sleep_percent_delta?: number | null;
+      recovery_percent_delta?: number | null;
+      strain_delta?: number | null;
+      hrv_ms_delta?: number | null;
+    };
+  };
 };
 
 type WhoopWeeklyResponse = {
-  avg_sleep?: number | null;
-  avg_recovery?: number | null;
-  avg_strain?: number | null;
-  avg_hrv?: number | null;
+  averages?: {
+    sleep_score_percent?: number | null;
+    recovery_score_percent?: number | null;
+    strain_score?: number | null;
+    hrv_ms?: number | null;
+  };
+  comparison?: {
+    vs_last_month?: {
+      sleep_percent_delta?: number | null;
+      recovery_percent_delta?: number | null;
+      strain_delta?: number | null;
+      hrv_ms_delta?: number | null;
+    };
+  };
 };
 
 
@@ -48,6 +66,10 @@ export default function HomeScreen() {
       ]);
     
 
+      console.log('[HomeScreen] Weekly response:', weeklyRes);
+      console.log('[HomeScreen] Weekly comparison:', weeklyRes?.comparison);
+      console.log('[HomeScreen] Yesterday response:', yesterdayRes);
+      console.log('[HomeScreen] Yesterday comparison:', yesterdayRes?.comparison);
       setToday(todayRes);
       setYesterday(yesterdayRes);
       setWeekly(weeklyRes);
@@ -95,22 +117,54 @@ export default function HomeScreen() {
 
       <Text style={styles.sectionTitle}>Yesterday's Metrics</Text>
       <View style={styles.cardRow}>
-        <MetricCard label="Sleep Score" value={percentOrNA(yesterday?.sleep_score)} />
-        <MetricCard label="Recovery" value={percentOrNA(yesterday?.recovery_score)} />
+        <MetricCard
+          label="Sleep Score"
+          value={percentOrNA(yesterday?.sleep_score)}
+          subtitle={formatDeltaLastWeek(yesterday?.comparison?.vs_last_week?.sleep_percent_delta, '%')}
+        />
+        <MetricCard
+          label="Recovery"
+          value={percentOrNA(yesterday?.recovery_score)}
+          subtitle={formatDeltaLastWeek(yesterday?.comparison?.vs_last_week?.recovery_percent_delta, '%')}
+        />
       </View>
       <View style={styles.cardRow}>
-        <MetricCard label="Strain" value={strainOrNA(yesterday?.strain)} />
-        <MetricCard label="HRV" value={msOrNA(yesterday?.hrv)} />
+        <MetricCard
+          label="Strain"
+          value={strainOrNA(yesterday?.strain)}
+          subtitle={formatStrainDeltaLastWeek(yesterday?.comparison?.vs_last_week?.strain_delta)}
+        />
+        <MetricCard
+          label="HRV"
+          value={msOrNA(yesterday?.hrv)}
+          subtitle={formatDeltaLastWeek(yesterday?.comparison?.vs_last_week?.hrv_ms_delta, ' ms')}
+        />
       </View>
 
       <Text style={styles.sectionTitle}>Weekly Averages</Text>
       <View style={styles.cardRow}>
-        <MetricCard label="Avg Sleep" value={percentOrNA(weekly?.avg_sleep)} />
-        <MetricCard label="Avg Recovery" value={percentOrNA(weekly?.avg_recovery)} />
+        <MetricCard
+          label="Avg Sleep"
+          value={percentOrNA(weekly?.averages?.sleep_score_percent)}
+          subtitle={formatDelta(weekly?.comparison?.vs_last_month?.sleep_percent_delta, '%')}
+        />
+        <MetricCard
+          label="Avg Recovery"
+          value={percentOrNA(weekly?.averages?.recovery_score_percent)}
+          subtitle={formatDelta(weekly?.comparison?.vs_last_month?.recovery_percent_delta, '%')}
+        />
       </View>
       <View style={styles.cardRow}>
-        <MetricCard label="Avg Strain" value={strainOrNA(weekly?.avg_strain)} />
-        <MetricCard label="Avg HRV" value={msOrNA(weekly?.avg_hrv)} />
+        <MetricCard
+          label="Avg Strain"
+          value={strainOrNA(weekly?.averages?.strain_score)}
+          subtitle={formatStrainDelta(weekly?.comparison?.vs_last_month?.strain_delta)}
+        />
+        <MetricCard
+          label="Avg HRV"
+          value={msOrNA(weekly?.averages?.hrv_ms)}
+          subtitle={formatDelta(weekly?.comparison?.vs_last_month?.hrv_ms_delta, ' ms')}
+        />
       </View>
 
 
@@ -121,7 +175,9 @@ export default function HomeScreen() {
 
 function percentOrNA(v?: number | null) {
   if (v === null || v === undefined) return 'N/A';
-  return `${Math.round(Math.min(Math.max(v, 0), 100))}%`;
+  const rounded = Math.round(Math.min(Math.max(v, 0), 100));
+  console.log(`[percentOrNA] Input: ${v}, Rounded: ${rounded}`);
+  return `${rounded}%`;
 }
 function numberOrNA(v?: number | null) {
   if (v === null || v === undefined) return 'N/A';
@@ -130,7 +186,10 @@ function numberOrNA(v?: number | null) {
 
 function strainOrNA(v?: number | null) {
   if (v === null || v === undefined) return 'N/A';
-  return `${Math.round(v * 10) / 10}`; // Round to 1 decimal place
+  const rounded = Math.round(v * 10) / 10;
+  const result = rounded % 1 === 0 ? `${Math.round(rounded)}` : `${rounded}`;
+  console.log(`[strainOrNA] Input: ${v}, Rounded: ${rounded}, Result: ${result}`);
+  return result;
 }
 function msOrNA(v?: number | null) {
   if (v === null || v === undefined) return 'N/A';
@@ -141,11 +200,48 @@ function hoursOrNA(v?: number | null) {
   return `${v} hrs`;
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+function formatDelta(delta?: number | null, suffix: string = '') {
+  console.log('[formatDelta] called with:', delta, suffix);
+  if (delta === null || delta === undefined) {
+    console.log('[formatDelta] returning undefined');
+    return undefined;
+  }
+  const sign = delta > 0 ? '+' : '';
+  const rounded = Math.round(delta);
+  const result = `${sign}${rounded}${suffix} vs last month`;
+  console.log('[formatDelta] returning:', result);
+  return result;
+}
+
+function formatStrainDelta(delta?: number | null) {
+  if (delta === null || delta === undefined) return undefined;
+  const sign = delta > 0 ? '+' : '';
+  const rounded = Math.round(delta * 10) / 10;
+  const displayValue = rounded % 1 === 0 ? Math.round(rounded) : rounded;
+  return `${sign}${displayValue} vs last month`;
+}
+
+function formatDeltaLastWeek(delta?: number | null, suffix: string = '') {
+  if (delta === null || delta === undefined) return undefined;
+  const sign = delta > 0 ? '+' : '';
+  const rounded = Math.round(delta);
+  return `${sign}${rounded}${suffix} vs last week`;
+}
+
+function formatStrainDeltaLastWeek(delta?: number | null) {
+  if (delta === null || delta === undefined) return undefined;
+  const sign = delta > 0 ? '+' : '';
+  const rounded = Math.round(delta * 10) / 10;
+  const displayValue = rounded % 1 === 0 ? Math.round(rounded) : rounded;
+  return `${sign}${displayValue} vs last week`;
+}
+
+function MetricCard({ label, value, subtitle }: { label: string; value: string; subtitle?: string }) {
   return (
     <Card style={styles.card}>
       <Text style={styles.cardLabel}>{label}</Text>
       <Text style={styles.cardValue}>{value}</Text>
+      {subtitle && <Text style={styles.cardSubtitle}>{subtitle}</Text>}
     </Card>
   );
 }
@@ -177,6 +273,11 @@ const styles = StyleSheet.create({
   },
   cardValue: {
     ...typography.h1,
+    marginTop: 4,
+  },
+  cardSubtitle: {
+    ...typography.small,
+    color: colors.textMuted,
     marginTop: 4,
   },
   errorBox: {
