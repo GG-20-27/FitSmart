@@ -2461,8 +2461,51 @@ ${trainingTip}. ${nutritionTip}.`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[WHOOP TODAY] Error:', message);
-      res.status(500).json({ 
+      res.status(500).json({
         error: 'Failed to fetch WHOOP data',
+        details: message
+      });
+    }
+  });
+
+  // HRV Baseline endpoint - returns 7-day rolling average HRV
+  app.get('/api/whoop/hrv-baseline', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate with WHOOP to access this resource'
+        });
+      }
+
+      console.log(`[HRV BASELINE] Calculating 7-day HRV baseline for user: ${userId}`);
+
+      // Use getWeeklyAverages which already calculates 7-day HRV average
+      const weeklyAverages = await whoopApiService.getWeeklyAverages(userId);
+
+      if (weeklyAverages.avgHRV !== null) {
+        console.log(`[HRV BASELINE] 7-day average HRV: ${weeklyAverages.avgHRV}ms for user: ${userId}`);
+        return res.json({
+          hrv_baseline: weeklyAverages.avgHRV,
+          period_days: 7,
+          user_id: userId,
+          timestamp: new Date().toISOString()
+        });
+      } else {
+        console.log(`[HRV BASELINE] No HRV data available for baseline calculation for user: ${userId}`);
+        return res.status(404).json({
+          error: 'Insufficient HRV data',
+          message: 'Not enough HRV data available to calculate baseline',
+          user_id: userId
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[HRV BASELINE] Error:', message);
+      res.status(500).json({
+        error: 'Failed to calculate HRV baseline',
         details: message
       });
     }
@@ -3740,6 +3783,18 @@ ${trainingTip}. ${nutritionTip}.`;
 
         console.log(`[TRAINING] User fitness goal: ${fitnessGoal || 'none'}`);
 
+        // Extract strain and recovery values explicitly
+        const strainValue = whoopData?.strainScore !== undefined && whoopData?.strainScore !== null
+          ? whoopData.strainScore
+          : undefined;
+        const recoveryValue = whoopData?.recoveryScore !== undefined && whoopData?.recoveryScore !== null
+          ? whoopData.recoveryScore
+          : undefined;
+
+        console.log(`[TRAINING] Extracted values for score calculation:`);
+        console.log(`[TRAINING] - strainValue: ${strainValue} (raw: ${whoopData?.strainScore})`);
+        console.log(`[TRAINING] - recoveryValue: ${recoveryValue} (raw: ${whoopData?.recoveryScore})`);
+
         // Calculate training score
         const scoreResult = trainingScoreService.calculateTrainingScore({
           type,
@@ -3748,19 +3803,23 @@ ${trainingTip}. ${nutritionTip}.`;
           goal: goal || undefined,
           comment: comment || undefined,
           skipped: skipped || false,
-          recoveryScore: whoopData?.recoveryScore || undefined,
-          strainScore: whoopData?.strainScore || undefined,
+          recoveryScore: recoveryValue,
+          strainScore: strainValue,
           fitnessGoal: fitnessGoal || undefined,
         });
 
         console.log(`[TRAINING] Score calculated: ${scoreResult.score}/10`);
         console.log(`[TRAINING] Score breakdown:`);
-        console.log(`[TRAINING] - Strain Appropriateness: ${scoreResult.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0 (${whoopData?.strainScore ? 'using strain=' + whoopData.strainScore : 'no strain data'})`);
+        console.log(`[TRAINING] - Strain Appropriateness: ${scoreResult.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0 (strain=${strainValue}, recovery=${recoveryValue})`);
         console.log(`[TRAINING] - Session Quality: ${scoreResult.breakdown.sessionQualityScore.toFixed(1)}/3.0`);
         console.log(`[TRAINING] - Goal Alignment: ${scoreResult.breakdown.goalAlignmentScore.toFixed(1)}/2.0`);
         console.log(`[TRAINING] - Injury Safety: ${scoreResult.breakdown.injurySafetyModifier.toFixed(1)}/1.0`);
 
-        // Get GPT analysis
+        // Get GPT analysis - use same extracted values
+        const sleepValue = whoopData?.sleepScore !== undefined && whoopData?.sleepScore !== null
+          ? whoopData.sleepScore
+          : undefined;
+
         const gptAnalysis = await openAIService.analyzeTrainingSession({
           trainingType: type,
           duration: parseInt(duration),
@@ -3769,9 +3828,9 @@ ${trainingTip}. ${nutritionTip}.`;
           comment: comment || undefined,
           score: scoreResult.score,
           breakdown: scoreResult.breakdown,
-          recoveryScore: whoopData?.recoveryScore || undefined,
-          strainScore: whoopData?.strainScore || undefined,
-          sleepScore: whoopData?.sleepScore || undefined,
+          recoveryScore: recoveryValue,
+          strainScore: strainValue,
+          sleepScore: sleepValue,
           recoveryZone: scoreResult.recoveryZone,
           userGoal: fitnessGoal || undefined,
         });
@@ -3779,16 +3838,16 @@ ${trainingTip}. ${nutritionTip}.`;
         console.log(`[TRAINING] GPT analysis complete`);
         console.log(`[TRAINING] GPT analysis text: ${gptAnalysis.training_analysis.substring(0, 100)}...`);
 
-        // Store analysis result
+        // Store analysis result with extracted values
         const analysisData = {
           score: scoreResult.score,
           breakdown: scoreResult.breakdown,
           analysis: gptAnalysis.training_analysis,
           recoveryZone: scoreResult.recoveryZone,
           whoopData: {
-            recoveryScore: whoopData?.recoveryScore,
-            strainScore: whoopData?.strainScore,
-            sleepScore: whoopData?.sleepScore,
+            recoveryScore: recoveryValue,
+            strainScore: strainValue,
+            sleepScore: sleepValue,
           },
         };
 
@@ -4024,6 +4083,299 @@ ${trainingTip}. ${nutritionTip}.`;
       console.error('[TRAINING ANALYSIS] Error:', message);
       res.status(500).json({
         error: 'Failed to analyze training data',
+        details: message
+      });
+    }
+  });
+
+  // ========== FitScore Calculation Endpoint ==========
+  // Calculates the overall FitScore by combining Recovery, Training, and Nutrition scores
+  app.post('/api/fitscore/calculate', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      const { date } = req.body;
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const targetDate = date || todayKey(tz);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to calculate FitScore'
+        });
+      }
+
+      console.log(`[FITSCORE] Calculating FitScore for user: ${userId}, date: ${targetDate}`);
+
+      // Import the recovery score service
+      const { recoveryScoreService } = await import('./services/recoveryScoreService');
+
+      // 1. Get WHOOP data for today using getTodaysData (has working sleep hours)
+      let whoopData = null;
+      try {
+        const todayData = await whoopApiService.getTodaysData(userId);
+        console.log(`[FITSCORE] todayData.sleep_hours: ${todayData?.sleep_hours}`);
+
+        if (todayData) {
+          whoopData = {
+            recoveryScore: todayData.recovery_score,
+            sleepScore: todayData.sleep_score,
+            sleepHours: todayData.sleep_hours ?? todayData.sleepHours,
+            strainScore: todayData.strain,
+            hrv: todayData.hrv,
+            restingHeartRate: todayData.resting_heart_rate,
+          };
+        }
+        console.log(`[FITSCORE] WHOOP data retrieved - sleepHours: ${whoopData?.sleepHours}`);
+      } catch (whoopError) {
+        console.log(`[FITSCORE] Failed to get WHOOP data: ${whoopError}`);
+      }
+
+      // 1b. Get yesterday's WHOOP data for comparison
+      let yesterdayData = null;
+      try {
+        const yesterdayDate = new Date(targetDate);
+        yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+        const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
+        yesterdayData = await whoopApiService.getDataForDate(userId, yesterdayStr);
+        console.log(`[FITSCORE] Yesterday WHOOP data retrieved:`, yesterdayData);
+      } catch (yesterdayError) {
+        console.log(`[FITSCORE] Failed to get yesterday's WHOOP data: ${yesterdayError}`);
+      }
+
+      // 2. Get HRV baseline (7-day average)
+      let hrvBaseline = null;
+      try {
+        const weeklyAverages = await whoopApiService.getWeeklyAverages(userId);
+        hrvBaseline = weeklyAverages.avgHRV;
+        console.log(`[FITSCORE] HRV baseline: ${hrvBaseline}ms`);
+      } catch (hrvError) {
+        console.log(`[FITSCORE] Failed to get HRV baseline: ${hrvError}`);
+      }
+
+      // 3. Calculate Recovery Score
+      const recoveryResult = recoveryScoreService.calculateRecoveryScore({
+        recoveryPercent: whoopData?.recoveryScore ?? undefined,
+        sleepHours: whoopData?.sleepHours ?? undefined,
+        sleepScorePercent: whoopData?.sleepScore ?? undefined,
+        hrv: whoopData?.hrv ?? undefined,
+        hrvBaseline: hrvBaseline ?? undefined,
+      });
+
+      console.log(`[FITSCORE] Recovery score: ${recoveryResult.score}/10`);
+
+      // 4. Get Training Sessions and calculate average training score
+      const trainingSessions = await storage.getTrainingDataByUserAndDate(userId, targetDate);
+      let trainingScore = 5; // Default if no training
+      let trainingBreakdown = null;
+
+      if (trainingSessions && trainingSessions.length > 0) {
+        // Get user's fitness goal
+        const [userGoal] = await db
+          .select()
+          .from(userGoals)
+          .where(eq(userGoals.userId, userId))
+          .limit(1);
+
+        const fitnessGoal = userGoal?.fitnessGoal || undefined;
+
+        // Calculate scores for each training session
+        const sessionScores = trainingSessions.map((session: any) => {
+          const result = trainingScoreService.calculateTrainingScore({
+            type: session.type,
+            duration: session.duration,
+            intensity: session.intensity,
+            goal: session.goal,
+            comment: session.comment,
+            skipped: session.skipped,
+            recoveryScore: whoopData?.recoveryScore,
+            strainScore: whoopData?.strainScore,
+            fitnessGoal,
+          });
+          return result.score;
+        });
+
+        trainingScore = sessionScores.reduce((a: number, b: number) => a + b, 0) / sessionScores.length;
+        console.log(`[FITSCORE] Training score: ${trainingScore.toFixed(1)}/10 (${trainingSessions.length} sessions)`);
+      } else {
+        console.log(`[FITSCORE] No training sessions found, using default score: ${trainingScore}/10`);
+      }
+
+      // 5. Get Meals and calculate nutrition score
+      const meals = await storage.getMealsByUserAndDate(userId, targetDate);
+      let nutritionScore = 1; // Default if no meals (per spec)
+      let mealScores: number[] = [];
+
+      if (meals && meals.length > 0) {
+        mealScores = meals.map((meal: any) => {
+          if (meal.analysisResult) {
+            try {
+              const parsed = JSON.parse(meal.analysisResult);
+              return parsed.nutrition_subscore || 5;
+            } catch (e) {
+              return 5;
+            }
+          }
+          return 5;
+        }).filter((score: number) => score > 0);
+
+        if (mealScores.length > 0) {
+          nutritionScore = mealScores.reduce((a, b) => a + b, 0) / mealScores.length;
+        }
+        console.log(`[FITSCORE] Nutrition score: ${nutritionScore.toFixed(1)}/10 (${meals.length} meals)`);
+      } else {
+        console.log(`[FITSCORE] No meals found, using default score: ${nutritionScore}/10`);
+      }
+
+      // 6. Calculate final FitScore (average of all three)
+      const fitScore = (recoveryResult.score + trainingScore + nutritionScore) / 3;
+      const roundedFitScore = Math.round(fitScore * 10) / 10;
+
+      console.log(`[FITSCORE] Final FitScore: ${roundedFitScore}/10`);
+      console.log(`[FITSCORE] Breakdown: Recovery=${recoveryResult.score}, Training=${trainingScore.toFixed(1)}, Nutrition=${nutritionScore.toFixed(1)}`);
+
+      // Determine overall zone based on FitScore
+      const getScoreZone = (score: number): 'green' | 'yellow' | 'red' => {
+        if (score >= 8) return 'green';
+        if (score >= 4) return 'yellow';
+        return 'red';
+      };
+
+      const response = {
+        date: targetDate,
+        fitScore: roundedFitScore,
+        fitScoreZone: getScoreZone(roundedFitScore),
+        breakdown: {
+          recovery: {
+            score: recoveryResult.score,
+            zone: recoveryResult.recoveryZone,
+            details: recoveryResult.breakdown,
+            analysis: recoveryResult.analysis,
+          },
+          training: {
+            score: Math.round(trainingScore * 10) / 10,
+            zone: getScoreZone(trainingScore),
+            sessionsCount: trainingSessions?.length || 0,
+          },
+          nutrition: {
+            score: Math.round(nutritionScore * 10) / 10,
+            zone: getScoreZone(nutritionScore),
+            mealsCount: meals?.length || 0,
+            mealScores,
+          },
+        },
+        whoopData: {
+          recoveryScore: whoopData?.recoveryScore,
+          strainScore: whoopData?.strainScore,
+          sleepScore: whoopData?.sleepScore,
+          sleepHours: whoopData?.sleepHours,
+          hrv: whoopData?.hrv,
+          hrvBaseline,
+        },
+        yesterdayData: {
+          recoveryScore: yesterdayData?.recoveryScore ?? null,
+          sleepScore: yesterdayData?.sleepScore ?? null,
+          sleepHours: yesterdayData?.sleepHours ?? null,
+          hrv: yesterdayData?.hrv ?? null,
+        },
+        allGreen: recoveryResult.recoveryZone === 'green' &&
+                  getScoreZone(trainingScore) === 'green' &&
+                  getScoreZone(nutritionScore) === 'green',
+        timestamp: new Date().toISOString(),
+      };
+
+      res.json(response);
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITSCORE] Error calculating FitScore:', message);
+      res.status(500).json({
+        error: 'Failed to calculate FitScore',
+        details: message
+      });
+    }
+  });
+
+  // ========== FitCoach Daily Summary Endpoint ==========
+  // Generates warm, supportive summary without raw numbers
+  app.post('/api/fitscore/coach-summary', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+
+      if (!userId) {
+        return res.status(401).json({
+          error: 'Authentication required',
+          message: 'Please authenticate to get coach summary'
+        });
+      }
+
+      const {
+        recoveryZone,
+        trainingZone,
+        nutritionZone,
+        fitScoreZone,
+        hadTraining,
+        hadMeals,
+        sleepHours,
+        sleepScore,
+        hrv,
+        hrvBaseline,
+      } = req.body;
+
+      console.log(`[COACH SUMMARY] Generating summary for user: ${userId}`);
+
+      // Determine sleep quality based on sleep score
+      let sleepQuality: 'good' | 'moderate' | 'poor' = 'moderate';
+      if (sleepScore !== undefined && sleepScore !== null) {
+        if (sleepScore >= 70) sleepQuality = 'good';
+        else if (sleepScore >= 50) sleepQuality = 'moderate';
+        else sleepQuality = 'poor';
+      } else if (sleepHours !== undefined && sleepHours !== null) {
+        if (sleepHours >= 7) sleepQuality = 'good';
+        else if (sleepHours >= 5.5) sleepQuality = 'moderate';
+        else sleepQuality = 'poor';
+      }
+
+      // Determine HRV trend
+      let hrvTrend: 'above_baseline' | 'near_baseline' | 'below_baseline' = 'near_baseline';
+      if (hrv !== undefined && hrv !== null && hrvBaseline !== undefined && hrvBaseline !== null) {
+        const ratio = hrv / hrvBaseline;
+        if (ratio >= 1.1) hrvTrend = 'above_baseline';
+        else if (ratio <= 0.9) hrvTrend = 'below_baseline';
+        else hrvTrend = 'near_baseline';
+      }
+
+      // Get user's fitness goal
+      const [userGoal] = await db
+        .select()
+        .from(userGoals)
+        .where(eq(userGoals.userId, userId))
+        .limit(1);
+
+      const summary = await openAIService.generateDailySummary({
+        recoveryZone: recoveryZone || 'yellow',
+        trainingZone: trainingZone || 'yellow',
+        nutritionZone: nutritionZone || 'yellow',
+        fitScoreZone: fitScoreZone || 'yellow',
+        hadTraining: hadTraining ?? false,
+        hadMeals: hadMeals ?? false,
+        sleepQuality,
+        hrvTrend,
+        userGoal: userGoal?.fitnessGoal || undefined,
+      });
+
+      console.log(`[COACH SUMMARY] Summary generated successfully`);
+
+      res.json({
+        fitCoachTake: summary.fitCoachTake,
+        tomorrowsOutlook: summary.tomorrowsOutlook,
+        timestamp: new Date().toISOString(),
+      });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[COACH SUMMARY] Error:', message);
+      res.status(500).json({
+        error: 'Failed to generate coach summary',
         details: message
       });
     }

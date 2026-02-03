@@ -3,30 +3,64 @@
  */
 import '../loadEnv';
 
-const FITCOACH_TRAINING_SYSTEM_PROMPT = `You are fitCoachAi, a training analysis expert for the FitSmart app.
+const FITCOACH_DAILY_SUMMARY_PROMPT = `You are fitCoachAi, a warm and supportive wellness coach for the FitSmart app.
 
-Your role is to analyze training sessions and provide:
-1. A detailed explanation of the training score breakdown
-2. Contextual insights connecting WHOOP metrics, recovery state, and user goals
-3. Specific, actionable recommendations for improvement
+Your role is to provide a personal, human daily summary that speaks to the WHOLE person - not just their numbers.
 
-Guidelines:
-- ALWAYS reference specific metrics when available (strain, recovery %, sleep scores)
-- When strain data is provided, MUST mention the actual strain value in your analysis
-- Explain WHY the score is what it is, not just WHAT the score is
-- Connect training decisions to recovery state and fitness goals
-- Relate the strain value to the strain appropriateness score (e.g., "today's strain of 10.6 aligns well with your 3.0/4.0 strain appropriateness")
-- Provide concrete next steps or microhabits
-- Be encouraging but honest about training appropriateness
-- End with a call-to-action (e.g., "Ask FitCoach if you need specific exercises for that!")
-- Keep analysis concise but detailed (3-5 sentences)
+CRITICAL RULES:
+- NEVER mention specific numbers, percentages, or scores
+- NEVER say things like "your recovery was 85%" or "you scored 7.2"
+- Speak to patterns, effort, consistency, mindset, and how they might be feeling
+- Be warm, supportive, and human - like a trusted coach who knows them
+- Use "you" language - this is personal
 
-Example tone with strain data:
-"This moderate 45-minute run makes perfect sense as a recovery session given your 65% recovery. Today's strain of 10.1 aligns well with your strain appropriateness score of 3.2/4.0, showing you understood the task of taking it easy. The session quality was solid, and running aligns well with your endurance goal. However, your goal alignment score is lower because you're also working on movement fluidity - consider adding a 15-minute mobility session after your next run to support your court movement goal. Ask FitCoach if you need specific mobility exercises!"
+FitCoach's Take (2-4 sentences):
+- Acknowledge their day with empathy
+- Connect the dots between their metrics holistically
+- Speak to effort and intention, not outcomes
+- End with encouragement or gentle insight
+
+Tomorrow's Outlook (1-2 sentences):
+- Forward-looking, soft motivational guidance
+- No metrics or numbers
+- Focus on one actionable mindset or behavior
+
+Example good response:
+{
+  "fitCoachTake": "Today wasn't easy, and that's perfectly normal. Your body is telling you it needs a bit more rest — and listening to that is a strength, not a setback. You showed up anyway, and that matters.",
+  "tomorrowsOutlook": "An early wind-down tonight will set you up for a strong start tomorrow. Trust the process."
+}
+
+Example bad response (too many numbers):
+{
+  "fitCoachTake": "Your recovery score of 65% means you should take it easy. With only 5 hours of sleep..." - DON'T mention numbers!
+}
+
+Always respond in JSON format with fitCoachTake and tomorrowsOutlook fields.`;
+
+const FITCOACH_TRAINING_SYSTEM_PROMPT = `You are fitCoachAi, a concise training coach for the FitSmart app.
+
+Provide a SHORT analysis (2-3 sentences max) focusing ONLY on:
+1. The actual WHOOP strain value and what it means for this session
+2. How the training aligns with the user's fitness goal
+3. Any injury/recovery concerns if relevant
+
+CRITICAL RULES:
+- If strain data is provided, ALWAYS mention the specific strain number (e.g., "Your strain of 10.6...")
+- DO NOT explain the scoring breakdown or percentages
+- DO NOT explain what metrics measure
+- Be direct, warm, and actionable
+- End with brief encouragement or a quick tip
+
+Good example:
+"Your strain of 8.4 was appropriate for your moderate recovery today. This run supports your endurance goal well - keep it up!"
+
+Bad example (too long):
+"The session quality score of 2.6/3.0 reflects your ability to maintain pace..." - DON'T explain metrics like this.
 
 Always respond in JSON format:
 {
-  "training_analysis": "<detailed, contextual analysis explaining the score>"
+  "training_analysis": "<2-3 sentence analysis>"
 }`;
 
 const FITSCORE_AI_SYSTEM_PROMPT = `You are fitScoreAi, a nutrition analysis expert for the FitSmart app.
@@ -66,6 +100,11 @@ export interface MealAnalysisResult {
 
 export interface TrainingAnalysisResult {
   training_analysis: string;
+}
+
+export interface DailySummaryResult {
+  fitCoachTake: string;
+  tomorrowsOutlook: string;
 }
 
 export class OpenAIService {
@@ -216,30 +255,31 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
     try {
       console.log(`[OpenAI Service] Analyzing training session: ${params.trainingType}`);
 
-      // Build context prompt with all available data
+      // Build concise context prompt focused on key data
       const contextParts = [];
-      contextParts.push(`Training: ${params.trainingType} for ${params.duration} minutes`);
-      if (params.intensity) contextParts.push(`at ${params.intensity} intensity`);
-      if (params.goal) contextParts.push(`with goal: ${params.goal}`);
-      if (params.comment) contextParts.push(`User notes: "${params.comment}"`);
 
-      contextParts.push(`\nOverall Training Score: ${params.score.toFixed(1)}/10 (${params.recoveryZone.toUpperCase()} ZONE)`);
+      // Training details
+      contextParts.push(`Training: ${params.trainingType}, ${params.duration} min, ${params.intensity || 'unspecified'} intensity`);
 
-      contextParts.push(`\nScore Breakdown:`);
-      contextParts.push(`- Strain Appropriateness: ${params.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0 (40%)`);
-      contextParts.push(`- Session Quality: ${params.breakdown.sessionQualityScore.toFixed(1)}/3.0 (30%)`);
-      contextParts.push(`- Goal Alignment: ${params.breakdown.goalAlignmentScore.toFixed(1)}/2.0 (20%)`);
-      contextParts.push(`- Injury Safety: ${params.breakdown.injurySafetyModifier.toFixed(1)}/1.0 (10%)`);
-
-      if (params.recoveryScore || params.strainScore || params.sleepScore) {
-        contextParts.push(`\nWHOOP Metrics:`);
-        if (params.recoveryScore) contextParts.push(`- Recovery: ${Math.round(params.recoveryScore)}%`);
-        if (params.strainScore) contextParts.push(`- Strain: ${params.strainScore.toFixed(1)}`);
-        if (params.sleepScore) contextParts.push(`- Sleep: ${Math.round(params.sleepScore)}%`);
+      // WHOOP data - emphasize strain
+      if (params.strainScore) {
+        contextParts.push(`WHOOP Strain: ${params.strainScore.toFixed(1)} (scale 0-21)`);
+      }
+      if (params.recoveryScore) {
+        contextParts.push(`Recovery: ${Math.round(params.recoveryScore)}% (${params.recoveryZone} zone)`);
       }
 
+      // Score
+      contextParts.push(`Score: ${params.score.toFixed(1)}/10`);
+
+      // Goal
       if (params.userGoal) {
-        contextParts.push(`\nUser's Fitness Goal: ${params.userGoal}`);
+        contextParts.push(`Fitness Goal: ${params.userGoal}`);
+      }
+
+      // User comment if any
+      if (params.comment) {
+        contextParts.push(`User notes: "${params.comment}"`);
       }
 
       const userPrompt = contextParts.join('\n');
@@ -262,8 +302,8 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
               content: userPrompt
             }
           ],
-          max_completion_tokens: 400,
-          temperature: 0.8,
+          max_completion_tokens: 200,
+          temperature: 0.7,
           response_format: { type: 'json_object' }
         })
       });
@@ -295,13 +335,178 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
       console.error('[OpenAI Service] Failed to analyze training:', error);
 
       // Return fallback response with basic context
-      const basicAnalysis = `Your ${params.trainingType} session scored ${params.score.toFixed(1)}/10. ` +
-        `This training was performed in the ${params.recoveryZone} recovery zone. ` +
-        `Consider your recovery metrics when planning your next session.`;
+      const strainPart = params.strainScore ? `Your strain of ${params.strainScore.toFixed(1)} ` : 'This ';
+      const basicAnalysis = `${strainPart}${params.trainingType} session scored ${params.score.toFixed(1)}/10 in the ${params.recoveryZone} zone. Keep listening to your body!`;
 
       return {
         training_analysis: basicAnalysis
       };
+    }
+  }
+
+  /**
+   * Generate daily FitCoach summary using fitCoachAi persona
+   * Provides warm, supportive summary without raw numbers
+   */
+  async generateDailySummary(params: {
+    recoveryZone: 'green' | 'yellow' | 'red';
+    trainingZone: 'green' | 'yellow' | 'red';
+    nutritionZone: 'green' | 'yellow' | 'red';
+    fitScoreZone: 'green' | 'yellow' | 'red';
+    hadTraining: boolean;
+    hadMeals: boolean;
+    sleepQuality: 'good' | 'moderate' | 'poor';
+    hrvTrend: 'above_baseline' | 'near_baseline' | 'below_baseline';
+    userGoal?: string;
+  }): Promise<DailySummaryResult> {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    try {
+      console.log(`[OpenAI Service] Generating daily FitCoach summary`);
+
+      // Build context without exposing raw numbers
+      const contextParts = [];
+
+      // Recovery context
+      const recoveryDescriptions = {
+        green: 'well-recovered and energized',
+        yellow: 'moderately recovered with some fatigue signals',
+        red: 'showing signs of accumulated stress or fatigue'
+      };
+      contextParts.push(`Recovery state: ${recoveryDescriptions[params.recoveryZone]}`);
+
+      // Sleep context
+      const sleepDescriptions = {
+        good: 'had a restful night',
+        moderate: 'sleep was okay but not optimal',
+        poor: 'sleep was disrupted or insufficient'
+      };
+      contextParts.push(`Sleep: ${sleepDescriptions[params.sleepQuality]}`);
+
+      // HRV context
+      const hrvDescriptions = {
+        above_baseline: 'HRV trending above their personal baseline (good adaptation)',
+        near_baseline: 'HRV at typical levels',
+        below_baseline: 'HRV below baseline (body under some stress)'
+      };
+      contextParts.push(`HRV: ${hrvDescriptions[params.hrvTrend]}`);
+
+      // Training context
+      if (params.hadTraining) {
+        const trainingDescriptions = {
+          green: 'Training was well-balanced for their recovery level',
+          yellow: 'Training was acceptable but could be better aligned',
+          red: 'Training may have been too intense or misaligned with recovery'
+        };
+        contextParts.push(`Training: ${trainingDescriptions[params.trainingZone]}`);
+      } else {
+        contextParts.push('Training: Rest day (no training logged)');
+      }
+
+      // Nutrition context
+      if (params.hadMeals) {
+        const nutritionDescriptions = {
+          green: 'Nutrition was excellent today',
+          yellow: 'Nutrition was decent with room for improvement',
+          red: 'Nutrition needs attention'
+        };
+        contextParts.push(`Nutrition: ${nutritionDescriptions[params.nutritionZone]}`);
+      } else {
+        contextParts.push('Nutrition: No meals logged yet');
+      }
+
+      // Overall day
+      const overallDescriptions = {
+        green: 'Overall a strong day',
+        yellow: 'A balanced day with some areas to work on',
+        red: 'A challenging day - rest and recovery are important'
+      };
+      contextParts.push(`Overall: ${overallDescriptions[params.fitScoreZone]}`);
+
+      // User goal if available
+      if (params.userGoal) {
+        contextParts.push(`Fitness goal: ${params.userGoal}`);
+      }
+
+      const userPrompt = `Generate a warm, supportive daily summary for this user. Remember: NO numbers or percentages!
+
+Context:
+${contextParts.join('\n')}
+
+Provide FitCoach's Take (2-4 sentences) and Tomorrow's Outlook (1-2 sentences).`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: this.textModel,
+          messages: [
+            {
+              role: 'system',
+              content: FITCOACH_DAILY_SUMMARY_PROMPT
+            },
+            {
+              role: 'user',
+              content: userPrompt
+            }
+          ],
+          max_completion_tokens: 300,
+          temperature: 0.8,
+          response_format: { type: 'json_object' }
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[OpenAI Service] API error ${response.status}: ${errorText}`);
+        throw new Error(`OpenAI API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+
+      if (!content) {
+        throw new Error('No response from OpenAI');
+      }
+
+      const result = JSON.parse(content) as DailySummaryResult;
+
+      // Validate response
+      if (!result.fitCoachTake || result.fitCoachTake.length < 20) {
+        throw new Error('Invalid fitCoachTake from AI');
+      }
+      if (!result.tomorrowsOutlook || result.tomorrowsOutlook.length < 10) {
+        throw new Error('Invalid tomorrowsOutlook from AI');
+      }
+
+      console.log(`[OpenAI Service] Daily summary generated successfully`);
+      return result;
+
+    } catch (error) {
+      console.error('[OpenAI Service] Failed to generate daily summary:', error);
+
+      // Return fallback response based on overall zone
+      const fallbacks = {
+        green: {
+          fitCoachTake: "You're in a great place today. Your body is responding well, and your efforts are paying off. Keep trusting the process and stay consistent.",
+          tomorrowsOutlook: "Carry this momentum forward — tomorrow is yours to own."
+        },
+        yellow: {
+          fitCoachTake: "Today was solid, even if it wasn't perfect. Progress isn't always linear, and showing up matters more than being perfect. You're doing the work.",
+          tomorrowsOutlook: "A good night's rest will help you come back stronger tomorrow."
+        },
+        red: {
+          fitCoachTake: "Today might have felt tough, and that's okay. Your body is asking for a little extra care right now. Rest is productive too — it's how you come back stronger.",
+          tomorrowsOutlook: "Be gentle with yourself tonight. Tomorrow is a fresh start."
+        }
+      };
+
+      return fallbacks[params.fitScoreZone] || fallbacks.yellow;
     }
   }
 }

@@ -76,6 +76,56 @@ export interface TrainingAnalysisResponse {
   userGoal?: string;
 }
 
+// FitScore Calculation Types
+export interface RecoveryBreakdown {
+  recoveryScaled: number;
+  sleepQuality: number;
+  hrvScaled: number;
+}
+
+export interface FitScoreBreakdown {
+  recovery: {
+    score: number;
+    zone: 'green' | 'yellow' | 'red';
+    details: RecoveryBreakdown;
+    analysis: string;
+  };
+  training: {
+    score: number;
+    zone: 'green' | 'yellow' | 'red';
+    sessionsCount: number;
+  };
+  nutrition: {
+    score: number;
+    zone: 'green' | 'yellow' | 'red';
+    mealsCount: number;
+    mealScores: number[];
+  };
+}
+
+export interface FitScoreResponse {
+  date: string;
+  fitScore: number;
+  fitScoreZone: 'green' | 'yellow' | 'red';
+  breakdown: FitScoreBreakdown;
+  whoopData: {
+    recoveryScore?: number;
+    strainScore?: number;
+    sleepScore?: number;
+    sleepHours?: number;
+    hrv?: number;
+    hrvBaseline?: number;
+  };
+  yesterdayData?: {
+    recoveryScore?: number | null;
+    sleepScore?: number | null;
+    sleepHours?: number | null;
+    hrv?: number | null;
+  };
+  allGreen: boolean;
+  timestamp: string;
+}
+
 /**
  * Upload a meal with image, type, and optional notes
  */
@@ -84,8 +134,9 @@ export async function uploadMeal(params: {
   mealType: string;
   mealNotes?: string;
   date?: string;
+  mealTime?: string; // HH:MM format
 }): Promise<MealData> {
-  const { imageUri, mealType, mealNotes, date } = params;
+  const { imageUri, mealType, mealNotes, date, mealTime } = params;
 
   // Create form data for multipart upload
   const formData = new FormData();
@@ -110,6 +161,9 @@ export async function uploadMeal(params: {
   }
   if (date) {
     formData.append('date', date);
+  }
+  if (mealTime) {
+    formData.append('mealTime', mealTime);
   }
 
   // Get auth token
@@ -232,4 +286,60 @@ export async function analyzeTraining(date: string): Promise<TrainingAnalysisRes
  */
 export function formatDate(date: Date): string {
   return date.toISOString().split('T')[0];
+}
+
+/**
+ * Calculate FitScore for a specific date
+ * Combines Recovery, Training, and Nutrition scores
+ */
+export async function calculateFitScore(date?: string): Promise<FitScoreResponse> {
+  console.log(`[API] Calculating FitScore for date: ${date || 'today'}`);
+
+  const response = await apiRequest<FitScoreResponse>(
+    '/api/fitscore/calculate',
+    {
+      method: 'POST',
+      body: JSON.stringify({ date }),
+    }
+  );
+
+  console.log(`[API] FitScore calculated: ${response.fitScore}/10`);
+  return response;
+}
+
+// Coach Summary Types
+export interface CoachSummaryResponse {
+  fitCoachTake: string;
+  tomorrowsOutlook: string;
+  timestamp: string;
+}
+
+/**
+ * Get FitCoach daily summary
+ * Returns warm, supportive summary without raw numbers
+ */
+export async function getCoachSummary(params: {
+  recoveryZone: 'green' | 'yellow' | 'red';
+  trainingZone: 'green' | 'yellow' | 'red';
+  nutritionZone: 'green' | 'yellow' | 'red';
+  fitScoreZone: 'green' | 'yellow' | 'red';
+  hadTraining: boolean;
+  hadMeals: boolean;
+  sleepScore?: number;
+  sleepHours?: number;
+  hrv?: number;
+  hrvBaseline?: number;
+}): Promise<CoachSummaryResponse> {
+  console.log(`[API] Getting coach summary`);
+
+  const response = await apiRequest<CoachSummaryResponse>(
+    '/api/fitscore/coach-summary',
+    {
+      method: 'POST',
+      body: JSON.stringify(params),
+    }
+  );
+
+  console.log(`[API] Coach summary received`);
+  return response;
 }

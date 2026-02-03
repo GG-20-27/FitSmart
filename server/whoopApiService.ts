@@ -825,6 +825,7 @@ export class WhoopApiService {
       let timeInBedHours: number | null = null;
       let stageSummary: any = null;
       
+      console.log(`[SLEEP DEBUG] recovery exists: ${!!recovery}, sleep_id: ${recovery?.sleep_id}`);
       if (recovery?.sleep_id) {
         console.log(`Found sleep_id in recovery data: ${recovery.sleep_id}`);
         try {
@@ -864,6 +865,9 @@ export class WhoopApiService {
             }
 
             // Compute time asleep (Sleep Hours) when we have scored stages
+            console.log(`[SLEEP DEBUG] stageSummary exists: ${!!stageSummary}`);
+            console.log(`[SLEEP DEBUG] light: ${stageSummary?.total_light_sleep_time_milli}, slow_wave: ${stageSummary?.total_slow_wave_sleep_time_milli}, rem: ${stageSummary?.total_rem_sleep_time_milli}`);
+
             if (stageSummary &&
                 typeof stageSummary.total_light_sleep_time_milli === "number" &&
                 typeof stageSummary.total_slow_wave_sleep_time_milli === "number" &&
@@ -875,10 +879,18 @@ export class WhoopApiService {
 
               sleepHours = Math.round((asleepMs / 3600000) * 10) / 10;
               console.log(`[SLEEP] Time asleep (derived from stages): ${sleepHours} h`);
+            } else if (stageSummary?.total_in_bed_time_milli) {
+              // Use time in bed as fallback if stages are missing
+              sleepHours = Math.round((stageSummary.total_in_bed_time_milli / 3600000) * 10) / 10;
+              console.log(`[SLEEP] Using time in bed as sleep hours: ${sleepHours} h`);
+            } else if (sleepData?.start && sleepData?.end) {
+              // Calculate from start/end times
+              const durationMs = new Date(sleepData.end).getTime() - new Date(sleepData.start).getTime();
+              sleepHours = Math.round((durationMs / 3600000) * 10) / 10;
+              console.log(`[SLEEP] Calculated from start/end: ${sleepHours} h`);
             } else {
-              // No stage data yet → fallback to time in bed
-              sleepHours = null; // keep null to avoid mislabeling as "sleep hours"
-              console.log("[SLEEP] Stage summary missing → using Time in Bed fallback, scoring may be pending");
+              sleepHours = null;
+              console.log("[SLEEP] No sleep duration data available");
             }
           }
         } catch (sleepError: any) {
@@ -1206,6 +1218,7 @@ export class WhoopApiService {
   async getDataForDate(userId: string, dateStr: string): Promise<{
     recoveryScore?: number;
     sleepScore?: number;
+    sleepHours?: number;
     strainScore?: number;
     hrv?: number;
     restingHeartRate?: number;
@@ -1219,10 +1232,12 @@ export class WhoopApiService {
 
       const headers = await this.authHeader(userId);
 
-      // Calculate date range: the date itself + next day to catch cycles that started on this date
-      const startDate = new Date(dateStr);
-      const endDate = new Date(dateStr);
-      endDate.setDate(endDate.getDate() + 2); // Add 2 days to ensure we catch the cycle
+      // Calculate date range: go back 1 day and forward 2 days to catch all relevant cycles
+      // WHOOP cycles span from evening to evening, so we need a wider window
+      const startDate = new Date(dateStr + 'T00:00:00Z');
+      startDate.setDate(startDate.getDate() - 1); // Start from previous day
+      const endDate = new Date(dateStr + 'T23:59:59Z');
+      endDate.setDate(endDate.getDate() + 2); // End 2 days later
 
       const startStr = startDate.toISOString();
       const endStr = endDate.toISOString();
@@ -1242,37 +1257,55 @@ export class WhoopApiService {
 
       console.log(`[WHOOP HISTORICAL] Found ${cycleResponse.data.records.length} cycles`);
 
-      // Find the cycle that corresponds to this date
-      // WHOOP cycles typically start in the evening and end the next evening
-      // We want the cycle where the date falls within the cycle period
-      const targetDate = new Date(dateStr);
+      // Find the best matching cycle for this date
+      // For today's date, we want the CURRENT/ONGOING cycle (highest strain for activity tracking)
+      // WHOOP cycles typically start around 9pm and end the next day around 9pm
       const targetDateStr = dateStr;
 
       let targetCycle = null;
+      let bestMatch = null;
+
       for (const cycle of cycleResponse.data.records) {
         const cycleStart = new Date(cycle.start);
-        const cycleEnd = new Date(cycle.end);
-        const cycleDate = cycleStart.toISOString().split('T')[0];
+        const cycleEnd = cycle.end ? new Date(cycle.end) : new Date(); // Ongoing cycles may not have end
+        const cycleStartDate = cycleStart.toISOString().split('T')[0];
 
-        console.log(`[WHOOP HISTORICAL] Checking cycle: ${cycle.id}, date=${cycleDate}, start=${cycle.start}, end=${cycle.end}, strain=${cycle.score?.strain}`);
+        // Also check if target date falls within the cycle period
+        const targetDateTime = new Date(dateStr + 'T12:00:00Z'); // Midday of target date
+        const isWithinCycle = targetDateTime >= cycleStart && targetDateTime <= cycleEnd;
 
-        // Match if the cycle start date matches our target date
-        if (cycleDate === targetDateStr) {
+        console.log(`[WHOOP HISTORICAL] Checking cycle: ${cycle.id}, startDate=${cycleStartDate}, start=${cycle.start}, end=${cycle.end || 'ongoing'}, strain=${cycle.score?.strain}, isWithinCycle=${isWithinCycle}`);
+
+        // Prefer cycle where target date is within the cycle period
+        if (isWithinCycle) {
+          if (!bestMatch || (cycle.score?.strain || 0) > (bestMatch.score?.strain || 0)) {
+            bestMatch = cycle;
+            console.log(`[WHOOP HISTORICAL] Better match found: ${cycle.id} with strain=${cycle.score?.strain}`);
+          }
+        }
+
+        // Fallback: match by start date
+        if (cycleStartDate === targetDateStr && !bestMatch) {
           targetCycle = cycle;
-          console.log(`[WHOOP HISTORICAL] Found matching cycle: ${cycle.id} for date ${targetDateStr}, strain=${cycle.score?.strain}`);
-          break;
+          console.log(`[WHOOP HISTORICAL] Start date match: ${cycle.id} for date ${targetDateStr}, strain=${cycle.score?.strain}`);
         }
       }
+
+      // Use bestMatch if found, otherwise use targetCycle
+      targetCycle = bestMatch || targetCycle;
 
       if (!targetCycle) {
         console.log(`[WHOOP HISTORICAL] No cycle found matching date ${dateStr}`);
         return null;
       }
 
+      console.log(`[WHOOP HISTORICAL] Selected cycle: ${targetCycle.id}, strain=${targetCycle.score?.strain}`);
+
       // Fetch recovery data for this cycle
       const recovery = await this.getRecovery(targetCycle.id, userId);
 
       let sleepScore = null;
+      let sleepHours = null;
       let hrv = null;
 
       if (recovery) {
@@ -1290,6 +1323,32 @@ export class WhoopApiService {
             if (sleepResponse.data?.score?.sleep_performance_percentage !== null) {
               sleepScore = sleepResponse.data.score.sleep_performance_percentage;
             }
+
+            // Extract total sleep hours from sleep data
+            // Calculate from individual sleep stages (same as getTodayData)
+            const stageSummary = sleepResponse.data?.score?.stage_summary;
+
+            if (stageSummary &&
+                typeof stageSummary.total_light_sleep_time_milli === "number" &&
+                typeof stageSummary.total_slow_wave_sleep_time_milli === "number" &&
+                typeof stageSummary.total_rem_sleep_time_milli === "number") {
+              const asleepMs =
+                (stageSummary.total_light_sleep_time_milli || 0) +
+                (stageSummary.total_slow_wave_sleep_time_milli || 0) +
+                (stageSummary.total_rem_sleep_time_milli || 0);
+              sleepHours = Math.round((asleepMs / 3600000) * 10) / 10;
+              console.log(`[WHOOP HISTORICAL] Sleep hours from stages: ${sleepHours}h`);
+            } else if (stageSummary?.total_in_bed_time_milli) {
+              // Fallback to time in bed
+              sleepHours = Math.round((stageSummary.total_in_bed_time_milli / 3600000) * 10) / 10;
+              console.log(`[WHOOP HISTORICAL] Sleep hours from time in bed: ${sleepHours}h`);
+            } else if (sleepResponse.data?.end && sleepResponse.data?.start) {
+              // Last fallback: calculate from start/end times
+              const startTime = new Date(sleepResponse.data.start).getTime();
+              const endTime = new Date(sleepResponse.data.end).getTime();
+              sleepHours = Math.round(((endTime - startTime) / 3600000) * 10) / 10;
+              console.log(`[WHOOP HISTORICAL] Sleep hours from duration: ${sleepHours}h`);
+            }
           } catch (sleepError) {
             console.log(`[WHOOP HISTORICAL] Failed to fetch sleep for cycle ${targetCycle.id}`);
           }
@@ -1299,6 +1358,7 @@ export class WhoopApiService {
       const result = {
         recoveryScore: recovery?.score?.recovery_score || null,
         sleepScore: sleepScore,
+        sleepHours: sleepHours,
         strainScore: targetCycle.score?.strain || null,
         hrv: hrv,
         restingHeartRate: recovery?.score?.resting_heart_rate || null,

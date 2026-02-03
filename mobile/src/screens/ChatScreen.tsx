@@ -29,7 +29,7 @@ type ChatScreenParams = {
 };
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radii, typography, shadows } from '../theme';

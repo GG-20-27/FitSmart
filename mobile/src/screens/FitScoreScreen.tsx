@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { colors, spacing, typography, radii } from '../theme';
 import { Button } from '../ui/components';
+import FitScoreTriangle from '../components/FitScoreTriangle';
 import {
   uploadMeal,
   getMealsByDate,
@@ -12,10 +14,14 @@ import {
   updateTrainingData,
   deleteTrainingData as deleteTrainingDataAPI,
   analyzeTraining,
+  calculateFitScore,
+  getCoachSummary,
   formatDate,
   type MealData,
   type TrainingDataEntry,
   type TrainingAnalysisResponse,
+  type FitScoreResponse,
+  type CoachSummaryResponse,
 } from '../api/fitscore';
 
 export default function FitScoreScreen() {
@@ -32,6 +38,8 @@ export default function FitScoreScreen() {
   const [selectedMealType, setSelectedMealType] = useState('');
   const [mealNotes, setMealNotes] = useState('');
   const [editingMealId, setEditingMealId] = useState<number | null>(null);
+  const [mealTime, setMealTime] = useState<Date>(new Date());
+  const [showMealTimePicker, setShowMealTimePicker] = useState(false);
 
   // Meal analysis modal state
   const [showAnalysisModal, setShowAnalysisModal] = useState(false);
@@ -52,11 +60,22 @@ export default function FitScoreScreen() {
 
   // Training form state
   const [trainingType, setTrainingType] = useState('');
-  const [trainingDuration, setTrainingDuration] = useState('');
+  const [trainingDurationHours, setTrainingDurationHours] = useState(0);
+  const [trainingDurationMinutes, setTrainingDurationMinutes] = useState(45);
+  const [showTrainingDurationPicker, setShowTrainingDurationPicker] = useState(false);
   const [trainingGoal, setTrainingGoal] = useState('');
   const [trainingIntensity, setTrainingIntensity] = useState('');
   const [trainingComment, setTrainingComment] = useState('');
   const [trainingSkipped, setTrainingSkipped] = useState(false);
+
+  // FitScore calculation state
+  const [fitScoreResult, setFitScoreResult] = useState<FitScoreResponse | null>(null);
+  const [calculatingFitScore, setCalculatingFitScore] = useState(false);
+  const [showFitScoreResult, setShowFitScoreResult] = useState(false);
+
+  // Coach summary state
+  const [coachSummary, setCoachSummary] = useState<CoachSummaryResponse | null>(null);
+  const [loadingCoachSummary, setLoadingCoachSummary] = useState(false);
 
   const isToday = selectedDate.toDateString() === new Date().toDateString();
   const hasMeals = meals.length > 0;
@@ -116,7 +135,7 @@ export default function FitScoreScreen() {
     }
   };
 
-  const handleCalculateFitScore = () => {
+  const handleCalculateFitScore = async () => {
     if (!canCalculate) {
       Alert.alert(
         'Missing Data',
@@ -125,11 +144,56 @@ export default function FitScoreScreen() {
       return;
     }
 
-    // TODO: Implement full FitScore calculation (average of nutrition, training, recovery)
-    Alert.alert(
-      'Coming Soon',
-      'Full FitScore calculation combining nutrition, training, and recovery will be available soon!'
-    );
+    setCalculatingFitScore(true);
+    setCoachSummary(null);
+
+    try {
+      const dateStr = formatDate(selectedDate);
+      console.log(`[FITSCORE] Calculating FitScore for ${dateStr}`);
+
+      const result = await calculateFitScore(dateStr);
+
+      console.log(`[FITSCORE] Result received: ${result.fitScore}/10`);
+      setFitScoreResult(result);
+      setShowFitScoreResult(true);
+
+      // Fetch coach summary in the background
+      fetchCoachSummary(result);
+
+    } catch (error) {
+      console.error('[FITSCORE] Calculation failed:', error);
+      Alert.alert(
+        'Calculation Failed',
+        'Failed to calculate your FitScore. Please try again.'
+      );
+    } finally {
+      setCalculatingFitScore(false);
+    }
+  };
+
+  const fetchCoachSummary = async (fitScoreData: FitScoreResponse) => {
+    setLoadingCoachSummary(true);
+    try {
+      const summary = await getCoachSummary({
+        recoveryZone: fitScoreData.breakdown.recovery.zone,
+        trainingZone: fitScoreData.breakdown.training.zone,
+        nutritionZone: fitScoreData.breakdown.nutrition.zone,
+        fitScoreZone: fitScoreData.fitScoreZone,
+        hadTraining: fitScoreData.breakdown.training.sessionsCount > 0,
+        hadMeals: fitScoreData.breakdown.nutrition.mealsCount > 0,
+        sleepScore: fitScoreData.whoopData.sleepScore,
+        sleepHours: fitScoreData.whoopData.sleepHours,
+        hrv: fitScoreData.whoopData.hrv,
+        hrvBaseline: fitScoreData.whoopData.hrvBaseline,
+      });
+      setCoachSummary(summary);
+      console.log('[COACH SUMMARY] Summary received');
+    } catch (error) {
+      console.error('[COACH SUMMARY] Failed to fetch:', error);
+      // Don't show an error - coach summary is optional
+    } finally {
+      setLoadingCoachSummary(false);
+    }
   };
 
   const requestPermissions = async () => {
@@ -205,8 +269,10 @@ export default function FitScoreScreen() {
 
   const getScoreColor = (score?: number): string => {
     if (!score) return colors.textSecondary;
-    if (score >= 8) return colors.success; // Green: 8-10
-    if (score >= 4) return colors.warning; // Amber: 4-7.9
+    // Use rounded score for color to match displayed value
+    const roundedScore = Math.round(score);
+    if (roundedScore >= 8) return colors.success; // Green: 8-10
+    if (roundedScore >= 4) return colors.warning; // Amber: 4-7.9
     return colors.danger; // Red: 1-3.9
   };
 
@@ -284,6 +350,7 @@ export default function FitScoreScreen() {
         mealType: selectedMealType,
         mealNotes: mealNotes || undefined,
         date: formatDate(selectedDate),
+        mealTime: mealTime.toTimeString().slice(0, 5), // HH:MM format
       });
 
       // Replace temporary meal with actual meal
@@ -331,63 +398,76 @@ export default function FitScoreScreen() {
       return;
     }
 
-    try {
-      const params = {
-        type: trainingType,
-        duration: parseInt(trainingDuration) || 0,
-        goal: trainingGoal || undefined,
-        intensity: trainingIntensity || undefined,
-        comment: trainingComment || undefined,
-        skipped: trainingSkipped,
-      };
+    const totalDurationMinutes = (trainingDurationHours * 60) + trainingDurationMinutes;
+    const params = {
+      type: trainingType,
+      duration: totalDurationMinutes,
+      goal: trainingGoal || undefined,
+      intensity: trainingIntensity || undefined,
+      comment: trainingComment || undefined,
+      skipped: trainingSkipped,
+    };
 
+    // Close form immediately and reset
+    const savedType = trainingType;
+    const savedDuration = totalDurationMinutes;
+    const savedGoal = trainingGoal;
+    const savedIntensity = trainingIntensity;
+    const savedComment = trainingComment;
+    const savedSkipped = trainingSkipped;
+    const wasEditing = !!editingTrainingId;
+    const editId = editingTrainingId;
+
+    setTrainingType('');
+    setTrainingDurationHours(0);
+    setTrainingDurationMinutes(45);
+    setTrainingGoal('');
+    setTrainingIntensity('');
+    setTrainingComment('');
+    setTrainingSkipped(false);
+    setTrainingEditing(false);
+    setEditingTrainingId(null);
+
+    try {
       let savedTraining: TrainingDataEntry;
 
-      if (editingTrainingId) {
+      if (wasEditing && editId) {
         // Update existing
         setLoading(true);
-        savedTraining = await updateTrainingData(editingTrainingId, params);
-        setTrainingSessions(trainingSessions.map(t => t.id === editingTrainingId ? savedTraining : t));
+        savedTraining = await updateTrainingData(editId, params);
+        setTrainingSessions(currentSessions =>
+          currentSessions.map(t => t.id === editId ? savedTraining : t)
+        );
         setLoading(false);
       } else {
-        // Add new - create placeholder first
+        // Add new - create placeholder first with analyzing state
         const tempTraining: TrainingDataEntry = {
-          id: -1, // Temporary ID
+          id: -1, // Temporary ID triggers "Analyzing..." overlay
           userId: 'temp',
-          type: trainingType,
-          duration: parseInt(trainingDuration) || 0,
-          goal: trainingGoal || undefined,
-          intensity: trainingIntensity || undefined,
-          comment: trainingComment || undefined,
-          skipped: trainingSkipped,
+          type: savedType,
+          duration: savedDuration,
+          goal: savedGoal || undefined,
+          intensity: savedIntensity || undefined,
+          comment: savedComment || undefined,
+          skipped: savedSkipped,
           date: formatDate(selectedDate),
           createdAt: new Date().toISOString(),
         };
 
-        // Add placeholder to sessions array
-        setTrainingSessions([...trainingSessions, tempTraining]);
+        // Add placeholder to sessions array immediately
+        setTrainingSessions(currentSessions => [...currentSessions, tempTraining]);
 
-        // Save to server
+        // Save to server (this triggers analysis)
         savedTraining = await saveTrainingData({
           ...params,
           date: formatDate(selectedDate),
         });
 
-        // Replace placeholder with real data
+        // Replace placeholder with real data including analysis
         setTrainingSessions(currentSessions =>
           currentSessions.map(t => t.id === -1 ? savedTraining : t)
         );
       }
-
-      // Reset form
-      setTrainingType('');
-      setTrainingDuration('');
-      setTrainingGoal('');
-      setTrainingIntensity('');
-      setTrainingComment('');
-      setTrainingSkipped(false);
-      setTrainingEditing(false);
-      setEditingTrainingId(null);
 
       console.log('Training saved successfully:', savedTraining);
     } catch (error) {
@@ -437,7 +517,11 @@ export default function FitScoreScreen() {
   const handleEditTraining = (training: TrainingDataEntry) => {
     setIsEditingTrainings(false); // Exit edit mode
     setTrainingType(training.type);
-    setTrainingDuration(training.duration.toString());
+    // Convert duration minutes to hours and minutes
+    const hours = Math.floor(training.duration / 60);
+    const minutes = training.duration % 60;
+    setTrainingDurationHours(hours);
+    setTrainingDurationMinutes(minutes);
     setTrainingGoal(training.goal || '');
     setTrainingIntensity(training.intensity || '');
     setTrainingComment(training.comment || '');
@@ -706,7 +790,7 @@ export default function FitScoreScreen() {
             </View>
           ) : trainingEditing ? (
             <View style={styles.trainingForm}>
-              <Text style={styles.formLabel}>Training Type</Text>
+              <Text style={styles.formLabel}>Training Type <Text style={styles.mandatoryAsterisk}>*</Text></Text>
               <TextInput
                 style={styles.textInput}
                 value={trainingType}
@@ -715,15 +799,98 @@ export default function FitScoreScreen() {
                 placeholderTextColor={colors.textMuted}
               />
 
-              <Text style={[styles.formLabel, styles.formLabelSpaced]}>Duration (minutes)</Text>
-              <TextInput
-                style={styles.textInput}
-                value={trainingDuration}
-                onChangeText={setTrainingDuration}
-                placeholder="e.g., 45"
-                placeholderTextColor={colors.textMuted}
-                keyboardType="numeric"
-              />
+              <Text style={[styles.formLabel, styles.formLabelSpaced]}>Duration <Text style={styles.mandatoryAsterisk}>*</Text></Text>
+              {Platform.OS === 'ios' ? (
+                <View style={styles.iosTimePickerContainer}>
+                  <DateTimePicker
+                    value={(() => {
+                      const date = new Date();
+                      date.setHours(trainingDurationHours);
+                      date.setMinutes(trainingDurationMinutes);
+                      return date;
+                    })()}
+                    mode="countdown"
+                    display="spinner"
+                    onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
+                      if (selectedDate) {
+                        setTrainingDurationHours(selectedDate.getHours());
+                        setTrainingDurationMinutes(selectedDate.getMinutes());
+                      }
+                    }}
+                    textColor={colors.textPrimary}
+                    style={styles.iosTimePicker}
+                  />
+                </View>
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={styles.timePickerButton}
+                    onPress={() => setShowTrainingDurationPicker(!showTrainingDurationPicker)}
+                  >
+                    <Ionicons name="time-outline" size={20} color={colors.accent} />
+                    <Text style={styles.timePickerButtonText}>
+                      {trainingDurationHours > 0 ? `${trainingDurationHours}h ` : ''}{trainingDurationMinutes}min
+                    </Text>
+                    <Ionicons name={showTrainingDurationPicker ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textMuted} />
+                  </TouchableOpacity>
+                  {showTrainingDurationPicker && (
+                    <View style={styles.durationPickerContainer}>
+                      <View style={styles.durationPickerWrapper}>
+                        <View style={styles.durationColumn}>
+                          <Text style={styles.durationColumnLabel}>Hours</Text>
+                          <ScrollView style={styles.durationScrollView} showsVerticalScrollIndicator={false}>
+                            {[0, 1, 2, 3, 4, 5].map((hour) => (
+                              <TouchableOpacity
+                                key={hour}
+                                style={[
+                                  styles.durationOption,
+                                  trainingDurationHours === hour && styles.durationOptionActive,
+                                ]}
+                                onPress={() => setTrainingDurationHours(hour)}
+                              >
+                                <Text style={[
+                                  styles.durationOptionText,
+                                  trainingDurationHours === hour && styles.durationOptionTextActive,
+                                ]}>
+                                  {hour}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+                        </View>
+                        <View style={styles.durationColumn}>
+                          <Text style={styles.durationColumnLabel}>Minutes</Text>
+                          <ScrollView style={styles.durationScrollView} showsVerticalScrollIndicator={false}>
+                            {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((min) => (
+                              <TouchableOpacity
+                                key={min}
+                                style={[
+                                  styles.durationOption,
+                                  trainingDurationMinutes === min && styles.durationOptionActive,
+                                ]}
+                                onPress={() => setTrainingDurationMinutes(min)}
+                              >
+                                <Text style={[
+                                  styles.durationOptionText,
+                                  trainingDurationMinutes === min && styles.durationOptionTextActive,
+                                ]}>
+                                  {min}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </ScrollView>
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.durationSaveButton}
+                        onPress={() => setShowTrainingDurationPicker(false)}
+                      >
+                        <Text style={styles.durationSaveButtonText}>Save Duration</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </>
+              )}
 
               <Text style={[styles.formLabel, styles.formLabelSpaced]}>Goal</Text>
               <TextInput
@@ -768,30 +935,38 @@ export default function FitScoreScreen() {
                 numberOfLines={3}
               />
 
+              {/* Save Button - enabled only when mandatory fields are filled */}
+              {(() => {
+                const isFormValid = trainingType.trim().length > 0 && (trainingDurationHours > 0 || trainingDurationMinutes > 0);
+                return (
+                  <Button
+                    onPress={handleSaveTraining}
+                    variant={isFormValid ? 'primary' : 'secondary'}
+                    style={styles.saveButton}
+                    disabled={!isFormValid}
+                  >
+                    {editingTrainingId ? 'Update Training' : 'Save Training Data'}
+                  </Button>
+                );
+              })()}
+
+              {/* Cancel Button - always visible */}
               <Button
-                onPress={handleSaveTraining}
-                variant="secondary"
-                style={styles.saveButton}
+                onPress={() => {
+                  setTrainingEditing(false);
+                  setEditingTrainingId(null);
+                  setTrainingType('');
+                  setTrainingDurationHours(0);
+                  setTrainingDurationMinutes(45);
+                  setTrainingGoal('');
+                  setTrainingIntensity('');
+                  setTrainingComment('');
+                }}
+                variant="ghost"
+                style={styles.cancelButton}
               >
-                {editingTrainingId ? 'Update Training' : 'Save Training Data'}
+                Cancel
               </Button>
-              {editingTrainingId && (
-                <Button
-                  onPress={() => {
-                    setTrainingEditing(false);
-                    setEditingTrainingId(null);
-                    setTrainingType('');
-                    setTrainingDuration('');
-                    setTrainingGoal('');
-                    setTrainingIntensity('');
-                    setTrainingComment('');
-                  }}
-                  variant="ghost"
-                  style={styles.cancelButton}
-                >
-                  Cancel
-                </Button>
-              )}
             </View>
           ) : null}
 
@@ -799,14 +974,206 @@ export default function FitScoreScreen() {
       )}
 
       {/* Calculate FitScore Button */}
-      {canCalculate && isToday && (
+      {canCalculate && isToday && !showFitScoreResult && (
         <View style={styles.calculateSection}>
           <Button
             onPress={handleCalculateFitScore}
             style={styles.calculateButton}
+            disabled={calculatingFitScore}
           >
-            Calculate My FitScore
+            {calculatingFitScore ? 'Calculating...' : 'Calculate My FitScore'}
           </Button>
+        </View>
+      )}
+
+      {/* FitScore Result - Recovery Analysis FIRST, then Triangle */}
+      {showFitScoreResult && fitScoreResult && (
+        <View style={styles.fitScoreResultSection}>
+          {/* 1. Recovery Analysis Card - FIRST */}
+          <View style={styles.recoveryAnalysisCard}>
+            <Text style={styles.recoveryAnalysisTitle}>Recovery Analysis</Text>
+
+            {/* Recovery Metrics Grid - 2x2 Layout */}
+            {/* Row 1: Recovery % and Sleep Hours */}
+            <View style={styles.recoveryMetricsRow}>
+              <View style={styles.recoveryMetricItem}>
+                <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                  <Ionicons name="heart" size={20} color={colors.accent} />
+                </View>
+                <Text style={styles.recoveryMetricLabel}>Recovery</Text>
+                <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                  {fitScoreResult.whoopData.recoveryScore ?? 'N/A'}%
+                </Text>
+                {fitScoreResult.yesterdayData?.recoveryScore != null && fitScoreResult.whoopData.recoveryScore != null && (
+                  <Text style={[
+                    styles.recoveryMetricDelta,
+                    { color: fitScoreResult.whoopData.recoveryScore >= fitScoreResult.yesterdayData.recoveryScore ? colors.success : colors.danger }
+                  ]}>
+                    {fitScoreResult.whoopData.recoveryScore >= fitScoreResult.yesterdayData.recoveryScore ? '↑' : '↓'}
+                    {Math.abs(fitScoreResult.whoopData.recoveryScore - fitScoreResult.yesterdayData.recoveryScore).toFixed(0)}% vs yesterday
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.recoveryMetricItem}>
+                <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                  <Ionicons name="bed" size={20} color={colors.accent} />
+                </View>
+                <Text style={styles.recoveryMetricLabel}>Sleep Hours</Text>
+                <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                  {fitScoreResult.whoopData.sleepHours ? `${fitScoreResult.whoopData.sleepHours.toFixed(1)}h` : 'N/A'}
+                </Text>
+                {fitScoreResult.yesterdayData?.sleepHours != null && fitScoreResult.whoopData.sleepHours != null && (
+                  <Text style={[
+                    styles.recoveryMetricDelta,
+                    { color: fitScoreResult.whoopData.sleepHours >= fitScoreResult.yesterdayData.sleepHours ? colors.success : colors.danger }
+                  ]}>
+                    {fitScoreResult.whoopData.sleepHours >= fitScoreResult.yesterdayData.sleepHours ? '↑' : '↓'}
+                    {Math.abs(fitScoreResult.whoopData.sleepHours - fitScoreResult.yesterdayData.sleepHours).toFixed(1)}h vs yesterday
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {/* Row 2: Sleep Quality and HRV */}
+            <View style={styles.recoveryMetricsRow}>
+              <View style={styles.recoveryMetricItem}>
+                <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                  <Ionicons name="moon" size={20} color={colors.accent} />
+                </View>
+                <Text style={styles.recoveryMetricLabel}>Sleep Quality</Text>
+                <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                  {fitScoreResult.whoopData.sleepScore ?? 'N/A'}%
+                </Text>
+                {fitScoreResult.yesterdayData?.sleepScore != null && fitScoreResult.whoopData.sleepScore != null && (
+                  <Text style={[
+                    styles.recoveryMetricDelta,
+                    { color: fitScoreResult.whoopData.sleepScore >= fitScoreResult.yesterdayData.sleepScore ? colors.success : colors.danger }
+                  ]}>
+                    {fitScoreResult.whoopData.sleepScore >= fitScoreResult.yesterdayData.sleepScore ? '↑' : '↓'}
+                    {Math.abs(fitScoreResult.whoopData.sleepScore - fitScoreResult.yesterdayData.sleepScore).toFixed(0)}% vs yesterday
+                  </Text>
+                )}
+              </View>
+
+              <View style={styles.recoveryMetricItem}>
+                <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                  <Ionicons name="pulse" size={20} color={colors.accent} />
+                </View>
+                <Text style={styles.recoveryMetricLabel}>HRV</Text>
+                <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                  {fitScoreResult.whoopData.hrv ? Math.round(fitScoreResult.whoopData.hrv) : 'N/A'} ms
+                </Text>
+                {fitScoreResult.yesterdayData?.hrv != null && fitScoreResult.whoopData.hrv != null && (
+                  <Text style={[
+                    styles.recoveryMetricDelta,
+                    { color: fitScoreResult.whoopData.hrv >= fitScoreResult.yesterdayData.hrv ? colors.success : colors.danger }
+                  ]}>
+                    {fitScoreResult.whoopData.hrv >= fitScoreResult.yesterdayData.hrv ? '↑' : '↓'}
+                    {Math.abs(fitScoreResult.whoopData.hrv - fitScoreResult.yesterdayData.hrv).toFixed(0)} ms vs yesterday
+                  </Text>
+                )}
+              </View>
+            </View>
+
+            {/* Analysis Text */}
+            <View style={styles.recoveryAnalysisTextBox}>
+              <Ionicons name="sparkles" size={16} color={colors.accent} />
+              <Text style={styles.recoveryAnalysisText}>{fitScoreResult.breakdown.recovery.analysis}</Text>
+            </View>
+          </View>
+
+          {/* 2. Score Breakdown Title */}
+          <Text style={styles.sectionTitleLarge}>Score Breakdown</Text>
+
+          {/* 3. FitScore Triangle Visual - SVG Equilateral Triangle */}
+          <View style={styles.triangleWrapper}>
+            <FitScoreTriangle
+              recoveryScore={fitScoreResult.breakdown.recovery.score}
+              nutritionScore={fitScoreResult.breakdown.nutrition.score}
+              trainingScore={fitScoreResult.breakdown.training.score}
+              fitScore={fitScoreResult.fitScore}
+              size={280}
+            />
+          </View>
+
+          {/* Formula Text */}
+          <Text style={styles.formulaText}>FitScore = avg(Recovery, Training, Nutrition)</Text>
+
+          {/* All Green Celebration */}
+          {fitScoreResult.allGreen && (
+            <View style={styles.allGreenBanner}>
+              <Text style={styles.allGreenText}>Perfect Day! All metrics in the green zone!</Text>
+            </View>
+          )}
+
+          {/* Summary Stats */}
+          <View style={styles.fitScoreSummary}>
+            <View style={styles.fitScoreSummaryItem}>
+              <Text style={styles.fitScoreSummaryValue}>{fitScoreResult.breakdown.nutrition.mealsCount}</Text>
+              <Text style={styles.fitScoreSummaryLabel}>Meals</Text>
+            </View>
+            <View style={styles.fitScoreSummaryItem}>
+              <Text style={styles.fitScoreSummaryValue}>{fitScoreResult.breakdown.training.sessionsCount}</Text>
+              <Text style={styles.fitScoreSummaryLabel}>Training Sessions</Text>
+            </View>
+            <View style={styles.fitScoreSummaryItem}>
+              <Text style={styles.fitScoreSummaryValue}>
+                {fitScoreResult.whoopData.sleepHours ? fitScoreResult.whoopData.sleepHours.toFixed(1) : 'N/A'}
+              </Text>
+              <Text style={styles.fitScoreSummaryLabel}>Sleep Hours</Text>
+            </View>
+          </View>
+
+          {/* FitCoach's Take */}
+          <View style={styles.coachSummaryCard}>
+            <View style={styles.coachSummaryHeader}>
+              <View style={styles.coachIconContainer}>
+                <Ionicons name="chatbubble-ellipses" size={18} color={colors.accent} />
+              </View>
+              <Text style={styles.coachSummaryTitle}>FitCoach's Take</Text>
+            </View>
+            {loadingCoachSummary ? (
+              <View style={styles.coachSummaryLoading}>
+                <ActivityIndicator size="small" color={colors.accent} />
+                <Text style={styles.coachSummaryLoadingText}>Generating insights...</Text>
+              </View>
+            ) : coachSummary ? (
+              <Text style={styles.coachSummaryText}>{coachSummary.fitCoachTake}</Text>
+            ) : (
+              <Text style={styles.coachSummaryPlaceholder}>Coach insights loading...</Text>
+            )}
+          </View>
+
+          {/* Tomorrow's Outlook */}
+          <View style={styles.coachSummaryCard}>
+            <View style={styles.coachSummaryHeader}>
+              <View style={[styles.coachIconContainer, { backgroundColor: colors.warning + '20' }]}>
+                <Ionicons name="sunny" size={18} color={colors.warning} />
+              </View>
+              <Text style={styles.coachSummaryTitle}>Tomorrow's Outlook</Text>
+            </View>
+            {loadingCoachSummary ? (
+              <View style={styles.coachSummaryLoading}>
+                <ActivityIndicator size="small" color={colors.warning} />
+              </View>
+            ) : coachSummary ? (
+              <Text style={styles.coachSummaryText}>{coachSummary.tomorrowsOutlook}</Text>
+            ) : (
+              <Text style={styles.coachSummaryPlaceholder}>Outlook loading...</Text>
+            )}
+          </View>
+
+          {/* Recalculate Button */}
+          <TouchableOpacity
+            style={styles.recalculateButton}
+            onPress={() => {
+              setShowFitScoreResult(false);
+              setFitScoreResult(null);
+            }}
+          >
+            <Text style={styles.recalculateButtonText}>Update Data & Recalculate</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -888,6 +1255,51 @@ export default function FitScoreScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+
+              {/* Meal Time Picker */}
+              <Text style={styles.modalSectionTitle}>Meal Time</Text>
+              {Platform.OS === 'ios' ? (
+                <View style={styles.iosTimePickerContainer}>
+                  <DateTimePicker
+                    value={mealTime}
+                    mode="time"
+                    display="spinner"
+                    onChange={(event: DateTimePickerEvent, selectedTime?: Date) => {
+                      if (selectedTime) {
+                        setMealTime(selectedTime);
+                      }
+                    }}
+                    textColor={colors.textPrimary}
+                    style={styles.iosTimePicker}
+                  />
+                </View>
+              ) : (
+                <>
+                  <TouchableOpacity
+                    style={styles.timePickerButton}
+                    onPress={() => setShowMealTimePicker(!showMealTimePicker)}
+                  >
+                    <Ionicons name="time-outline" size={20} color={colors.accent} />
+                    <Text style={styles.timePickerButtonText}>
+                      {mealTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </Text>
+                    <Ionicons name={showMealTimePicker ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textMuted} />
+                  </TouchableOpacity>
+                  {showMealTimePicker && (
+                    <DateTimePicker
+                      value={mealTime}
+                      mode="time"
+                      display="spinner"
+                      onChange={(event: DateTimePickerEvent, selectedTime?: Date) => {
+                        setShowMealTimePicker(false);
+                        if (selectedTime) {
+                          setMealTime(selectedTime);
+                        }
+                      }}
+                    />
+                  )}
+                </>
+              )}
 
               {/* Meal Notes */}
               <Text style={styles.modalSectionTitle}>Meal Notes (Optional)</Text>
@@ -1283,6 +1695,14 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: spacing.lg,
+  },
+  saveButtonDisabled: {
+    opacity: 0.5,
+    backgroundColor: colors.surfaceMute,
+  },
+  mandatoryAsterisk: {
+    color: colors.danger,
+    fontWeight: '700',
   },
   trainingCard: {
     padding: spacing.lg,
@@ -2052,5 +2472,276 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontWeight: '700',
     flexShrink: 0,
+  },
+  // FitScore Result Styles
+  fitScoreResultSection: {
+    marginTop: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
+  },
+  sectionTitleLarge: {
+    ...typography.h2,
+    marginBottom: spacing.lg,
+    textAlign: 'center',
+  },
+  triangleWrapper: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMute + '15',
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    paddingVertical: spacing.xl,
+    marginBottom: spacing.md,
+  },
+  formulaText: {
+    ...typography.body,
+    color: colors.textMuted,
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginBottom: spacing.lg,
+  },
+  allGreenBanner: {
+    backgroundColor: colors.success + '20',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.success,
+  },
+  allGreenText: {
+    ...typography.body,
+    color: colors.success,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  recoveryAnalysisCard: {
+    backgroundColor: colors.surfaceMute + '15',
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  recoveryAnalysisTitle: {
+    ...typography.title,
+    marginBottom: spacing.md,
+  },
+  recoveryMetricsGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  recoveryMetricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  recoveryMetricItem: {
+    alignItems: 'center',
+    flex: 1,
+    paddingVertical: spacing.sm,
+  },
+  recoveryMetricIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  recoveryMetricLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginBottom: spacing.xs / 2,
+    textAlign: 'center',
+  },
+  recoveryMetricValue: {
+    ...typography.title,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  recoveryMetricDelta: {
+    ...typography.small,
+    marginTop: spacing.xs / 2,
+    textAlign: 'center',
+  },
+  recoveryAnalysisTextBox: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceMute + '20',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+    alignItems: 'flex-start',
+  },
+  recoveryAnalysisText: {
+    ...typography.body,
+    color: colors.textMuted,
+    flex: 1,
+    lineHeight: 20,
+  },
+  fitScoreSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: colors.surfaceMute + '15',
+    borderRadius: radii.md,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+  },
+  fitScoreSummaryItem: {
+    alignItems: 'center',
+  },
+  fitScoreSummaryValue: {
+    ...typography.h2,
+    color: colors.accent,
+    fontWeight: '700',
+  },
+  fitScoreSummaryLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  recalculateButton: {
+    backgroundColor: colors.surfaceMute + '30',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    alignItems: 'center',
+  },
+  recalculateButtonText: {
+    ...typography.body,
+    color: colors.accent,
+    fontWeight: '600',
+  },
+  // Coach Summary Styles
+  coachSummaryCard: {
+    backgroundColor: colors.surfaceMute + '20',
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  coachSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  coachIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.accent + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  coachSummaryTitle: {
+    ...typography.body,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  coachSummaryText: {
+    ...typography.body,
+    color: colors.textSecondary,
+    lineHeight: 22,
+  },
+  coachSummaryLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  coachSummaryLoadingText: {
+    ...typography.small,
+    color: colors.textMuted,
+  },
+  coachSummaryPlaceholder: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+  },
+  // Time Picker Styles
+  timePickerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMute + '30',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  timePickerButtonText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    flex: 1,
+    fontWeight: '600',
+  },
+  iosTimePickerContainer: {
+    backgroundColor: colors.surfaceMute + '20',
+    borderRadius: radii.md,
+    overflow: 'hidden',
+    marginBottom: spacing.md,
+  },
+  iosTimePicker: {
+    height: 150,
+    backgroundColor: 'transparent',
+  },
+  durationPickerContainer: {
+    backgroundColor: colors.surfaceMute + '20',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+  },
+  mealTimePickerContainer: {
+    backgroundColor: colors.surfaceMute + '20',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  durationPickerWrapper: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.xl,
+  },
+  durationColumn: {
+    alignItems: 'center',
+    width: 80,
+  },
+  durationColumnLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  durationScrollView: {
+    height: 150,
+  },
+  mealTimeScrollView: {
+    height: 180,
+  },
+  durationOption: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.sm,
+    marginVertical: 2,
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  durationOptionActive: {
+    backgroundColor: colors.accent + '30',
+  },
+  durationOptionText: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontSize: 18,
+  },
+  durationOptionTextActive: {
+    color: colors.accent,
+    fontWeight: '700',
+  },
+  durationSaveButton: {
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    marginTop: spacing.md,
+    alignItems: 'center',
+  },
+  durationSaveButtonText: {
+    ...typography.body,
+    color: colors.bgPrimary,
+    fontWeight: '600',
   },
 });
