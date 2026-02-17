@@ -1,4 +1,4 @@
-import { users, meals, trainingData, whoopData, userCalendars, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar } from "@shared/schema";
+import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily } from "@shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 
@@ -32,6 +32,11 @@ export interface IStorage {
   createUserCalendar(data: InsertUserCalendar): Promise<UserCalendar>;
   deleteUserCalendar(id: number): Promise<void>;
   updateUserCalendar(id: number, data: Partial<InsertUserCalendar>): Promise<UserCalendar>;
+
+  // FitLook operations
+  getFitlookByUserAndDate(userId: string, dateLocal: string): Promise<FitlookDaily | undefined>;
+  createFitlook(data: InsertFitlookDaily): Promise<FitlookDaily>;
+  deleteFitlookByUserAndDate(userId: string, dateLocal: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -174,6 +179,22 @@ export class DatabaseStorage implements IStorage {
       .where(eq(userCalendars.id, id))
       .returning();
     return calendar;
+  }
+  // FitLook operations
+  async getFitlookByUserAndDate(userId: string, dateLocal: string): Promise<FitlookDaily | undefined> {
+    const [row] = await db.select().from(fitlookDaily)
+      .where(and(eq(fitlookDaily.userId, userId), eq(fitlookDaily.dateLocal, dateLocal)));
+    return row || undefined;
+  }
+
+  async createFitlook(data: InsertFitlookDaily): Promise<FitlookDaily> {
+    const [row] = await db.insert(fitlookDaily).values(data).returning();
+    return row;
+  }
+
+  async deleteFitlookByUserAndDate(userId: string, dateLocal: string): Promise<void> {
+    await db.delete(fitlookDaily)
+      .where(and(eq(fitlookDaily.userId, userId), eq(fitlookDaily.dateLocal, dateLocal)));
   }
 }
 

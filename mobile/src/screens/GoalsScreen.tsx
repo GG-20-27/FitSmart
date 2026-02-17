@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, spacing, typography } from '../theme';
 import { Card } from '../ui/components';
+import { apiRequest } from '../api/client';
 
 type GoalCategory = 'Recovery' | 'Training' | 'Nutrition' | 'Mindset';
 
@@ -63,8 +64,33 @@ export default function GoalsScreen() {
   const [avgFitScore, setAvgFitScore] = useState(0);
   const [fitScoreDelta, setFitScoreDelta] = useState(0);
 
-  // Load goals from storage
+  // Load goals from backend, fallback to local storage
   const loadGoals = useCallback(async () => {
+    try {
+      const serverGoals = await apiRequest<any[]>('/api/goals');
+      if (serverGoals && serverGoals.length > 0) {
+        const mapped: Goal[] = serverGoals.map((g: any) => ({
+          id: String(g.id),
+          title: g.title,
+          emoji: g.emoji || '🎯',
+          category: g.category as GoalCategory,
+          progress: g.progress || 0,
+          streak: g.streak || 0,
+          microhabits: g.microhabits ? (typeof g.microhabits === 'string' ? JSON.parse(g.microhabits) : g.microhabits) : [],
+          createdAt: g.createdAt || new Date().toISOString(),
+        }));
+        setGoals(mapped);
+        calculateTotalStreak(mapped);
+        // Cache locally
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(mapped));
+        console.log(`[GOALS] Loaded ${mapped.length} goals from server`);
+        return;
+      }
+    } catch (error) {
+      console.log('[GOALS] Server fetch failed, loading from local storage:', error);
+    }
+
+    // Fallback to local storage
     try {
       const stored = await AsyncStorage.getItem(STORAGE_KEY);
       if (stored) {
@@ -77,14 +103,66 @@ export default function GoalsScreen() {
     }
   }, []);
 
-  // Save goals to storage
-  const saveGoals = async (newGoals: Goal[]) => {
+  // Save goals locally (cache)
+  const saveGoalsLocal = async (newGoals: Goal[]) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(newGoals));
       setGoals(newGoals);
       calculateTotalStreak(newGoals);
     } catch (error) {
-      console.error('Failed to save goals:', error);
+      console.error('Failed to save goals locally:', error);
+    }
+  };
+
+  // Create goal on backend
+  const createGoalOnServer = async (goal: Goal) => {
+    try {
+      const result = await apiRequest<any>('/api/goals', {
+        method: 'POST',
+        body: JSON.stringify({
+          title: goal.title,
+          emoji: goal.emoji,
+          category: goal.category,
+          progress: goal.progress,
+          streak: goal.streak,
+          microhabits: JSON.stringify(goal.microhabits),
+        }),
+      });
+      console.log(`[GOALS] Created goal on server: ${result.id}`);
+      return String(result.id);
+    } catch (error) {
+      console.error('[GOALS] Failed to create goal on server:', error);
+      return null;
+    }
+  };
+
+  // Update goal on backend
+  const updateGoalOnServer = async (goal: Goal) => {
+    try {
+      await apiRequest(`/api/goals/${goal.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title: goal.title,
+          emoji: goal.emoji,
+          category: goal.category,
+          progress: goal.progress,
+          streak: goal.streak,
+          microhabits: JSON.stringify(goal.microhabits),
+        }),
+      });
+      console.log(`[GOALS] Updated goal on server: ${goal.id}`);
+    } catch (error) {
+      console.error('[GOALS] Failed to update goal on server:', error);
+    }
+  };
+
+  // Delete goal on backend
+  const deleteGoalOnServer = async (goalId: string) => {
+    try {
+      await apiRequest(`/api/goals/${goalId}`, { method: 'DELETE' });
+      console.log(`[GOALS] Deleted goal on server: ${goalId}`);
+    } catch (error) {
+      console.error('[GOALS] Failed to delete goal on server:', error);
     }
   };
 
@@ -118,12 +196,14 @@ export default function GoalsScreen() {
         const allDone = updatedHabits.every(h => h.done);
         const newStreak = allDone ? goal.streak + 1 : goal.streak;
 
-        return { ...goal, microhabits: updatedHabits, progress, streak: newStreak };
+        const updated = { ...goal, microhabits: updatedHabits, progress, streak: newStreak };
+        updateGoalOnServer(updated);
+        return updated;
       }
       return goal;
     });
 
-    saveGoals(updatedGoals);
+    saveGoalsLocal(updatedGoals);
   };
 
   // Delete goal
@@ -137,8 +217,9 @@ export default function GoalsScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: () => {
+            deleteGoalOnServer(goalId);
             const filtered = goals.filter(g => g.id !== goalId);
-            saveGoals(filtered);
+            saveGoalsLocal(filtered);
           },
         },
       ]
@@ -166,7 +247,8 @@ export default function GoalsScreen() {
   // Save edited goal
   const saveEditedGoal = (updatedGoal: Goal) => {
     const updatedGoals = goals.map(g => g.id === updatedGoal.id ? updatedGoal : g);
-    saveGoals(updatedGoals);
+    updateGoalOnServer(updatedGoal);
+    saveGoalsLocal(updatedGoals);
     setShowEditModal(false);
     setEditingGoal(null);
   };
@@ -295,8 +377,13 @@ export default function GoalsScreen() {
       <AddGoalModal
         visible={showAddModal}
         onClose={() => setShowAddModal(false)}
-        onAdd={(newGoal) => {
-          saveGoals([...goals, newGoal]);
+        onAdd={async (newGoal) => {
+          // Create on server first to get the real ID
+          const serverId = await createGoalOnServer(newGoal);
+          if (serverId) {
+            newGoal.id = serverId;
+          }
+          saveGoalsLocal([...goals, newGoal]);
           setShowAddModal(false);
         }}
       />

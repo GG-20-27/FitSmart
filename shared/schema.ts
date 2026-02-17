@@ -118,6 +118,26 @@ export const fitScores = pgTable("fit_scores", {
   calculatedAt: timestamp("calculated_at").defaultNow().notNull(),
 });
 
+export const fitlookDaily = pgTable("fitlook_daily", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  dateLocal: text("date_local").notNull(), // YYYY-MM-DD in Europe/Zurich
+  payloadJson: text("payload_json").notNull(), // Stringified FitLookPayload
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// FitLook payload shape (shared between server and mobile)
+export interface FitLookPayload {
+  date_local: string;
+  hero_text: string;
+  readiness_tag: 'Green' | 'Yellow' | 'Red';
+  readiness_line: string;
+  todays_focus: string;
+  momentum_line: string;
+  cta_primary: string;
+  cta_secondary: string;
+}
+
 export const insertUserSchema = createInsertSchema(users).pick({
   id: true,
   email: true,
@@ -170,6 +190,11 @@ export const insertFitScoreSchema = createInsertSchema(fitScores).omit({
   calculatedAt: true,
 });
 
+export const insertFitlookDailySchema = createInsertSchema(fitlookDaily).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Type definitions
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -191,6 +216,8 @@ export type InsertUserGoal = z.infer<typeof insertUserGoalSchema>;
 export type UserGoal = typeof userGoals.$inferSelect;
 export type InsertFitScore = z.infer<typeof insertFitScoreSchema>;
 export type FitScore = typeof fitScores.$inferSelect;
+export type InsertFitlookDaily = z.infer<typeof insertFitlookDailySchema>;
+export type FitlookDaily = typeof fitlookDaily.$inferSelect;
 
 
 

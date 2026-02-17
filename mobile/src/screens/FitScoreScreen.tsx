@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -22,7 +22,236 @@ import {
   type TrainingAnalysisResponse,
   type FitScoreResponse,
   type CoachSummaryResponse,
+  type CoachSlide,
 } from '../api/fitscore';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+const MODAL_HEIGHT = SCREEN_HEIGHT * 0.92;
+const DISMISS_THRESHOLD = 120;
+
+function CoachModal({
+  visible,
+  onClose,
+  coachSummary,
+  activeSlideIndex,
+  setActiveSlideIndex,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  coachSummary: CoachSummaryResponse | null;
+  activeSlideIndex: number;
+  setActiveSlideIndex: (i: number) => void;
+}) {
+  const translateY = useRef(new Animated.Value(MODAL_HEIGHT)).current;
+  const backdropOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (visible) {
+      translateY.setValue(MODAL_HEIGHT);
+      backdropOpacity.setValue(0);
+      Animated.parallel([
+        Animated.spring(translateY, {
+          toValue: 0,
+          useNativeDriver: true,
+          damping: 25,
+          stiffness: 200,
+        }),
+        Animated.timing(backdropOpacity, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    }
+  }, [visible]);
+
+  const dismissModal = () => {
+    Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: MODAL_HEIGHT,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: 250,
+        useNativeDriver: true,
+      }),
+    ]).start(() => onClose());
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        return gestureState.dy > 10 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
+      },
+      onPanResponderMove: (_, gestureState) => {
+        if (gestureState.dy > 0) {
+          translateY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy > DISMISS_THRESHOLD || gestureState.vy > 0.5) {
+          dismissModal();
+        } else {
+          Animated.spring(translateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            damping: 25,
+            stiffness: 200,
+          }).start();
+        }
+      },
+    })
+  ).current;
+
+  if (!visible) return null;
+
+  return (
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="none"
+      statusBarTranslucent
+      onRequestClose={dismissModal}
+    >
+      <View style={styles.coachModalOverlay}>
+        <Animated.View
+          style={[styles.coachModalBackdrop, { opacity: backdropOpacity }]}
+        >
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={dismissModal} />
+        </Animated.View>
+
+        <Animated.View
+          style={[
+            styles.coachModalSheet,
+            { transform: [{ translateY }] },
+          ]}
+          {...panResponder.panHandlers}
+        >
+          {/* Drag handle — tap to dismiss */}
+          <TouchableOpacity
+            style={styles.coachModalTopBar}
+            activeOpacity={0.7}
+            onPress={dismissModal}
+          >
+            <View style={styles.coachDragHandle} />
+            <Ionicons name="chevron-down" size={20} color="#555" style={{ marginTop: 4 }} />
+          </TouchableOpacity>
+
+          {/* Title */}
+          <View style={styles.coachModalHeader}>
+            <Text style={styles.coachModalHeaderTitle}>FitCoach</Text>
+          </View>
+
+          {/* Slides */}
+          {coachSummary?.slides && (
+            <FlatList
+              ref={(ref) => { (globalThis as any).__coachFlatListRef = ref; }}
+              data={coachSummary.slides}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={(e) => {
+                const index = Math.round(e.nativeEvent.contentOffset.x / Dimensions.get('window').width);
+                setActiveSlideIndex(index);
+              }}
+              keyExtractor={(_, i) => `slide-${i}`}
+              style={{ flex: 1 }}
+              renderItem={({ item, index }) => {
+                const slideWidth = Dimensions.get('window').width;
+                return (
+                  <View style={{ width: slideWidth, flex: 1 }}>
+                    <ScrollView
+                      showsVerticalScrollIndicator={false}
+                      contentContainerStyle={styles.coachSlideScroll}
+                    >
+                      {/* Slide number */}
+                      <Text style={styles.coachSlideNumber}>{`${index + 1} / ${coachSummary.slides.length}`}</Text>
+
+                      {/* Context strip - slide 1 only */}
+                      {index === 0 && item.context_strip && (
+                        <View style={styles.coachContextStripWrap}>
+                          <Text style={styles.coachContextStrip}>{item.context_strip}</Text>
+                        </View>
+                      )}
+
+                      {/* Title */}
+                      <Text style={styles.coachSlideTitle}>{item.title}</Text>
+                      <View style={styles.coachSlideDivider} />
+
+                      {/* Chips */}
+                      {item.chips && item.chips.length > 0 && (
+                        <View style={styles.coachChipsContainer}>
+                          {item.chips.map((chip: string, ci: number) => (
+                            <View key={`chip-${ci}`} style={styles.coachChip}>
+                              <Text style={styles.coachChipText}>{chip}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
+
+                      {/* Content */}
+                      <Text style={styles.coachSlideContent}>{item.content}</Text>
+
+                      {/* Coach call */}
+                      {item.coach_call && (
+                        <View style={styles.coachCallContainer}>
+                          <View style={styles.coachCallAccent} />
+                          <Text style={styles.coachCallText}>{item.coach_call}</Text>
+                        </View>
+                      )}
+                    </ScrollView>
+
+                    {/* Tap zones overlay */}
+                    <View style={styles.coachSlideTapZones} pointerEvents="box-none">
+                      <TouchableOpacity
+                        style={styles.coachSlideTapLeft}
+                        activeOpacity={1}
+                        onPress={() => {
+                          if (activeSlideIndex > 0) {
+                            const newIdx = activeSlideIndex - 1;
+                            setActiveSlideIndex(newIdx);
+                            (globalThis as any).__coachFlatListRef?.scrollToIndex({ index: newIdx, animated: true });
+                          }
+                        }}
+                      />
+                      <TouchableOpacity
+                        style={styles.coachSlideTapRight}
+                        activeOpacity={1}
+                        onPress={() => {
+                          if (coachSummary.slides && activeSlideIndex < coachSummary.slides.length - 1) {
+                            const newIdx = activeSlideIndex + 1;
+                            setActiveSlideIndex(newIdx);
+                            (globalThis as any).__coachFlatListRef?.scrollToIndex({ index: newIdx, animated: true });
+                          }
+                        }}
+                      />
+                    </View>
+                  </View>
+                );
+              }}
+            />
+          )}
+
+          {/* Progress dots */}
+          <View style={styles.coachDotsContainer}>
+            {coachSummary?.slides?.map((_: CoachSlide, i: number) => (
+              <View
+                key={`dot-${i}`}
+                style={[
+                  styles.coachDot,
+                  i === activeSlideIndex && styles.coachDotActive,
+                ]}
+              />
+            ))}
+          </View>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
 
 export default function FitScoreScreen() {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
@@ -76,6 +305,12 @@ export default function FitScoreScreen() {
   // Coach summary state
   const [coachSummary, setCoachSummary] = useState<CoachSummaryResponse | null>(null);
   const [loadingCoachSummary, setLoadingCoachSummary] = useState(false);
+  const [showCoachModal, setShowCoachModal] = useState(false);
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [showRecoveryAnalysis, setShowRecoveryAnalysis] = useState(false);
+  const [triangleAnimating, setTriangleAnimating] = useState(false);
+  const triangleHasAnimated = useRef(false);
+  const fitScoreFadeAnim = useRef(new Animated.Value(0)).current;
 
   const isToday = selectedDate.toDateString() === new Date().toDateString();
   const hasMeals = meals.length > 0;
@@ -157,6 +392,16 @@ export default function FitScoreScreen() {
       setFitScoreResult(result);
       setShowFitScoreResult(true);
 
+      // Trigger fade-in animation
+      fitScoreFadeAnim.setValue(0);
+      triangleHasAnimated.current = false;
+      setTriangleAnimating(false);
+      Animated.timing(fitScoreFadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }).start();
+
       // Fetch coach summary in the background
       fetchCoachSummary(result);
 
@@ -175,16 +420,24 @@ export default function FitScoreScreen() {
     setLoadingCoachSummary(true);
     try {
       const summary = await getCoachSummary({
+        fitScore: fitScoreData.fitScore,
         recoveryZone: fitScoreData.breakdown.recovery.zone,
         trainingZone: fitScoreData.breakdown.training.zone,
         nutritionZone: fitScoreData.breakdown.nutrition.zone,
         fitScoreZone: fitScoreData.fitScoreZone,
         hadTraining: fitScoreData.breakdown.training.sessionsCount > 0,
         hadMeals: fitScoreData.breakdown.nutrition.mealsCount > 0,
+        mealsCount: fitScoreData.breakdown.nutrition.mealsCount,
+        sessionsCount: fitScoreData.breakdown.training.sessionsCount,
+        recoveryScore: fitScoreData.whoopData.recoveryScore,
         sleepScore: fitScoreData.whoopData.sleepScore,
         sleepHours: fitScoreData.whoopData.sleepHours,
         hrv: fitScoreData.whoopData.hrv,
         hrvBaseline: fitScoreData.whoopData.hrvBaseline,
+        strainScore: fitScoreData.whoopData.strainScore,
+        recoveryBreakdownScore: fitScoreData.breakdown.recovery.score,
+        trainingBreakdownScore: fitScoreData.breakdown.training.score,
+        nutritionBreakdownScore: fitScoreData.breakdown.nutrition.score,
       });
       setCoachSummary(summary);
       console.log('[COACH SUMMARY] Summary received');
@@ -271,8 +524,8 @@ export default function FitScoreScreen() {
     if (!score) return colors.textSecondary;
     // Use rounded score for color to match displayed value
     const roundedScore = Math.round(score);
-    if (roundedScore >= 8) return colors.success; // Green: 8-10
-    if (roundedScore >= 4) return colors.warning; // Amber: 4-7.9
+    if (roundedScore >= 7) return colors.success; // Green: 7-10
+    if (roundedScore >= 4) return colors.warning; // Amber: 4-6.9
     return colors.danger; // Red: 1-3.9
   };
 
@@ -988,7 +1241,7 @@ export default function FitScoreScreen() {
 
       {/* FitScore Result - Recovery Analysis FIRST, then Triangle */}
       {showFitScoreResult && fitScoreResult && (
-        <View style={styles.fitScoreResultSection}>
+        <Animated.View style={[styles.fitScoreResultSection, { opacity: fitScoreFadeAnim }]}>
           {/* 1. Recovery Analysis Card - FIRST */}
           <View style={styles.recoveryAnalysisCard}>
             <Text style={styles.recoveryAnalysisTitle}>Recovery Analysis</Text>
@@ -1076,24 +1329,50 @@ export default function FitScoreScreen() {
               </View>
             </View>
 
-            {/* Analysis Text */}
-            <View style={styles.recoveryAnalysisTextBox}>
-              <Ionicons name="sparkles" size={16} color={colors.accent} />
-              <Text style={styles.recoveryAnalysisText}>{fitScoreResult.breakdown.recovery.analysis}</Text>
-            </View>
+            {/* Analysis - Tap to View */}
+            {fitScoreResult.breakdown.recovery.analysis && !showRecoveryAnalysis && (
+              <TouchableOpacity
+                onPress={() => setShowRecoveryAnalysis(true)}
+                style={styles.recoveryTapToView}
+              >
+                <Ionicons name="sparkles" size={14} color={colors.accent} />
+                <Text style={styles.recoveryTapToViewText}>Tap to view AI analysis</Text>
+              </TouchableOpacity>
+            )}
+            {showRecoveryAnalysis && fitScoreResult.breakdown.recovery.analysis && (
+              <TouchableOpacity
+                onPress={() => setShowRecoveryAnalysis(false)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.recoveryAnalysisTextBox}>
+                  <Ionicons name="sparkles" size={16} color={colors.accent} />
+                  <Text style={styles.recoveryAnalysisText}>{fitScoreResult.breakdown.recovery.analysis}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
           </View>
 
           {/* 2. Score Breakdown Title */}
           <Text style={styles.sectionTitleLarge}>Score Breakdown</Text>
 
           {/* 3. FitScore Triangle Visual - SVG Equilateral Triangle */}
-          <View style={styles.triangleWrapper}>
+          <View
+            style={styles.triangleWrapper}
+            onLayout={() => {
+              if (!triangleHasAnimated.current) {
+                triangleHasAnimated.current = true;
+                // Small delay so it starts after the view is visible on screen
+                setTimeout(() => setTriangleAnimating(true), 200);
+              }
+            }}
+          >
             <FitScoreTriangle
               recoveryScore={fitScoreResult.breakdown.recovery.score}
               nutritionScore={fitScoreResult.breakdown.nutrition.score}
               trainingScore={fitScoreResult.breakdown.training.score}
               fitScore={fitScoreResult.fitScore}
               size={280}
+              animate={triangleAnimating}
             />
           </View>
 
@@ -1107,62 +1386,32 @@ export default function FitScoreScreen() {
             </View>
           )}
 
-          {/* Summary Stats */}
-          <View style={styles.fitScoreSummary}>
-            <View style={styles.fitScoreSummaryItem}>
-              <Text style={styles.fitScoreSummaryValue}>{fitScoreResult.breakdown.nutrition.mealsCount}</Text>
-              <Text style={styles.fitScoreSummaryLabel}>Meals</Text>
-            </View>
-            <View style={styles.fitScoreSummaryItem}>
-              <Text style={styles.fitScoreSummaryValue}>{fitScoreResult.breakdown.training.sessionsCount}</Text>
-              <Text style={styles.fitScoreSummaryLabel}>Training Sessions</Text>
-            </View>
-            <View style={styles.fitScoreSummaryItem}>
-              <Text style={styles.fitScoreSummaryValue}>
-                {fitScoreResult.whoopData.sleepHours ? fitScoreResult.whoopData.sleepHours.toFixed(1) : 'N/A'}
-              </Text>
-              <Text style={styles.fitScoreSummaryLabel}>Sleep Hours</Text>
-            </View>
-          </View>
-
-          {/* FitCoach's Take */}
-          <View style={styles.coachSummaryCard}>
+          {/* FitCoach Preview */}
+          <TouchableOpacity
+            style={styles.coachPreviewCard}
+            onPress={() => coachSummary?.slides && setShowCoachModal(true)}
+            activeOpacity={coachSummary?.slides ? 0.7 : 1}
+          >
             <View style={styles.coachSummaryHeader}>
               <View style={styles.coachIconContainer}>
                 <Ionicons name="chatbubble-ellipses" size={18} color={colors.accent} />
               </View>
-              <Text style={styles.coachSummaryTitle}>FitCoach's Take</Text>
+              <Text style={styles.coachSummaryTitle}>FitCoach</Text>
             </View>
             {loadingCoachSummary ? (
               <View style={styles.coachSummaryLoading}>
                 <ActivityIndicator size="small" color={colors.accent} />
-                <Text style={styles.coachSummaryLoadingText}>Generating insights...</Text>
+                <Text style={styles.coachSummaryLoadingText}>Analyzing your day...</Text>
               </View>
             ) : coachSummary ? (
-              <Text style={styles.coachSummaryText}>{coachSummary.fitCoachTake}</Text>
+              <>
+                <Text style={styles.coachPreviewText}>{coachSummary.preview}</Text>
+                <Text style={styles.coachPreviewCTA}>Tap to see detailed overview</Text>
+              </>
             ) : (
-              <Text style={styles.coachSummaryPlaceholder}>Coach insights loading...</Text>
+              <Text style={styles.coachSummaryPlaceholder}>Coach analysis loading...</Text>
             )}
-          </View>
-
-          {/* Tomorrow's Outlook */}
-          <View style={styles.coachSummaryCard}>
-            <View style={styles.coachSummaryHeader}>
-              <View style={[styles.coachIconContainer, { backgroundColor: colors.warning + '20' }]}>
-                <Ionicons name="sunny" size={18} color={colors.warning} />
-              </View>
-              <Text style={styles.coachSummaryTitle}>Tomorrow's Outlook</Text>
-            </View>
-            {loadingCoachSummary ? (
-              <View style={styles.coachSummaryLoading}>
-                <ActivityIndicator size="small" color={colors.warning} />
-              </View>
-            ) : coachSummary ? (
-              <Text style={styles.coachSummaryText}>{coachSummary.tomorrowsOutlook}</Text>
-            ) : (
-              <Text style={styles.coachSummaryPlaceholder}>Outlook loading...</Text>
-            )}
-          </View>
+          </TouchableOpacity>
 
           {/* Recalculate Button */}
           <TouchableOpacity
@@ -1170,11 +1419,14 @@ export default function FitScoreScreen() {
             onPress={() => {
               setShowFitScoreResult(false);
               setFitScoreResult(null);
+              setShowRecoveryAnalysis(false);
+              setTriangleAnimating(false);
+              triangleHasAnimated.current = false;
             }}
           >
             <Text style={styles.recalculateButtonText}>Update Data & Recalculate</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
       )}
 
       {/* Info text when conditions not met */}
@@ -1188,6 +1440,15 @@ export default function FitScoreScreen() {
           </Text>
         </View>
       )}
+
+      {/* FitCoach Slide Modal */}
+      <CoachModal
+        visible={showCoachModal}
+        onClose={() => { setShowCoachModal(false); setActiveSlideIndex(0); }}
+        coachSummary={coachSummary}
+        activeSlideIndex={activeSlideIndex}
+        setActiveSlideIndex={setActiveSlideIndex}
+      />
 
       {/* Enhanced Meal Modal */}
       <Modal
@@ -2562,6 +2823,18 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs / 2,
     textAlign: 'center',
   },
+  recoveryTapToView: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingTop: spacing.sm,
+  },
+  recoveryTapToViewText: {
+    ...typography.small,
+    color: colors.accent,
+    fontStyle: 'italic',
+    fontSize: 12,
+  },
   recoveryAnalysisTextBox: {
     flexDirection: 'row',
     backgroundColor: colors.surfaceMute + '20',
@@ -2609,11 +2882,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   // Coach Summary Styles
-  coachSummaryCard: {
+  coachPreviewCard: {
     backgroundColor: colors.surfaceMute + '20',
     borderRadius: radii.lg,
     padding: spacing.lg,
     marginTop: spacing.lg,
+    marginBottom: spacing.lg,
   },
   coachSummaryHeader: {
     flexDirection: 'row',
@@ -2634,10 +2908,17 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
   },
-  coachSummaryText: {
+  coachPreviewText: {
     ...typography.body,
-    color: colors.textSecondary,
+    color: '#FFFFFF',
     lineHeight: 22,
+  },
+  coachPreviewCTA: {
+    ...typography.small,
+    color: colors.accent,
+    fontStyle: 'italic',
+    marginTop: spacing.md,
+    fontWeight: '500',
   },
   coachSummaryLoading: {
     flexDirection: 'row',
@@ -2653,6 +2934,167 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textMuted,
     fontStyle: 'italic',
+  },
+  // Coach Modal Styles
+  coachModalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  coachModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  coachModalSheet: {
+    height: MODAL_HEIGHT,
+    backgroundColor: '#0B1120',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  coachModalTopBar: {
+    alignItems: 'center',
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  coachDragHandle: {
+    width: 36,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#555',
+  },
+  coachModalHeader: {
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.md,
+  },
+  coachModalHeaderTitle: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  coachSlideScroll: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
+  },
+  coachSlideTapZones: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 80,
+    flexDirection: 'row',
+    zIndex: 10,
+  },
+  coachSlideTapLeft: {
+    flex: 1,
+  },
+  coachSlideTapRight: {
+    flex: 2,
+  },
+  coachSlideNumber: {
+    color: '#666',
+    marginBottom: spacing.md,
+    letterSpacing: 3,
+    textTransform: 'uppercase',
+    fontSize: 11,
+    fontWeight: '500',
+  },
+  coachContextStripWrap: {
+    alignSelf: 'flex-start',
+    marginBottom: spacing.lg,
+  },
+  coachContextStrip: {
+    color: colors.accent,
+    backgroundColor: colors.accent + '12',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+    borderRadius: 20,
+    fontSize: 12,
+    fontWeight: '500',
+    overflow: 'hidden',
+  },
+  coachSlideTitle: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 28,
+    marginBottom: spacing.sm,
+    letterSpacing: -0.5,
+  },
+  coachSlideDivider: {
+    width: 32,
+    height: 3,
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+    marginBottom: spacing.lg,
+  },
+  coachChipsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.xl,
+  },
+  coachChip: {
+    backgroundColor: colors.accent + '12',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: colors.accent + '25',
+  },
+  coachChipText: {
+    color: colors.accent,
+    fontWeight: '600',
+    fontSize: 12,
+    letterSpacing: 0.3,
+  },
+  coachSlideContent: {
+    color: 'rgba(255,255,255,0.88)',
+    lineHeight: 26,
+    fontSize: 16,
+    letterSpacing: 0.1,
+  },
+  coachCallContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: spacing.xl,
+    backgroundColor: colors.accent + '08',
+    borderRadius: radii.md,
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  coachCallAccent: {
+    width: 3,
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+    alignSelf: 'stretch',
+  },
+  coachCallText: {
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    lineHeight: 20,
+  },
+  coachDotsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingBottom: Platform.OS === 'ios' ? 44 : 24,
+    paddingTop: spacing.md,
+    gap: 8,
+  },
+  coachDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#333',
+  },
+  coachDotActive: {
+    backgroundColor: colors.accent,
+    width: 24,
   },
   // Time Picker Styles
   timePickerButton: {

@@ -308,7 +308,17 @@ export async function calculateFitScore(date?: string): Promise<FitScoreResponse
 }
 
 // Coach Summary Types
+export interface CoachSlide {
+  title: string;
+  chips: string[];
+  content: string;
+  coach_call: string;
+  context_strip?: string; // slide 1 only
+}
+
 export interface CoachSummaryResponse {
+  preview: string;
+  slides: CoachSlide[];
   fitCoachTake: string;
   tomorrowsOutlook: string;
   timestamp: string;
@@ -319,16 +329,24 @@ export interface CoachSummaryResponse {
  * Returns warm, supportive summary without raw numbers
  */
 export async function getCoachSummary(params: {
+  fitScore: number;
   recoveryZone: 'green' | 'yellow' | 'red';
   trainingZone: 'green' | 'yellow' | 'red';
   nutritionZone: 'green' | 'yellow' | 'red';
   fitScoreZone: 'green' | 'yellow' | 'red';
   hadTraining: boolean;
   hadMeals: boolean;
+  mealsCount?: number;
+  sessionsCount?: number;
+  recoveryScore?: number;
   sleepScore?: number;
   sleepHours?: number;
   hrv?: number;
   hrvBaseline?: number;
+  strainScore?: number;
+  recoveryBreakdownScore?: number;
+  trainingBreakdownScore?: number;
+  nutritionBreakdownScore?: number;
 }): Promise<CoachSummaryResponse> {
   console.log(`[API] Getting coach summary`);
 

@@ -22,9 +22,9 @@ import axios from "axios";
 import { getCurrentUserId, requireAdmin } from './authMiddleware';
 import { requireJWTAuth, jwtAuthMiddleware } from './jwtAuth';
 import { db } from './db';
-import { users, fitScores, userGoals } from '@shared/schema';
+import { users, fitScores, userGoals, fitlookDaily } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -2205,38 +2205,66 @@ ${trainingTip}. ${nutritionTip}.`;
 
   // POST /api/goals - Create new goal
   app.post('/api/goals', requireJWTAuth, async (req, res) => {
-    console.log('[GOALS] Creating new goal');
+    console.log('[GOALS] Creating new goal, body:', JSON.stringify(req.body));
     try {
       const userId = getCurrentUserId(req);
       if (!userId) {
         return res.status(401).json({ error: 'Authentication required' });
       }
 
-      const { id, title, emoji, category, progress, streak, microhabits } = req.body;
+      const { title, emoji, category, progress, streak, microhabits } = req.body;
 
-      if (!id || !title || !emoji || !category || !microhabits) {
-        return res.status(400).json({ error: 'Missing required fields' });
+      if (!title || !category) {
+        console.log(`[GOALS] Validation failed - title: "${title}", category: "${category}"`);
+        return res.status(400).json({ error: `Missing required fields (title: ${!!title}, category: ${!!category})` });
       }
+
+      console.log(`[GOALS] Inserting goal for user ${userId}: title="${title}", category="${category}", emoji="${emoji}"`);
 
       const newGoal = await db
         .insert(userGoals)
         .values({
-          id,
           userId,
           title,
-          emoji,
+          emoji: emoji || null,
           category,
           progress: progress || 0,
           streak: streak || 0,
-          microhabits,
+          microhabits: typeof microhabits === 'string' ? microhabits : (microhabits ? JSON.stringify(microhabits) : null),
         })
         .returning();
 
-      console.log(`[GOALS] Created goal ${id} for user ${userId}`);
+      console.log(`[GOALS] Created goal ${newGoal[0].id} for user ${userId}`);
       res.json(newGoal[0]);
-    } catch (error) {
+    } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
-      console.error('[GOALS] Error creating goal:', message);
+      const detail = error?.detail || error?.constraint || '';
+      console.error('[GOALS] Error creating goal:', message, detail);
+
+      // If serial sequence is broken (from old timestamp IDs), try to fix it
+      if (message.includes('duplicate key') || message.includes('unique constraint')) {
+        try {
+          await db.execute(sql`SELECT setval('user_goals_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM user_goals))`);
+          console.log('[GOALS] Reset serial sequence, retrying insert...');
+          const retryGoal = await db
+            .insert(userGoals)
+            .values({
+              userId,
+              title,
+              emoji: emoji || null,
+              category,
+              progress: progress || 0,
+              streak: streak || 0,
+              microhabits: typeof microhabits === 'string' ? microhabits : (microhabits ? JSON.stringify(microhabits) : null),
+            })
+            .returning();
+          console.log(`[GOALS] Retry succeeded: goal ${retryGoal[0].id}`);
+          return res.json(retryGoal[0]);
+        } catch (retryError) {
+          console.error('[GOALS] Retry also failed:', retryError);
+        }
+      }
+
       res.status(500).json({ error: 'Failed to create goal', details: message });
     }
   });
@@ -4176,7 +4204,7 @@ ${trainingTip}. ${nutritionTip}.`;
           .where(eq(userGoals.userId, userId))
           .limit(1);
 
-        const fitnessGoal = userGoal?.fitnessGoal || undefined;
+        const fitnessGoal = userGoal?.title || undefined;
 
         // Calculate scores for each training session
         const sessionScores = trainingSessions.map((session: any) => {
@@ -4235,7 +4263,7 @@ ${trainingTip}. ${nutritionTip}.`;
 
       // Determine overall zone based on FitScore
       const getScoreZone = (score: number): 'green' | 'yellow' | 'red' => {
-        if (score >= 8) return 'green';
+        if (score >= 7) return 'green';
         if (score >= 4) return 'yellow';
         return 'red';
       };
@@ -4309,40 +4337,27 @@ ${trainingTip}. ${nutritionTip}.`;
       }
 
       const {
+        fitScore,
         recoveryZone,
         trainingZone,
         nutritionZone,
         fitScoreZone,
         hadTraining,
         hadMeals,
+        mealsCount,
+        sessionsCount,
+        recoveryScore,
         sleepHours,
         sleepScore,
         hrv,
         hrvBaseline,
+        strainScore,
+        recoveryBreakdownScore,
+        trainingBreakdownScore,
+        nutritionBreakdownScore,
       } = req.body;
 
-      console.log(`[COACH SUMMARY] Generating summary for user: ${userId}`);
-
-      // Determine sleep quality based on sleep score
-      let sleepQuality: 'good' | 'moderate' | 'poor' = 'moderate';
-      if (sleepScore !== undefined && sleepScore !== null) {
-        if (sleepScore >= 70) sleepQuality = 'good';
-        else if (sleepScore >= 50) sleepQuality = 'moderate';
-        else sleepQuality = 'poor';
-      } else if (sleepHours !== undefined && sleepHours !== null) {
-        if (sleepHours >= 7) sleepQuality = 'good';
-        else if (sleepHours >= 5.5) sleepQuality = 'moderate';
-        else sleepQuality = 'poor';
-      }
-
-      // Determine HRV trend
-      let hrvTrend: 'above_baseline' | 'near_baseline' | 'below_baseline' = 'near_baseline';
-      if (hrv !== undefined && hrv !== null && hrvBaseline !== undefined && hrvBaseline !== null) {
-        const ratio = hrv / hrvBaseline;
-        if (ratio >= 1.1) hrvTrend = 'above_baseline';
-        else if (ratio <= 0.9) hrvTrend = 'below_baseline';
-        else hrvTrend = 'near_baseline';
-      }
+      console.log(`[COACH SUMMARY] Generating summary for user: ${userId}, fitScore: ${fitScore}`);
 
       // Get user's fitness goal
       const [userGoal] = await db
@@ -4352,20 +4367,32 @@ ${trainingTip}. ${nutritionTip}.`;
         .limit(1);
 
       const summary = await openAIService.generateDailySummary({
+        fitScore: fitScore || 5.0,
         recoveryZone: recoveryZone || 'yellow',
         trainingZone: trainingZone || 'yellow',
         nutritionZone: nutritionZone || 'yellow',
         fitScoreZone: fitScoreZone || 'yellow',
         hadTraining: hadTraining ?? false,
         hadMeals: hadMeals ?? false,
-        sleepQuality,
-        hrvTrend,
-        userGoal: userGoal?.fitnessGoal || undefined,
+        mealsCount,
+        sessionsCount,
+        recoveryScore,
+        sleepHours,
+        sleepScore,
+        hrv,
+        hrvBaseline,
+        strainScore,
+        userGoal: userGoal?.title || undefined,
+        recoveryBreakdownScore,
+        trainingBreakdownScore,
+        nutritionBreakdownScore,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);
 
       res.json({
+        preview: summary.preview,
+        slides: summary.slides,
         fitCoachTake: summary.fitCoachTake,
         tomorrowsOutlook: summary.tomorrowsOutlook,
         timestamp: new Date().toISOString(),
@@ -4378,6 +4405,178 @@ ${trainingTip}. ${nutritionTip}.`;
         error: 'Failed to generate coach summary',
         details: message
       });
+    }
+  });
+
+  // ==========================================
+  // FitLook Endpoints
+  // ==========================================
+
+  // GET /api/fitlook/today — Fetch or auto-generate today's FitLook
+  app.get('/api/fitlook/today', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const todayLocal = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+
+      // Check cache first
+      const existing = await storage.getFitlookByUserAndDate(userId, todayLocal);
+      if (existing) {
+        console.log(`[FITLOOK] Serving cached FitLook for ${userId} date=${todayLocal}`);
+        return res.json({
+          ...JSON.parse(existing.payloadJson),
+          cached: true,
+          created_at: existing.createdAt,
+        });
+      }
+
+      console.log(`[FITLOOK] Generating FitLook for user=${userId} date=${todayLocal}`);
+
+      // Gather inputs (all gracefully optional)
+      let recoveryPercent: number | undefined;
+      let sleepHours: number | undefined;
+      let hrv: number | undefined;
+      let strainScore: number | undefined;
+
+      try {
+        const whoopToday = await whoopApiService.getTodaysData(userId);
+        recoveryPercent = whoopToday?.recovery_score ?? undefined;
+        sleepHours = whoopToday?.sleep_hours ?? whoopToday?.sleepHours ?? undefined;
+        hrv = whoopToday?.hrv ?? undefined;
+        strainScore = whoopToday?.strain ?? undefined;
+      } catch (e) {
+        console.log('[FITLOOK] WHOOP data not available:', (e as Error).message);
+      }
+
+      // Yesterday's FitScore
+      const yesterday = DateTime.now().setZone('Europe/Zurich').minus({ days: 1 }).toISODate()!;
+      let yesterdayFitScore: number | undefined;
+      let yesterdayBreakdown: { recovery?: number; training?: number; nutrition?: number } | undefined;
+      try {
+        const [ys] = await db.select().from(fitScores)
+          .where(and(eq(fitScores.userId, userId), eq(fitScores.date, yesterday)))
+          .limit(1);
+        if (ys) yesterdayFitScore = ys.score;
+      } catch { /* graceful */ }
+
+      // 3-day FitScore trend
+      let fitScoreTrend3d: number[] | undefined;
+      try {
+        const recentScores = await db.select({ score: fitScores.score })
+          .from(fitScores)
+          .where(eq(fitScores.userId, userId))
+          .orderBy(desc(fitScores.date))
+          .limit(3);
+        if (recentScores.length >= 2) {
+          fitScoreTrend3d = recentScores.map(r => r.score);
+        }
+      } catch { /* graceful */ }
+
+      // Today's planned training from calendar
+      let plannedTraining: string | undefined;
+      try {
+        const calendars = await storage.getUserCalendars(userId);
+        const activeUrls = calendars.filter(c => c.isActive).map(c => c.calendarUrl);
+        const zurichNow = DateTime.now().setZone('Europe/Zurich');
+        const todayStart = zurichNow.startOf('day');
+        const todayEnd = zurichNow.endOf('day');
+
+        for (const url of activeUrls) {
+          try {
+            const resp = await fetch(url);
+            if (!resp.ok) continue;
+            const icsData = await resp.text();
+            const parsedCal = ical.parseICS(icsData);
+            Object.keys(parsedCal).forEach(key => {
+              const event = parsedCal[key];
+              if (event.type === 'VEVENT' && event.start && event.summary) {
+                const eventStart = DateTime.fromJSDate(new Date(event.start)).setZone('Europe/Zurich');
+                if (eventStart >= todayStart && eventStart <= todayEnd) {
+                  // Check if training-related
+                  const title = event.summary.toLowerCase();
+                  if (/train|gym|run|workout|swim|yoga|sport|floorball|strength|cardio|session/i.test(title)) {
+                    plannedTraining = event.summary;
+                  }
+                }
+              }
+            });
+          } catch { /* skip failed calendar */ }
+        }
+      } catch { /* graceful */ }
+
+      // User goal
+      let userGoalTitle: string | undefined;
+      try {
+        const [goal] = await db.select().from(userGoals)
+          .where(eq(userGoals.userId, userId))
+          .limit(1);
+        if (goal) userGoalTitle = goal.title;
+      } catch { /* graceful */ }
+
+      // Injury notes from recent training comments
+      let injuryNotes: string | undefined;
+      try {
+        const recentTraining = await storage.getTrainingDataByUserAndDate(userId, yesterday);
+        const notes = recentTraining
+          .filter(t => t.comment && /injur|pain|sore|strain|hurt/i.test(t.comment!))
+          .map(t => t.comment)
+          .join('; ');
+        if (notes) injuryNotes = notes;
+      } catch { /* graceful */ }
+
+      // Generate via AI
+      const payload = await openAIService.generateFitLook({
+        dateLocal: todayLocal,
+        recoveryPercent,
+        sleepHours,
+        hrv,
+        strainScore,
+        yesterdayFitScore,
+        yesterdayBreakdown,
+        fitScoreTrend3d,
+        plannedTraining,
+        userGoalTitle,
+        injuryNotes,
+      });
+
+      // Store immutably
+      const record = await storage.createFitlook({
+        userId,
+        dateLocal: todayLocal,
+        payloadJson: JSON.stringify(payload),
+      });
+
+      console.log(`[FITLOOK] Generated and stored for user=${userId} date=${todayLocal}`);
+      res.json({ ...payload, cached: false, created_at: record.createdAt });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITLOOK] Error:', message);
+      res.status(500).json({ error: 'Failed to generate FitLook', details: message });
+    }
+  });
+
+  // POST /api/fitlook/generate — Force regenerate (admin/debug)
+  app.post('/api/fitlook/generate', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const todayLocal = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+
+      // Delete existing for today
+      await storage.deleteFitlookByUserAndDate(userId, todayLocal);
+      console.log(`[FITLOOK] Force-regenerating for user=${userId} date=${todayLocal}`);
+
+      // Forward to GET handler logic by making internal request
+      // Simpler: just redirect
+      res.redirect(307, '/api/fitlook/today');
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITLOOK] Force-generate error:', message);
+      res.status(500).json({ error: 'Failed to regenerate FitLook', details: message });
     }
   });
 
