@@ -133,7 +133,6 @@ export class WhoopApiService {
         refresh_token: refreshToken,
         client_id: clientId,
         client_secret: clientSecret,
-        scope: 'offline'
       });
 
       const response = await axios.post('https://api.prod.whoop.com/oauth/oauth2/token', params, {

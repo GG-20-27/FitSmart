@@ -1,4 +1,4 @@
-import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily } from "@shared/schema";
+import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin } from "@shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 
@@ -37,6 +37,10 @@ export interface IStorage {
   getFitlookByUserAndDate(userId: string, dateLocal: string): Promise<FitlookDaily | undefined>;
   createFitlook(data: InsertFitlookDaily): Promise<FitlookDaily>;
   deleteFitlookByUserAndDate(userId: string, dateLocal: string): Promise<void>;
+
+  // Daily checkin operations
+  getCheckinByUserAndDate(userId: string, dateLocal: string): Promise<DailyCheckin | undefined>;
+  createCheckin(data: InsertDailyCheckin): Promise<DailyCheckin>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -195,6 +199,18 @@ export class DatabaseStorage implements IStorage {
   async deleteFitlookByUserAndDate(userId: string, dateLocal: string): Promise<void> {
     await db.delete(fitlookDaily)
       .where(and(eq(fitlookDaily.userId, userId), eq(fitlookDaily.dateLocal, dateLocal)));
+  }
+
+  // Daily checkin operations
+  async getCheckinByUserAndDate(userId: string, dateLocal: string): Promise<DailyCheckin | undefined> {
+    const [row] = await db.select().from(dailyCheckins)
+      .where(and(eq(dailyCheckins.userId, userId), eq(dailyCheckins.dateLocal, dateLocal)));
+    return row || undefined;
+  }
+
+  async createCheckin(data: InsertDailyCheckin): Promise<DailyCheckin> {
+    const [row] = await db.insert(dailyCheckins).values(data).returning();
+    return row;
   }
 }
 

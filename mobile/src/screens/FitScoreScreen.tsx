@@ -290,7 +290,7 @@ export default function FitScoreScreen() {
   // Training form state
   const [trainingType, setTrainingType] = useState('');
   const [trainingDurationHours, setTrainingDurationHours] = useState(0);
-  const [trainingDurationMinutes, setTrainingDurationMinutes] = useState(45);
+  const [trainingDurationMinutes, setTrainingDurationMinutes] = useState(40);
   const [showTrainingDurationPicker, setShowTrainingDurationPicker] = useState(false);
   const [trainingGoal, setTrainingGoal] = useState('');
   const [trainingIntensity, setTrainingIntensity] = useState('');
@@ -1064,6 +1064,7 @@ export default function FitScoreScreen() {
                     })()}
                     mode="countdown"
                     display="spinner"
+                    minuteInterval={10}
                     onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
                       if (selectedDate) {
                         setTrainingDurationHours(selectedDate.getHours());
@@ -1114,7 +1115,7 @@ export default function FitScoreScreen() {
                         <View style={styles.durationColumn}>
                           <Text style={styles.durationColumnLabel}>Minutes</Text>
                           <ScrollView style={styles.durationScrollView} showsVerticalScrollIndicator={false}>
-                            {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((min) => (
+                            {[0, 10, 20, 30, 40, 50].map((min) => (
                               <TouchableOpacity
                                 key={min}
                                 style={[
@@ -1525,6 +1526,7 @@ export default function FitScoreScreen() {
                     value={mealTime}
                     mode="time"
                     display="spinner"
+                    minuteInterval={10}
                     onChange={(event: DateTimePickerEvent, selectedTime?: Date) => {
                       if (selectedTime) {
                         setMealTime(selectedTime);
@@ -1551,6 +1553,7 @@ export default function FitScoreScreen() {
                       value={mealTime}
                       mode="time"
                       display="spinner"
+                      minuteInterval={10}
                       onChange={(event: DateTimePickerEvent, selectedTime?: Date) => {
                         setShowMealTimePicker(false);
                         if (selectedTime) {

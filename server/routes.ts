@@ -22,9 +22,9 @@ import axios from "axios";
 import { getCurrentUserId, requireAdmin } from './authMiddleware';
 import { requireJWTAuth, jwtAuthMiddleware } from './jwtAuth';
 import { db } from './db';
-import { users, fitScores, userGoals, fitlookDaily } from '@shared/schema';
+import { users, fitScores, userGoals, fitlookDaily, dailyCheckins } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, sql, and } from 'drizzle-orm';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -4366,6 +4366,14 @@ ${trainingTip}. ${nutritionTip}.`;
         .where(eq(userGoals.userId, userId))
         .limit(1);
 
+      // Get today's self-assessment feeling (if available)
+      const todayLocal = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+      let todayFeeling: string | undefined;
+      try {
+        const checkin = await storage.getCheckinByUserAndDate(userId, todayLocal);
+        if (checkin) todayFeeling = checkin.feeling;
+      } catch { /* graceful */ }
+
       const summary = await openAIService.generateDailySummary({
         fitScore: fitScore || 5.0,
         recoveryZone: recoveryZone || 'yellow',
@@ -4386,6 +4394,7 @@ ${trainingTip}. ${nutritionTip}.`;
         recoveryBreakdownScore,
         trainingBreakdownScore,
         nutritionBreakdownScore,
+        todayFeeling,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);
@@ -4412,6 +4421,64 @@ ${trainingTip}. ${nutritionTip}.`;
   // FitLook Endpoints
   // ==========================================
 
+  // ──── Daily Check-in ────
+
+  // GET /api/checkin/today — Fetch today's check-in if exists
+  app.get('/api/checkin/today', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const todayLocal = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+      const checkin = await storage.getCheckinByUserAndDate(userId, todayLocal);
+
+      if (checkin) {
+        return res.json({ feeling: checkin.feeling, date_local: checkin.dateLocal, exists: true });
+      }
+      return res.json({ exists: false });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[CHECKIN] GET error:', message);
+      res.status(500).json({ error: 'Failed to fetch check-in' });
+    }
+  });
+
+  // POST /api/checkin/today — Save today's check-in
+  app.post('/api/checkin/today', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const { feeling } = req.body;
+      if (!feeling || !['energized', 'steady', 'tired', 'stressed'].includes(feeling)) {
+        return res.status(400).json({ error: 'Invalid feeling. Must be: energized, steady, tired, stressed' });
+      }
+
+      const todayLocal = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+
+      // Check if already exists
+      const existing = await storage.getCheckinByUserAndDate(userId, todayLocal);
+      if (existing) {
+        return res.json({ feeling: existing.feeling, date_local: existing.dateLocal, exists: true });
+      }
+
+      const checkin = await storage.createCheckin({
+        userId,
+        dateLocal: todayLocal,
+        feeling,
+      });
+
+      console.log(`[CHECKIN] Saved for user=${userId} date=${todayLocal} feeling=${feeling}`);
+      res.json({ feeling: checkin.feeling, date_local: checkin.dateLocal, exists: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[CHECKIN] POST error:', message);
+      res.status(500).json({ error: 'Failed to save check-in' });
+    }
+  });
+
+  // ──── FitLook ────
+
   // GET /api/fitlook/today — Fetch or auto-generate today's FitLook
   app.get('/api/fitlook/today', requireJWTAuth, async (req, res) => {
     try {
@@ -4431,7 +4498,13 @@ ${trainingTip}. ${nutritionTip}.`;
         });
       }
 
-      console.log(`[FITLOOK] Generating FitLook for user=${userId} date=${todayLocal}`);
+      // Check if self-assessment exists for today
+      const checkin = await storage.getCheckinByUserAndDate(userId, todayLocal);
+      if (!checkin) {
+        return res.status(400).json({ error: 'Check-in required', needs_checkin: true });
+      }
+
+      console.log(`[FITLOOK] Generating FitLook for user=${userId} date=${todayLocal} feeling=${checkin.feeling}`);
 
       // Gather inputs (all gracefully optional)
       let recoveryPercent: number | undefined;
@@ -4528,6 +4601,7 @@ ${trainingTip}. ${nutritionTip}.`;
       // Generate via AI
       const payload = await openAIService.generateFitLook({
         dateLocal: todayLocal,
+        feeling: checkin.feeling,
         recoveryPercent,
         sleepHours,
         hrv,

@@ -1,42 +1,63 @@
 /**
- * FitLook API - Morning Outlook
+ * FitLook API - Morning Outlook + Daily Check-in
  */
 
 import { apiRequest } from './client';
 
-export interface FitLookPayload {
-  date_local: string;
-  hero_text: string;
-  readiness_tag: 'Green' | 'Yellow' | 'Red';
-  readiness_line: string;
-  todays_focus: string;
-  momentum_line: string;
-  cta_primary: string;
-  cta_secondary: string;
+// ──── Check-in ────
+
+export type Feeling = 'energized' | 'steady' | 'tired' | 'stressed';
+
+export interface CheckinResponse {
+  feeling?: Feeling;
+  date_local?: string;
+  exists: boolean;
 }
 
-export interface FitLookResponse extends FitLookPayload {
+/** Fetch today's check-in (if exists) */
+export async function getCheckinToday(): Promise<CheckinResponse> {
+  return apiRequest<CheckinResponse>('/api/checkin/today');
+}
+
+/** Save today's check-in feeling */
+export async function saveCheckin(feeling: Feeling): Promise<CheckinResponse> {
+  return apiRequest<CheckinResponse>('/api/checkin/today', {
+    method: 'POST',
+    body: JSON.stringify({ feeling }),
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+// ──── FitLook ────
+
+export interface FitLookSlide {
+  title: string;
+  chips: string[];
+  body: string;
+  focus_line: string;
+}
+
+export interface FitLookResponse {
+  date_local: string;
+  feeling: string;
+  slides: FitLookSlide[];
   cached: boolean;
   created_at: string;
+  needs_checkin?: boolean;
 }
 
-/**
- * Fetch today's FitLook (auto-generates if not cached)
- */
+/** Fetch today's FitLook (auto-generates if cached or check-in exists) */
 export async function getFitLookToday(): Promise<FitLookResponse> {
   console.log('[API] Fetching FitLook for today');
   const response = await apiRequest<FitLookResponse>('/api/fitlook/today');
-  console.log(`[API] FitLook received, cached=${response.cached}, tag=${response.readiness_tag}`);
+  console.log(`[API] FitLook received, cached=${response.cached}, slides=${response.slides?.length}`);
   return response;
 }
 
-/**
- * Force-regenerate today's FitLook
- */
+/** Force-regenerate today's FitLook */
 export async function regenerateFitLook(): Promise<FitLookResponse> {
   console.log('[API] Force-regenerating FitLook');
-  const response = await apiRequest<FitLookResponse>('/api/fitlook/generate', {
+  return apiRequest<FitLookResponse>('/api/fitlook/generate', {
     method: 'POST',
   });
-  return response;
 }

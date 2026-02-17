@@ -188,48 +188,71 @@ export interface DailySummaryResult {
 // FitLook Morning Outlook Prompt
 const FITLOOK_MORNING_OUTLOOK_PROMPT = `You are fitLookAi — a grounded, emotionally intelligent morning coach for the FitSmart app.
 
-Purpose: Deliver a short morning briefing that anchors the user's day. Inspirational but data-grounded. Not a metrics dashboard — an emotional primer.
+Purpose: Deliver a 3-slide morning briefing that anchors the user's day. Forward-looking, slightly inspirational but grounded, context-aware. Not a dashboard — an emotional primer.
 
 Tone: Warm intensity 6/10. Steady, clear, human. Like a trusted friend who checked your numbers and tells you plainly what matters today. No corporate motivation. No therapy tone. No questions anywhere.
 
-BANNED PHRASES: "It's all about the journey", "Small steps", "Keep pushing", "You're doing great", "Listen to your body", "Trust the process", "Remember to", "Don't forget", "linchpin", "fortify", "trajectory", "calibration", "measurably", "paradigm", "synergy", "optimize", "leverage"
+BANNED PHRASES: "It's all about the journey", "Small steps", "Keep pushing", "You're doing great", "Listen to your body", "Trust the process", "Remember to", "Don't forget", "linchpin", "fortify", "trajectory", "calibration", "measurably", "paradigm", "synergy", "optimize", "leverage", "harness"
 
-READINESS TAG RULES:
-- Green: Recovery >= 67%. Lead with confidence and intent.
-- Yellow: Recovery 34-66%. Lead with awareness and smart pacing.
-- Red: Recovery <= 33%. Lead with honesty and self-compassion. Not defeatist — practical.
-- If recovery data is missing, default to Yellow and note that data was limited.
+SELF-ASSESSMENT RECONCILIATION:
+The user has reported how they feel today (energized/steady/tired/stressed). This is subjective. WHOOP data is objective.
+- If they match (green recovery + energized), reinforce confidently.
+- If they conflict (green recovery + tired), acknowledge BOTH honestly: "Your numbers look good but you're feeling off — that's real too."
+- Never dismiss the self-assessment. Never dismiss the data. Reconcile them.
 
-HERO TEXT STRUCTURE (3-5 sentences, under 80 words):
-1. Anchor the day (readiness + emotional framing)
-2. Reference yesterday briefly (one clause, not a paragraph)
-3. Mention today's training context (planned session or suggestion)
-4. Tie to user goal (if available)
-5. End with motivating but grounded line
-
-OUTPUT: Return valid JSON with exactly these fields:
+OUTPUT: Return valid JSON with exactly this structure:
 {
-  "date_local": "YYYY-MM-DD",
-  "hero_text": "3-5 sentences max, under 80 words",
-  "readiness_tag": "Green|Yellow|Red",
-  "readiness_line": "One sentence that translates readiness into a human feeling",
-  "todays_focus": "Short phrase, max 60 chars — the single priority for today",
-  "momentum_line": "Max 60 chars, only if 3-day trend is meaningfully up or down. Empty string if flat or insufficient data",
-  "cta_primary": "Short action label, max 20 chars",
-  "cta_secondary": "Short action label, max 20 chars"
+  "slides": [
+    {
+      "title": "Today's Readiness",
+      "chips": ["Recovery 73%", "Sleep 8.2h", "Feeling: Tired"],
+      "body": "2-4 short sentences. Use WHOOP recovery + sleep/HRV if available. Include the user's self-assessment feeling and reconcile it with metrics. Frame what kind of day it is (push / controlled / protect). Permission-based.",
+      "focus_line": "One practical direction line (max 70 chars)"
+    },
+    {
+      "title": "Yesterday's Takeaway",
+      "chips": ["FitScore 6.9", "Recovery 7.6", "Nutrition 6.5"],
+      "body": "2-4 short sentences. Reference yesterday's FitScore and sub-scores if available. Mention what worked and one miss/opportunity (nutrition/training/logging). Fair, no scolding.",
+      "focus_line": "One grounded takeaway (max 70 chars)"
+    },
+    {
+      "title": "Focus",
+      "chips": ["3-day: improving", "Goal: fluidity", "Risk: none"],
+      "body": "2-4 short sentences. Include 3-day momentum if available (improving/steady/slipping). Goal alignment if goal exists. Injury caution only if present.",
+      "focus_line": "Today's Focus: <short phrase>"
+    }
+  ]
 }
 
-RULES:
-- hero_text must NOT list metrics like a dashboard. Weave 1-2 numbers naturally into human language.
-- If planned training exists, reference it by name in hero_text or todays_focus.
-- If user has a goal, let it color the todays_focus but don't repeat it verbatim.
-- momentum_line must be empty string if there is no clear 3-day trend or fewer than 2 data points.
-- cta_primary should be the most impactful next action. cta_secondary is a softer alternative.
-- Be specific when you can (sleep hours, recovery zone, planned training title).
-- Give one clear actionable direction, not five.`;
+SLIDE 1 RULES (Today's Readiness):
+- Chips: Include recovery % if available, sleep hours if available, and "Feeling: <feeling>"
+- Readiness tag logic: Green >= 67% recovery, Yellow 34-66%, Red <= 33%
+- If recovery missing, default to the feeling to guide tone
+- body should reconcile metrics with self-assessment feeling
+- focus_line: one practical direction for the day
+
+SLIDE 2 RULES (Yesterday's Takeaway):
+- Chips: Include yesterday's FitScore and available sub-scores (Recovery/Training/Nutrition)
+- If no yesterday data, say "No data from yesterday" and keep it brief
+- Mention what went well + one honest area to improve
+- No scolding, no questions
+
+SLIDE 3 RULES (Focus):
+- Chips: 3-day trend (improving/steady/slipping or "not enough data"), goal name if exists, risk/injury if exists else "Risk: none"
+- If planned training exists, mention it
+- focus_line MUST start with "Today's Focus: " followed by a short phrase
+
+GLOBAL RULES:
+- Each chip should be short (under 20 chars ideally)
+- Each body should be 2-4 sentences, human-readable, under 60 words
+- Each focus_line should be max 70 chars
+- Weave numbers naturally into sentences, don't list them
+- Be specific when you can (sleep hours, recovery %, planned training title)
+- Give clear actionable direction, not vague platitudes`;
 
 export interface FitLookGenerationInput {
   dateLocal: string;
+  feeling: string; // energized | steady | tired | stressed
   recoveryPercent?: number;
   sleepHours?: number;
   hrv?: number;
@@ -507,6 +530,7 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
     recoveryBreakdownScore?: number;
     trainingBreakdownScore?: number;
     nutritionBreakdownScore?: number;
+    todayFeeling?: string; // energized | steady | tired | stressed
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -560,6 +584,10 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
 
       if (params.userGoal) {
         contextParts.push(`User goal: ${params.userGoal}`);
+      }
+
+      if (params.todayFeeling) {
+        contextParts.push(`Morning self-assessment: feeling ${params.todayFeeling}`);
       }
 
       const userPrompt = `Generate the FitCoach daily summary with preview and 5 slides. FitScore is ${params.fitScore}/10.
@@ -679,11 +707,12 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
     }
 
     try {
-      console.log(`[OpenAI Service] Generating FitLook for ${input.dateLocal}`);
+      console.log(`[OpenAI Service] Generating FitLook for ${input.dateLocal}, feeling=${input.feeling}`);
 
       // Build context
       const parts: string[] = [];
       parts.push(`Date: ${input.dateLocal}`);
+      parts.push(`Self-assessment feeling: ${input.feeling}`);
 
       if (input.recoveryPercent != null) {
         const tag = input.recoveryPercent >= 67 ? 'Green' : input.recoveryPercent >= 34 ? 'Yellow' : 'Red';
@@ -704,7 +733,9 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       }
 
       if (input.fitScoreTrend3d && input.fitScoreTrend3d.length >= 2) {
-        parts.push(`FitScore trend (last 3 days, newest first): ${input.fitScoreTrend3d.join(', ')}`);
+        const trend = input.fitScoreTrend3d;
+        const direction = trend[0] > trend[trend.length - 1] ? 'improving' : trend[0] < trend[trend.length - 1] ? 'slipping' : 'steady';
+        parts.push(`FitScore trend (last 3 days, newest first): ${trend.join(', ')} (${direction})`);
       }
 
       if (input.plannedTraining) {
@@ -716,7 +747,7 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       if (input.userGoalTitle) parts.push(`User goal: ${input.userGoalTitle}`);
       if (input.injuryNotes) parts.push(`Injury/caution notes: ${input.injuryNotes}`);
 
-      const userPrompt = `Generate this morning's FitLook outlook.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required fields: date_local, hero_text, readiness_tag, readiness_line, todays_focus, momentum_line, cta_primary, cta_secondary.`;
+      const userPrompt = `Generate this morning's FitLook 3-slide briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required "slides" array (3 slides: Today's Readiness, Yesterday's Takeaway, Focus).`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -730,7 +761,7 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
             { role: 'system', content: FITLOOK_MORNING_OUTLOOK_PROMPT },
             { role: 'user', content: userPrompt }
           ],
-          max_completion_tokens: 500,
+          max_completion_tokens: 800,
           temperature: 0.8,
           response_format: { type: 'json_object' }
         })
@@ -750,53 +781,77 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
 
       const parsed = JSON.parse(content);
 
-      // Validate required fields
-      if (!parsed.hero_text || parsed.hero_text.length < 20) {
-        throw new Error('Invalid hero_text in FitLook response');
+      // Validate slides array
+      if (!parsed.slides || !Array.isArray(parsed.slides) || parsed.slides.length !== 3) {
+        throw new Error('Invalid slides structure in FitLook response');
       }
-      if (!['Green', 'Yellow', 'Red'].includes(parsed.readiness_tag)) {
-        // Infer from recovery if the tag is wrong
-        if (input.recoveryPercent != null) {
-          parsed.readiness_tag = input.recoveryPercent >= 67 ? 'Green' : input.recoveryPercent >= 34 ? 'Yellow' : 'Red';
-        } else {
-          parsed.readiness_tag = 'Yellow';
+
+      // Validate each slide has required fields
+      for (const slide of parsed.slides) {
+        if (!slide.title || !slide.body || !slide.focus_line) {
+          throw new Error('Slide missing required fields');
+        }
+        if (!Array.isArray(slide.chips)) {
+          slide.chips = [];
         }
       }
 
-      // Enforce date
-      parsed.date_local = input.dateLocal;
+      const payload: import('@shared/schema').FitLookPayload = {
+        date_local: input.dateLocal,
+        feeling: input.feeling,
+        slides: parsed.slides,
+      };
 
-      // Ensure all fields exist
-      parsed.readiness_line = parsed.readiness_line || 'Your body has something to say — check in with it.';
-      parsed.todays_focus = parsed.todays_focus || 'Stay present and move with intent';
-      parsed.momentum_line = parsed.momentum_line || '';
-      parsed.cta_primary = parsed.cta_primary || 'Log breakfast';
-      parsed.cta_secondary = parsed.cta_secondary || 'Review plan';
-
-      console.log(`[OpenAI Service] FitLook generated: readiness=${parsed.readiness_tag}`);
-      return parsed;
+      console.log(`[OpenAI Service] FitLook generated: 3 slides, feeling=${input.feeling}`);
+      return payload;
 
     } catch (error) {
       console.error('[OpenAI Service] FitLook generation failed:', error);
 
-      // Return sensible fallback
+      // Return sensible fallback with 3 slides
       const tag = input.recoveryPercent != null
         ? (input.recoveryPercent >= 67 ? 'Green' : input.recoveryPercent >= 34 ? 'Yellow' : 'Red')
         : 'Yellow';
 
       return {
         date_local: input.dateLocal,
-        hero_text: tag === 'Green'
-          ? 'Recovery looks solid today. Yesterday set the stage, and your body responded. Use this readiness — it won\'t always be here. Show up with intent and let the work speak.'
-          : tag === 'Red'
-          ? 'Recovery is lower than ideal. That\'s data, not a verdict. Today is about being smart — protect the gains you\'ve made and give your system what it needs to bounce back.'
-          : 'A steady day ahead. Recovery is in the middle ground — enough to work with, not enough to ignore. Be deliberate about where you spend energy today.',
-        readiness_tag: tag,
-        readiness_line: tag === 'Green' ? 'Your body showed up ready — now match it.' : tag === 'Red' ? 'Low recovery — be smart about today.' : 'Moderate readiness — pace yourself.',
-        todays_focus: 'Move with purpose',
-        momentum_line: '',
-        cta_primary: 'Log breakfast',
-        cta_secondary: 'Review plan',
+        feeling: input.feeling,
+        slides: [
+          {
+            title: "Today's Readiness",
+            chips: [
+              input.recoveryPercent != null ? `Recovery ${input.recoveryPercent}%` : 'Recovery: N/A',
+              input.sleepHours != null ? `Sleep ${input.sleepHours}h` : 'Sleep: N/A',
+              `Feeling: ${input.feeling}`,
+            ],
+            body: tag === 'Green'
+              ? `Recovery looks solid today. You're feeling ${input.feeling} — your body and mind are in this together. A good day to show up with intent.`
+              : tag === 'Red'
+              ? `Recovery is low. You said you're feeling ${input.feeling}. Today is about being smart — protect what you've built and give your system space.`
+              : `A steady day ahead. You're feeling ${input.feeling} and recovery is moderate. Be deliberate about where you spend energy.`,
+            focus_line: tag === 'Green' ? 'Push with purpose today' : tag === 'Red' ? 'Protect and recover today' : 'Pace yourself and stay intentional',
+          },
+          {
+            title: "Yesterday's Takeaway",
+            chips: [
+              input.yesterdayFitScore != null ? `FitScore ${input.yesterdayFitScore}` : 'No FitScore',
+            ],
+            body: input.yesterdayFitScore != null
+              ? `Yesterday scored ${input.yesterdayFitScore}/10. The foundation is there — keep building on what worked.`
+              : 'No data from yesterday to review. Today is a fresh start.',
+            focus_line: 'Build on what worked yesterday',
+          },
+          {
+            title: 'Focus',
+            chips: [
+              input.fitScoreTrend3d ? `3-day: ${input.fitScoreTrend3d[0] > input.fitScoreTrend3d[input.fitScoreTrend3d.length - 1] ? 'improving' : 'steady'}` : '3-day: not enough data',
+              input.userGoalTitle ? `Goal: ${input.userGoalTitle}` : 'No goal set',
+              input.injuryNotes ? 'Risk: caution' : 'Risk: none',
+            ],
+            body: 'Stay present and move with intent today. Each choice builds toward the bigger picture.',
+            focus_line: "Today's Focus: Move with purpose",
+          },
+        ],
       };
     }
   }
