@@ -16,6 +16,7 @@ import { db } from '../db';
 import { users, whoopData, chatSummaries, userGoals } from '@shared/schema';
 import { eq, desc } from 'drizzle-orm';
 import { whoopApiService } from '../whoopApiService';
+import { storage } from '../storage';
 import type { WhoopTodayResponse } from '@shared/schema';
 
 export interface ContextPack {
@@ -61,6 +62,9 @@ export interface ContextPack {
 
   // Trend notes (7-day comparison)
   trendNotes: string | null;
+
+  // User context (3-tier training profile)
+  userContextSummary: string | null;
 }
 
 /**
@@ -204,11 +208,40 @@ export async function buildContextPack(userId: string): Promise<ContextPack> {
       console.warn('[CTX] Failed to fetch goals:', error);
     }
 
-    // 7. Fetch next calendar event
+    // 7. Fetch user context (3-tier training profile)
+    let userContextSummary: string | null = null;
+    try {
+      const ctx = await storage.getUserContext(userId);
+      if (ctx) {
+        const emphasisStr = ctx.tier2Emphasis === 'Sport-Specific' && ctx.sportSpecific
+          ? `Sport-Specific (${ctx.sportSpecific})`
+          : ctx.tier2Emphasis;
+        const parts = [
+          `Training profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}`,
+          `Phase: ${ctx.tier2Phase}, emphasis=${emphasisStr}`,
+          `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
+        ];
+        if (ctx.injuryType && ctx.injuryType !== 'None') {
+          const injuryLabel = ctx.injuryType === 'Other' && ctx.injuryDescription
+            ? `Other (${ctx.injuryDescription})`
+            : ctx.injuryType;
+          const regionStr = ctx.bodyRegion ? `, region: ${ctx.bodyRegion}` : '';
+          const locationStr = ctx.injuryLocation ? ` at ${ctx.injuryLocation}` : '';
+          const rehabStr = ctx.rehabStage ? ` — rehab stage: ${ctx.rehabStage}` : '';
+          parts.push(`⚠️ Active injury/constraint: ${injuryLabel}${regionStr}${locationStr}${rehabStr}`);
+        }
+        userContextSummary = parts.join('\n');
+        console.log(`[CTX] User context loaded: ${ctx.tier1Goal}, phase=${ctx.tier2Phase}, injury=${ctx.injuryType ?? 'none'}`);
+      }
+    } catch (error) {
+      console.warn('[CTX] Failed to fetch user context:', error);
+    }
+
+    // 8. Fetch next calendar event
     let nextTraining: string | null = null;
     // TODO: Implement calendar integration once userCalendars is populated
 
-    // 8. Assemble context pack
+    // 9. Assemble context pack
     const contextPack: ContextPack = {
       date: new Date().toISOString().split('T')[0],
       recoveryScore: whoopMetrics?.recovery_score || null,
@@ -237,6 +270,7 @@ export async function buildContextPack(userId: string): Promise<ContextPack> {
       nextTraining,
       recentSummary,
       trendNotes,
+      userContextSummary,
     };
 
     console.log(`[CTX] ✅ Context pack built successfully`);

@@ -250,6 +250,90 @@ GLOBAL RULES:
 - Be specific when you can (sleep hours, recovery %, planned training title)
 - Give clear actionable direction, not vague platitudes`;
 
+const FITROAST_WEEKLY_PROMPT = `You are FitRoastAI — the most personality-driven voice in the FitSmart app.
+
+PERSONA:
+Bold, observant, slightly theatrical, sarcastic but intelligent. Like a brutally honest friend who still believes in you. Makes smart non-sports comparisons. Uses emojis sparingly but with intent. Never cruel. Never attacks identity. Roasts behavior, not the person.
+
+INTENSITY: 8.5/10. Stronger than any other persona.
+
+TONE RULES:
+- Roast the choices, not the human.
+- "You flirt with discipline." ✅  |  "You are lazy." ❌
+- NOT allowed: meme spam, childish humor, scolding, excessive cheerleading.
+
+BANNED PHRASES: "listen to your body", "trust the process", "small steps", "you're doing great", "keep pushing", "paradigm", "optimize", "synergy", "leverage", "harness", "calibrate"
+
+BANNED METAPHORS (never reuse these, they're overused):
+- WiFi signal
+- group project teammate
+- Monday motivation
+- "you showed up"
+- "the data doesn't lie"
+- "your body is a temple"
+
+FRESHNESS MANDATE — THIS IS NON-NEGOTIABLE:
+Every single roast must be wholly original. The system generates a new roast weekly and users will notice immediately if jokes or metaphors repeat. You MUST:
+1. Pick a completely different comparison domain each week (e.g. one week: stock market, next: weather systems, next: restaurant reviews, next: film criticism, next: reality TV casting, next: wildlife documentary, etc.)
+2. Let the user's actual feelings data shape the emotional angle — if they reported "stressed" 3x, that's the comedic spine.
+3. Vary sentence structure. Some weeks punchy + short. Some weeks one slow-burn setup followed by a crisp punchline.
+4. Never open with the same type of sentence two generations in a row.
+5. The headline must be completely unique — it cannot sound like any generic fitness headline.
+
+EMOJI RULES:
+- Max 1 emoji per segment. Earn it. Don't decorate with it.
+- Place emoji at the END of the sentence, never mid-sentence.
+
+STRUCTURE — return exactly this JSON:
+{
+  "headline": "Punchy, original title for this specific week (5-8 words). Not generic. Based on the actual data.",
+  "segments": [
+    { "topic": "Recovery", "text": "1-2 sentences. Data-specific. Original comparison." },
+    { "topic": "Training", "text": "1-2 sentences. Reference actual session count. Be specific." },
+    { "topic": "Nutrition", "text": "1-2 sentences. If logged, find the gap. If not logged, roast the absence." },
+    { "topic": "Pattern", "text": "2-3 sentences. This is the smart one. Zoom out. What story does the whole week tell?" },
+    { "topic": "Final Challenge", "text": "2-3 sentences. Not soft. Not cheesy. Challenge with teeth. End on belief." }
+  ]
+}
+
+SEGMENT RULES:
+- Each segment = one punch. One idea. Short. Not a list.
+- Recovery: use actual % if available. No invented numbers.
+- Training: actual session count. Compare to what was theoretically possible.
+- Nutrition: if data missing, roast the mystery. Never hallucinate meals.
+- Pattern: the behavioral signature of the week. Make it feel like you've been watching.
+- Final Challenge: Cannot use "you've got this", "believe in yourself", "almost there", "next time". Must end with a direct challenge or consequence. Intensity: 9/10.
+
+INJURY / REHAB CONTEXT RULES (apply when user profile includes injury data):
+- If an active injury or post-surgery rehab stage is provided, weave it into the roast — it's one of the most loaded facts of the week.
+- Roast training choices relative to the rehab constraint: too hard = reckless; too light = suspicious overcaution; perfectly calibrated = rare and worth calling out with backhanded respect.
+- Reference the specific injury type and location (e.g. "post-surgery knee") rather than generic "injury" language — specificity makes it feel personal and observed.
+- If the rehab stage is early (Acute/Sub-acute), and training count is high, that's the irony to roast. If rehab stage is "Return to training" and load was light, call out the missed opportunity.
+- Never minimize rehab as a constraint — treat it as the dramatic backdrop of the whole week.
+
+If data is missing, roast the absence — do not fill gaps with invented facts.`;
+
+
+export interface FitRoastGenerationInput {
+  weekStart: string;
+  weekEnd: string;
+  avgFitScore?: number;
+  bestDayScore?: number;
+  worstDayScore?: number;
+  bestDay?: string;
+  worstDay?: string;
+  recoveryTrend?: string; // improving | steady | declining
+  avgRecovery?: number;
+  trainingCount?: number;
+  missedSessions?: number;
+  nutritionLogDays?: number;
+  totalDays?: number;
+  feelingsThisWeek?: string[]; // e.g. ['energized', 'tired', 'stressed']
+  userGoal?: string;
+  injuryNotes?: string;
+  userContextSummary?: string; // pre-built from user_context table
+}
+
 export interface FitLookGenerationInput {
   dateLocal: string;
   feeling: string; // energized | steady | tired | stressed
@@ -267,6 +351,7 @@ export interface FitLookGenerationInput {
   plannedTraining?: string;
   userGoalTitle?: string;
   injuryNotes?: string;
+  userContextSummary?: string; // pre-built from user_context table
 }
 
 export class OpenAIService {
@@ -531,6 +616,7 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
     trainingBreakdownScore?: number;
     nutritionBreakdownScore?: number;
     todayFeeling?: string; // energized | steady | tired | stressed
+    userContextSummary?: string; // pre-built from user_context table
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -588,6 +674,10 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
 
       if (params.todayFeeling) {
         contextParts.push(`Morning self-assessment: feeling ${params.todayFeeling}`);
+      }
+
+      if (params.userContextSummary) {
+        contextParts.push(params.userContextSummary);
       }
 
       const userPrompt = `Generate the FitCoach daily summary with preview and 5 slides. FitScore is ${params.fitScore}/10.
@@ -746,6 +836,7 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
 
       if (input.userGoalTitle) parts.push(`User goal: ${input.userGoalTitle}`);
       if (input.injuryNotes) parts.push(`Injury/caution notes: ${input.injuryNotes}`);
+      if (input.userContextSummary) parts.push(input.userContextSummary);
 
       const userPrompt = `Generate this morning's FitLook 3-slide briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required "slides" array (3 slides: Today's Readiness, Yesterday's Takeaway, Focus).`;
 
@@ -850,6 +941,148 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
             ],
             body: 'Stay present and move with intent today. Each choice builds toward the bigger picture.',
             focus_line: "Today's Focus: Move with purpose",
+          },
+        ],
+      };
+    }
+  }
+
+  async generateFitRoast(input: FitRoastGenerationInput): Promise<import('@shared/schema').FitRoastPayload> {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    try {
+      console.log(`[OpenAI Service] Generating FitRoast week=${input.weekStart}–${input.weekEnd}`);
+
+      const parts: string[] = [];
+      parts.push(`Week: ${input.weekStart} to ${input.weekEnd}`);
+
+      if (input.avgFitScore != null) parts.push(`Average FitScore this week: ${input.avgFitScore}/10`);
+      if (input.bestDayScore != null && input.bestDay) parts.push(`Best day: ${input.bestDay} (${input.bestDayScore}/10)`);
+      if (input.worstDayScore != null && input.worstDay) parts.push(`Worst day: ${input.worstDay} (${input.worstDayScore}/10)`);
+
+      if (input.avgRecovery != null) parts.push(`Average recovery: ${input.avgRecovery}%`);
+      if (input.recoveryTrend) parts.push(`Recovery trend: ${input.recoveryTrend}`);
+
+      if (input.trainingCount != null) parts.push(`Training sessions completed: ${input.trainingCount}`);
+      if (input.missedSessions != null && input.missedSessions > 0) parts.push(`Estimated missed sessions: ${input.missedSessions}`);
+
+      if (input.nutritionLogDays != null && input.totalDays != null) {
+        parts.push(`Nutrition logged: ${input.nutritionLogDays} out of ${input.totalDays} days`);
+      } else if (input.nutritionLogDays == null) {
+        parts.push('Nutrition logging: unknown — meals not logged consistently');
+      }
+
+      if (input.feelingsThisWeek && input.feelingsThisWeek.length > 0) {
+        const feelingCounts: Record<string, number> = {};
+        for (const f of input.feelingsThisWeek) feelingCounts[f] = (feelingCounts[f] || 0) + 1;
+        const summary = Object.entries(feelingCounts).map(([f, c]) => `${f} (${c}x)`).join(', ');
+        parts.push(`Self-reported feelings this week: ${summary}`);
+      }
+
+      if (input.userGoal) parts.push(`User goal: ${input.userGoal}`);
+      if (input.injuryNotes) parts.push(`Injury/caution notes: ${input.injuryNotes}`);
+      if (input.userContextSummary) parts.push(input.userContextSummary);
+
+      // Derive a style seed so each week gets a distinctly different creative angle
+      const weekNum = Math.ceil(new Date(input.weekEnd).getDate() / 7) + new Date(input.weekEnd).getMonth() * 4;
+      const styleSeeds = [
+        'Use film criticism as your comparison domain this roast.',
+        'Use restaurant reviews as your comparison domain this roast.',
+        'Use weather forecasting as your comparison domain this roast.',
+        'Use stock market analysis as your comparison domain this roast.',
+        'Use a wildlife documentary narrator voice as your comparison domain.',
+        'Use reality TV casting notes as your comparison domain.',
+        'Use product launch press releases as your comparison domain.',
+        'Use travel reviews as your comparison domain.',
+        'Use academic peer review language as your comparison domain.',
+        'Use sports commentary from a sport unrelated to fitness as your comparison domain.',
+        'Use a property listing description as your comparison domain.',
+        'Use a Michelin star chef critique as your comparison domain.',
+      ];
+      const styleSeed = styleSeeds[weekNum % styleSeeds.length];
+
+      const feelingSignature = input.feelingsThisWeek && input.feelingsThisWeek.length > 0
+        ? `The dominant emotional signature this week: ${input.feelingsThisWeek.join(', ')}. Let this color the tone.`
+        : '';
+
+      const userPrompt = `Generate this week's FitRoast. Week ending ${input.weekEnd}.\n\nCreative direction: ${styleSeed} ${feelingSignature}\n\nWeekly data:\n${parts.join('\n')}\n\nIMPORTANT: This roast must feel completely unlike any previous generation. The headline must reflect the specific data of this week, not a generic fitness line. Return JSON only with "headline" and "segments" (exactly 5 segments: Recovery, Training, Nutrition, Pattern, Final Challenge).`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.textModel,
+          messages: [
+            { role: 'system', content: FITROAST_WEEKLY_PROMPT },
+            { role: 'user', content: userPrompt },
+          ],
+          max_completion_tokens: 700,
+          temperature: 1.0,
+          response_format: { type: 'json_object' },
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI API error: ${response.status} ${errorText}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) throw new Error('No content in OpenAI response');
+
+      const parsed = JSON.parse(content);
+
+      if (!parsed.headline || !Array.isArray(parsed.segments) || parsed.segments.length < 3) {
+        throw new Error('Invalid FitRoast structure in response');
+      }
+
+      return {
+        week_start: input.weekStart,
+        week_end: input.weekEnd,
+        headline: parsed.headline,
+        segments: parsed.segments,
+      };
+
+    } catch (error) {
+      console.error('[OpenAI Service] FitRoast generation failed:', error);
+
+      // Fallback roast
+      return {
+        week_start: input.weekStart,
+        week_end: input.weekEnd,
+        headline: 'A Week of Bold Intentions',
+        segments: [
+          {
+            topic: 'Recovery',
+            text: input.avgRecovery != null
+              ? `Average recovery of ${input.avgRecovery}% — your body is doing its part. Whether you matched the energy is a different question. 🔍`
+              : 'Recovery data decided to take the week off too. Fitting. 📵',
+          },
+          {
+            topic: 'Training',
+            text: input.trainingCount != null
+              ? `${input.trainingCount} session${input.trainingCount !== 1 ? 's' : ''} logged. The gym exists whether you show up or not. This week you showed up — noted.`
+              : 'Training this week remains a mystery. Even you might not know the full story.',
+          },
+          {
+            topic: 'Nutrition',
+            text: input.nutritionLogDays != null && input.totalDays != null
+              ? `Nutrition logged ${input.nutritionLogDays}/${input.totalDays} days. Selective memory is a diet plan, technically. 🍽️`
+              : 'The meals happened. Whether the app knows about them is a philosophical question.',
+          },
+          {
+            topic: 'Pattern',
+            text: 'The data tells a story of a person who knows what to do and is slowly, cautiously, deciding whether to fully commit. Progress is there. So is the gap between possible and actual.',
+          },
+          {
+            topic: 'Final Challenge',
+            text: "You don't need more information. You need a decision. Next week — one area, full send. Not a perfect week. A committed one. 🚀",
           },
         ],
       };

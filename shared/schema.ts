@@ -134,6 +134,51 @@ export const dailyCheckins = pgTable("daily_checkins", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const fitroastWeekly = pgTable("fitroast_weekly", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  weekStart: text("week_start").notNull(), // YYYY-MM-DD Monday
+  weekEnd: text("week_end").notNull(),     // YYYY-MM-DD Sunday
+  payloadJson: text("payload_json").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// FitRoast segment shape
+export interface FitRoastSegment {
+  topic: string;
+  text: string;
+}
+
+// FitRoast payload shape
+export interface FitRoastPayload {
+  week_start: string;
+  week_end: string;
+  headline: string;
+  segments: FitRoastSegment[];
+}
+
+export const userContext = pgTable("user_context", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  // Tier 1
+  tier1Goal: text("tier1_goal").notNull().default('Balanced Performance'),
+  tier1Priority: text("tier1_priority").notNull().default('Balanced with Life'),
+  // Tier 2
+  tier2Phase: text("tier2_phase").notNull().default('Maintaining'),
+  tier2Emphasis: text("tier2_emphasis").notNull().default('General Fitness'),
+  injuryType: text("injury_type"),
+  injuryDescription: text("injury_description"), // free text when injuryType = "Other"
+  bodyRegion: text("body_region"),              // Upper body / Lower body / Spine + Core
+  injuryLocation: text("injury_location"),       // free text "Where exactly?"
+  rehabStage: text("rehab_stage"),
+  sportSpecific: text("sport_specific"),         // free text when tier2Emphasis = "Sport-Specific"
+  // Tier 3
+  tier3WeekLoad: text("tier3_week_load").notNull().default('Normal'),
+  tier3Stress: text("tier3_stress").notNull().default('Medium'),
+  tier3SleepExpectation: text("tier3_sleep_expectation").notNull().default('Uncertain'),
+});
+
 // FitLook slide shape
 export interface FitLookSlide {
   title: string;
@@ -201,6 +246,11 @@ export const insertFitScoreSchema = createInsertSchema(fitScores).omit({
   calculatedAt: true,
 });
 
+export const insertFitroastWeeklySchema = createInsertSchema(fitroastWeekly).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertFitlookDailySchema = createInsertSchema(fitlookDaily).omit({
   id: true,
   createdAt: true,
@@ -209,6 +259,11 @@ export const insertFitlookDailySchema = createInsertSchema(fitlookDaily).omit({
 export const insertDailyCheckinSchema = createInsertSchema(dailyCheckins).omit({
   id: true,
   createdAt: true,
+});
+
+export const insertUserContextSchema = createInsertSchema(userContext).omit({
+  id: true,
+  updatedAt: true,
 });
 
 // Type definitions
@@ -236,8 +291,11 @@ export type InsertFitlookDaily = z.infer<typeof insertFitlookDailySchema>;
 export type FitlookDaily = typeof fitlookDaily.$inferSelect;
 export type InsertDailyCheckin = z.infer<typeof insertDailyCheckinSchema>;
 export type DailyCheckin = typeof dailyCheckins.$inferSelect;
+export type InsertFitroastWeekly = z.infer<typeof insertFitroastWeeklySchema>;
+export type FitroastWeekly = typeof fitroastWeekly.$inferSelect;
 
-
+export type InsertUserContext = z.infer<typeof insertUserContextSchema>;
+export type UserContext = typeof userContext.$inferSelect;
 
 // WHOOP API response types
 export interface WhoopTodayResponse {

@@ -469,6 +469,11 @@ export function composeFitScorePrompt(
     systemPrompt += `\n\n## User's Current Goals & Habits (Real-Time from Database)\n${goalsContext}\n\n**IMPORTANT:** These are the user's ACTUAL current goals, loaded directly from the database in real-time. You have full access to see all their goals, including any newly created ones. Reference these goals naturally in your responses, celebrate completed habits, and provide context-aware suggestions. When the user asks about their goals, acknowledge what you see here.`;
   }
 
+  // Add training context (3-tier user profile)
+  if (ctx.userContextSummary) {
+    systemPrompt += `\n\n## Training Context & Constraints\n${ctx.userContextSummary}\n\n**IMPORTANT:** Always factor these constraints into your analysis. If an active injury is listed, acknowledge it when discussing training load and recovery. Tailor advice to the stated phase and goal.`;
+  }
+
   // === USER PROMPT ===
   let userPrompt = userMessage || 'Please analyze my FitScore for today based on the data provided.';
 
@@ -570,6 +575,11 @@ export function composePersonaPrompt(
   // Add goals context
   if (goalsContext) {
     systemPrompt += `\n\n## User's Current Goals & Habits (Real-Time from Database)\n${goalsContext}\n\n**IMPORTANT:** These are the user's ACTUAL current goals, loaded directly from the database in real-time. You have full access to see all their goals, including any newly created ones. Reference these goals naturally in your responses, celebrate completed habits, and provide context-aware suggestions based on their WHOOP data and training. When the user asks about their goals, acknowledge what you see here.`;
+  }
+
+  // Add training context (3-tier user profile)
+  if (ctx.userContextSummary) {
+    systemPrompt += `\n\n## Training Context & Constraints\n${ctx.userContextSummary}\n\n**IMPORTANT:** This is the user's current training profile — always use it when answering questions about their goals, phase, injury, or weekly approach. If an active injury is listed, proactively factor it into any training or recovery advice. Do NOT give advice that contradicts their stated rehab stage or injury constraint.`;
   }
 
   // === USER PROMPT ===

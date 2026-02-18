@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,9 +16,18 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, spacing, typography } from '../theme';
+import { colors, spacing, typography, radii } from '../theme';
 import { Card } from '../ui/components';
 import { apiRequest } from '../api/client';
+import {
+  getUserContext, saveUserContext,
+  type UserContext,
+  DEFAULTS as CTX_DEFAULTS,
+  TIER1_GOALS, TIER1_GOAL_DESCRIPTIONS, TIER1_PRIORITIES,
+  TIER2_PHASES, TIER2_EMPHASIS,
+  INJURY_TYPES, BODY_REGIONS, REHAB_STAGES,
+  TIER3_WEEK_LOADS, TIER3_STRESS_LEVELS, TIER3_SLEEP_EXPECTATIONS,
+} from '../api/context';
 
 type GoalCategory = 'Recovery' | 'Training' | 'Nutrition' | 'Mindset';
 
@@ -63,6 +72,41 @@ export default function GoalsScreen() {
   const [totalStreak, setTotalStreak] = useState(0);
   const [avgFitScore, setAvgFitScore] = useState(0);
   const [fitScoreDelta, setFitScoreDelta] = useState(0);
+
+  // User context state
+  const [context, setContext] = useState<UserContext>(CTX_DEFAULTS);
+
+  const loadContext = useCallback(async () => {
+    try {
+      const ctx = await getUserContext();
+      setContext(ctx);
+    } catch {
+      // keep defaults
+    }
+  }, []);
+
+  const updateContextField = useCallback(async (
+    field: keyof UserContext,
+    value: string | null,
+  ) => {
+    const updated = { ...context, [field]: value };
+    setContext(updated);
+    try {
+      await saveUserContext(updated);
+    } catch {
+      // silent fail
+    }
+  }, [context]);
+
+  const updateContextBatch = useCallback(async (updates: Partial<UserContext>) => {
+    const updated = { ...context, ...updates };
+    setContext(updated);
+    try {
+      await saveUserContext(updated);
+    } catch {
+      // silent fail
+    }
+  }, [context]);
 
   // Load goals from backend, fallback to local storage
   const loadGoals = useCallback(async () => {
@@ -175,7 +219,8 @@ export default function GoalsScreen() {
   useFocusEffect(
     useCallback(() => {
       loadGoals();
-    }, [loadGoals])
+      loadContext();
+    }, [loadGoals, loadContext])
   );
 
   // Toggle microhabit completion
@@ -317,6 +362,9 @@ export default function GoalsScreen() {
             <Text style={styles.actionButtonText}>Edit Goals</Text>
           </TouchableOpacity>
         </View>
+
+        {/* My Context — 3-tier panel */}
+        <ContextPanel context={context} onUpdate={updateContextField} onBatchUpdate={updateContextBatch} />
 
         {/* Goals List */}
         {goals.length === 0 ? (
@@ -866,6 +914,450 @@ function EditGoalModal({
     </Modal>
   );
 }
+
+// ─────────────────────────────────────────────────────────────
+// Context Panel — 3-tier collapsible section
+// ─────────────────────────────────────────────────────────────
+
+function ContextPanel({
+  context,
+  onUpdate,
+  onBatchUpdate,
+}: {
+  context: UserContext;
+  onUpdate: (field: keyof UserContext, value: string | null) => void;
+  onBatchUpdate: (updates: Partial<UserContext>) => void;
+}) {
+  const [expandedTier, setExpandedTier] = useState<1 | 2 | 3 | null>(null);
+  const toggle = (t: 1 | 2 | 3) => setExpandedTier(prev => (prev === t ? null : t));
+
+  const hasInjury = !!context.injuryType && context.injuryType !== 'None';
+
+  return (
+    <View style={ctxStyles.wrapper}>
+      <Text style={ctxStyles.sectionLabel}>MY CONTEXT</Text>
+      <Text style={ctxStyles.sectionSub}>Helps FitLook, FitRoast & FitCoach personalise your AI.</Text>
+
+      {/* Tier 1 — Identity */}
+      <ContextTier
+        label="Identity"
+        badge="Tier 1"
+        summary={context.tier1Goal}
+        expanded={expandedTier === 1}
+        onToggle={() => toggle(1)}
+      >
+        {/* Primary Goal — card chips with descriptions */}
+        <View style={ctxStyles.optGroup}>
+          <Text style={ctxStyles.optGroupLabel}>PRIMARY GOAL</Text>
+          <View style={ctxStyles.goalCards}>
+            {TIER1_GOALS.map(goal => {
+              const active = goal === context.tier1Goal;
+              return (
+                <TouchableOpacity
+                  key={goal}
+                  style={[ctxStyles.goalCard, active && ctxStyles.goalCardActive]}
+                  onPress={() => onUpdate('tier1Goal', goal)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[ctxStyles.goalCardTitle, active && ctxStyles.goalCardTitleActive]}>
+                    {goal}
+                  </Text>
+                  <Text style={[ctxStyles.goalCardDesc, active && ctxStyles.goalCardDescActive]}>
+                    {TIER1_GOAL_DESCRIPTIONS[goal]}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        <OptionGroup
+          label="FITNESS PRIORITY"
+          options={TIER1_PRIORITIES}
+          selected={context.tier1Priority}
+          onSelect={v => onUpdate('tier1Priority', v)}
+        />
+      </ContextTier>
+
+      {/* Tier 2 — Phase + Constraints */}
+      <ContextTier
+        label="Phase & Constraints"
+        badge="Tier 2"
+        summary={context.tier2Phase}
+        expanded={expandedTier === 2}
+        onToggle={() => toggle(2)}
+      >
+        <OptionGroup
+          label="TRAINING PHASE"
+          options={TIER2_PHASES}
+          selected={context.tier2Phase}
+          onSelect={v => onUpdate('tier2Phase', v)}
+        />
+
+        <OptionGroup
+          label="CURRENT EMPHASIS"
+          options={TIER2_EMPHASIS}
+          selected={context.tier2Emphasis}
+          onSelect={v => {
+            if (v !== 'Sport-Specific') {
+              onBatchUpdate({ tier2Emphasis: v, sportSpecific: null });
+            } else {
+              onUpdate('tier2Emphasis', v);
+            }
+          }}
+        />
+
+        {/* Sport-Specific conditional text input */}
+        {context.tier2Emphasis === 'Sport-Specific' && (
+          <View style={ctxStyles.subField}>
+            <Text style={ctxStyles.subFieldLabel}>Which sport?</Text>
+            <TextInput
+              style={ctxStyles.textInput}
+              placeholder="e.g. Basketball, Rowing..."
+              placeholderTextColor={colors.textMuted}
+              value={context.sportSpecific ?? ''}
+              onChangeText={t => onUpdate('sportSpecific', t.slice(0, 30) || null)}
+              maxLength={30}
+            />
+          </View>
+        )}
+
+        <OptionGroup
+          label="INJURY / CONSTRAINT"
+          options={INJURY_TYPES}
+          selected={context.injuryType ?? 'None'}
+          onSelect={v => {
+            const val = v === 'None' ? null : v;
+            if (!val) {
+              onBatchUpdate({
+                injuryType: null,
+                injuryDescription: null,
+                bodyRegion: null,
+                injuryLocation: null,
+                rehabStage: null,
+              });
+            } else if (v !== 'Other') {
+              onBatchUpdate({ injuryType: val, injuryDescription: null });
+            } else {
+              onUpdate('injuryType', val);
+            }
+          }}
+        />
+
+        {/* "Other" injury free-text */}
+        {context.injuryType === 'Other' && (
+          <View style={ctxStyles.subField}>
+            <Text style={ctxStyles.subFieldLabel}>Describe injury</Text>
+            <TextInput
+              style={ctxStyles.textInput}
+              placeholder="Brief description..."
+              placeholderTextColor={colors.textMuted}
+              value={context.injuryDescription ?? ''}
+              onChangeText={t => onUpdate('injuryDescription', t || null)}
+            />
+          </View>
+        )}
+
+        {/* Steps 2-4: only shown if injury ≠ None */}
+        {hasInjury && (
+          <>
+            <OptionGroup
+              label="BODY REGION"
+              options={BODY_REGIONS}
+              selected={context.bodyRegion ?? ''}
+              onSelect={v => onUpdate('bodyRegion', v)}
+            />
+
+            <View style={ctxStyles.subField}>
+              <Text style={ctxStyles.subFieldLabel}>Where exactly?</Text>
+              <TextInput
+                style={ctxStyles.textInput}
+                placeholder="Left ankle – lateral ligament"
+                placeholderTextColor={colors.textMuted}
+                value={context.injuryLocation ?? ''}
+                onChangeText={t => onUpdate('injuryLocation', t || null)}
+              />
+            </View>
+
+            <OptionGroup
+              label="REHAB STAGE"
+              options={REHAB_STAGES}
+              selected={context.rehabStage ?? ''}
+              onSelect={v => onUpdate('rehabStage', v)}
+            />
+          </>
+        )}
+      </ContextTier>
+
+      {/* Tier 3 — This Week */}
+      <ContextTier
+        label="This Week"
+        badge="Tier 3"
+        summary={context.tier3WeekLoad}
+        expanded={expandedTier === 3}
+        onToggle={() => toggle(3)}
+      >
+        <OptionGroup
+          label="WEEK LOAD"
+          options={TIER3_WEEK_LOADS}
+          selected={context.tier3WeekLoad}
+          onSelect={v => onUpdate('tier3WeekLoad', v)}
+        />
+        <OptionGroup
+          label="STRESS FORECAST"
+          options={TIER3_STRESS_LEVELS}
+          selected={context.tier3Stress}
+          onSelect={v => onUpdate('tier3Stress', v)}
+        />
+        <OptionGroup
+          label="SLEEP EXPECTATION"
+          options={TIER3_SLEEP_EXPECTATIONS}
+          selected={context.tier3SleepExpectation}
+          onSelect={v => onUpdate('tier3SleepExpectation', v)}
+        />
+      </ContextTier>
+    </View>
+  );
+}
+
+function ContextTier({
+  label, badge, summary, expanded, onToggle, children,
+}: {
+  label: string;
+  badge: string;
+  summary: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={ctxStyles.tier}>
+      <TouchableOpacity
+        style={ctxStyles.tierHeader}
+        onPress={onToggle}
+        activeOpacity={0.75}
+      >
+        <View style={ctxStyles.tierHeaderLeft}>
+          <View style={ctxStyles.tierBadge}>
+            <Text style={ctxStyles.tierBadgeText}>{badge}</Text>
+          </View>
+          <Text style={ctxStyles.tierLabel}>{label}</Text>
+        </View>
+        <View style={ctxStyles.tierHeaderRight}>
+          <Text style={ctxStyles.tierSummary} numberOfLines={1}>{summary}</Text>
+          <Ionicons
+            name={expanded ? 'chevron-up' : 'chevron-down'}
+            size={16}
+            color={colors.textMuted}
+          />
+        </View>
+      </TouchableOpacity>
+      {expanded && (
+        <View style={ctxStyles.tierBody}>
+          {children}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function OptionGroup({
+  label, options, selected, onSelect,
+}: {
+  label: string;
+  options: string[];
+  selected: string;
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <View style={ctxStyles.optGroup}>
+      <Text style={ctxStyles.optGroupLabel}>{label}</Text>
+      <View style={ctxStyles.optPills}>
+        {options.map(opt => {
+          const active = opt === selected;
+          return (
+            <TouchableOpacity
+              key={opt}
+              style={[ctxStyles.pill, active && ctxStyles.pillActive]}
+              onPress={() => onSelect(opt)}
+              activeOpacity={0.7}
+            >
+              <Text style={[ctxStyles.pillText, active && ctxStyles.pillTextActive]}>
+                {opt}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+const ctxStyles = StyleSheet.create({
+  wrapper: {
+    marginBottom: spacing.xl,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.accent,
+    letterSpacing: 1.5,
+    marginBottom: spacing.xs,
+  },
+  sectionSub: {
+    fontSize: 13,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+  },
+  tier: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute + '60',
+    marginBottom: spacing.sm,
+    overflow: 'hidden',
+  },
+  tierHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  tierHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flex: 1,
+  },
+  tierHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    maxWidth: '50%',
+  },
+  tierBadge: {
+    backgroundColor: colors.accent + '20',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 3,
+    borderRadius: radii.sm,
+  },
+  tierBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.accent,
+    letterSpacing: 0.5,
+  },
+  tierLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  tierSummary: {
+    fontSize: 13,
+    color: colors.textMuted,
+    flex: 1,
+    textAlign: 'right',
+  },
+  tierBody: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceMute + '50',
+    gap: spacing.md,
+  },
+  optGroup: {
+    marginTop: spacing.md,
+  },
+  optGroupLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 1,
+    marginBottom: spacing.sm,
+  },
+  optPills: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  pill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    backgroundColor: colors.surfaceMute + '50',
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+  },
+  pillActive: {
+    backgroundColor: colors.accent + '25',
+    borderColor: colors.accent,
+  },
+  pillText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  pillTextActive: {
+    color: colors.accent,
+    fontWeight: '700',
+  },
+  // Goal cards (Tier 1 primary goal — wider chips with descriptions)
+  goalCards: {
+    gap: spacing.xs,
+  },
+  goalCard: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceMute + '50',
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+  },
+  goalCardActive: {
+    backgroundColor: colors.accent + '18',
+    borderColor: colors.accent,
+  },
+  goalCardTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+    marginBottom: 2,
+  },
+  goalCardTitleActive: {
+    color: colors.accent,
+  },
+  goalCardDesc: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  goalCardDescActive: {
+    color: colors.accent + 'BB',
+  },
+  // Conditional sub-fields (text inputs beneath chip selections)
+  subField: {
+    marginTop: spacing.xs,
+  },
+  subFieldLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 1,
+    marginBottom: spacing.xs,
+  },
+  textInput: {
+    backgroundColor: colors.surfaceMute + '40',
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.textPrimary,
+  },
+});
+
+// ─────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {

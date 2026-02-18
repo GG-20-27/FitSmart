@@ -1,4 +1,4 @@
-import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin } from "@shared/schema";
+import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext } from "@shared/schema";
 import { db } from "./db";
 import { eq, and } from "drizzle-orm";
 
@@ -41,6 +41,15 @@ export interface IStorage {
   // Daily checkin operations
   getCheckinByUserAndDate(userId: string, dateLocal: string): Promise<DailyCheckin | undefined>;
   createCheckin(data: InsertDailyCheckin): Promise<DailyCheckin>;
+
+  // FitRoast operations
+  getFitroastByUserAndWeek(userId: string, weekEnd: string): Promise<FitroastWeekly | undefined>;
+  createFitroast(data: InsertFitroastWeekly): Promise<FitroastWeekly>;
+  deleteFitroastByUserAndWeek(userId: string, weekEnd: string): Promise<void>;
+
+  // User context operations
+  getUserContext(userId: string): Promise<UserContext | undefined>;
+  upsertUserContext(userId: string, data: Partial<InsertUserContext>): Promise<UserContext>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -211,6 +220,45 @@ export class DatabaseStorage implements IStorage {
   async createCheckin(data: InsertDailyCheckin): Promise<DailyCheckin> {
     const [row] = await db.insert(dailyCheckins).values(data).returning();
     return row;
+  }
+
+  // FitRoast operations
+  async getFitroastByUserAndWeek(userId: string, weekEnd: string): Promise<FitroastWeekly | undefined> {
+    const [row] = await db.select().from(fitroastWeekly)
+      .where(and(eq(fitroastWeekly.userId, userId), eq(fitroastWeekly.weekEnd, weekEnd)));
+    return row || undefined;
+  }
+
+  async createFitroast(data: InsertFitroastWeekly): Promise<FitroastWeekly> {
+    const [row] = await db.insert(fitroastWeekly).values(data).returning();
+    return row;
+  }
+
+  async deleteFitroastByUserAndWeek(userId: string, weekEnd: string): Promise<void> {
+    await db.delete(fitroastWeekly)
+      .where(and(eq(fitroastWeekly.userId, userId), eq(fitroastWeekly.weekEnd, weekEnd)));
+  }
+
+  // User context operations
+  async getUserContext(userId: string): Promise<UserContext | undefined> {
+    const [row] = await db.select().from(userContext).where(eq(userContext.userId, userId));
+    return row || undefined;
+  }
+
+  async upsertUserContext(userId: string, data: Partial<InsertUserContext>): Promise<UserContext> {
+    const existing = await this.getUserContext(userId);
+    if (existing) {
+      const [row] = await db.update(userContext)
+        .set({ ...data, updatedAt: new Date() })
+        .where(eq(userContext.userId, userId))
+        .returning();
+      return row;
+    } else {
+      const [row] = await db.insert(userContext)
+        .values({ userId, ...data } as InsertUserContext)
+        .returning();
+      return row;
+    }
   }
 }
 

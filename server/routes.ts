@@ -22,7 +22,7 @@ import axios from "axios";
 import { getCurrentUserId, requireAdmin } from './authMiddleware';
 import { requireJWTAuth, jwtAuthMiddleware } from './jwtAuth';
 import { db } from './db';
-import { users, fitScores, userGoals, fitlookDaily, dailyCheckins } from '@shared/schema';
+import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
 import { eq, desc, sql, and } from 'drizzle-orm';
 
@@ -4374,6 +4374,22 @@ ${trainingTip}. ${nutritionTip}.`;
         if (checkin) todayFeeling = checkin.feeling;
       } catch { /* graceful */ }
 
+      // Get user context for AI personalisation
+      let coachContextSummary: string | undefined;
+      try {
+        const ctx = await storage.getUserContext(userId);
+        if (ctx) {
+          const parts = [
+            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, phase=${ctx.tier2Phase}, emphasis=${ctx.tier2Emphasis}`,
+            `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
+          ];
+          if (ctx.injuryType && ctx.injuryType !== 'None') {
+            parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
+          }
+          coachContextSummary = parts.join('\n');
+        }
+      } catch { /* graceful */ }
+
       const summary = await openAIService.generateDailySummary({
         fitScore: fitScore || 5.0,
         recoveryZone: recoveryZone || 'yellow',
@@ -4395,6 +4411,7 @@ ${trainingTip}. ${nutritionTip}.`;
         trainingBreakdownScore,
         nutritionBreakdownScore,
         todayFeeling,
+        userContextSummary: coachContextSummary,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);
@@ -4598,6 +4615,22 @@ ${trainingTip}. ${nutritionTip}.`;
         if (notes) injuryNotes = notes;
       } catch { /* graceful */ }
 
+      // User context for AI personalisation
+      let fitlookContextSummary: string | undefined;
+      try {
+        const ctx = await storage.getUserContext(userId);
+        if (ctx) {
+          const parts = [
+            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, phase=${ctx.tier2Phase}, emphasis=${ctx.tier2Emphasis}`,
+            `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
+          ];
+          if (ctx.injuryType && ctx.injuryType !== 'None') {
+            parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
+          }
+          fitlookContextSummary = parts.join('\n');
+        }
+      } catch { /* graceful */ }
+
       // Generate via AI
       const payload = await openAIService.generateFitLook({
         dateLocal: todayLocal,
@@ -4612,6 +4645,7 @@ ${trainingTip}. ${nutritionTip}.`;
         plannedTraining,
         userGoalTitle,
         injuryNotes,
+        userContextSummary: fitlookContextSummary,
       });
 
       // Store immutably
@@ -4651,6 +4685,286 @@ ${trainingTip}. ${nutritionTip}.`;
       const message = error instanceof Error ? error.message : String(error);
       console.error('[FITLOOK] Force-generate error:', message);
       res.status(500).json({ error: 'Failed to regenerate FitLook', details: message });
+    }
+  });
+
+  // ──── FitRoast ────
+
+  // GET /api/fitroast/current — Fetch the most recent weekly roast (or generate if missing)
+  app.get('/api/fitroast/current', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const zurichNow = DateTime.now().setZone('Europe/Zurich');
+      // Week: Monday–Sunday
+      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      const weekStart = zurichNow.startOf('week').toISODate()!;
+
+      // Check cache
+      const existing = await storage.getFitroastByUserAndWeek(userId, weekEnd);
+      if (existing) {
+        console.log(`[FITROAST] Serving cached roast for user=${userId} week=${weekEnd}`);
+        return res.json({
+          ...JSON.parse(existing.payloadJson),
+          cached: true,
+          created_at: existing.createdAt,
+        });
+      }
+
+      // No roast for this week yet — return 404 so mobile knows to prompt generate
+      return res.status(404).json({ error: 'No roast for this week yet', needs_generate: true, week_start: weekStart, week_end: weekEnd });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITROAST] GET error:', message);
+      res.status(500).json({ error: 'Failed to fetch FitRoast', details: message });
+    }
+  });
+
+  // POST /api/fitroast/generate — Generate (or regenerate) this week's roast
+  app.post('/api/fitroast/generate', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const zurichNow = DateTime.now().setZone('Europe/Zurich');
+      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      const weekStart = zurichNow.startOf('week').toISODate()!;
+
+      // Delete existing roast for this week (allow regeneration)
+      await storage.deleteFitroastByUserAndWeek(userId, weekEnd);
+
+      console.log(`[FITROAST] Generating roast for user=${userId} week=${weekStart}–${weekEnd}`);
+
+      // Gather weekly data (all graceful)
+      let avgFitScore: number | undefined;
+      let bestDayScore: number | undefined;
+      let worstDayScore: number | undefined;
+      let bestDay: string | undefined;
+      let worstDay: string | undefined;
+      let avgRecovery: number | undefined;
+
+      try {
+        const weekScores = await db.select()
+          .from(fitScores)
+          .where(and(eq(fitScores.userId, userId), sql`date >= ${weekStart} AND date <= ${weekEnd}`))
+          .orderBy(desc(fitScores.score));
+
+        if (weekScores.length > 0) {
+          avgFitScore = Math.round((weekScores.reduce((s, r) => s + r.score, 0) / weekScores.length) * 10) / 10;
+          bestDayScore = weekScores[0].score;
+          bestDay = weekScores[0].date;
+          worstDayScore = weekScores[weekScores.length - 1].score;
+          worstDay = weekScores[weekScores.length - 1].date;
+        }
+      } catch { /* graceful */ }
+
+      // Recovery trend from WHOOP
+      let recoveryTrend: string | undefined;
+      try {
+        const whoopToday = await whoopApiService.getTodaysData(userId);
+        if (whoopToday?.recovery_score) {
+          avgRecovery = whoopToday.recovery_score;
+        }
+      } catch { /* graceful */ }
+
+      // Training count this week
+      let trainingCount: number | undefined;
+      try {
+        const days: string[] = [];
+        for (let i = 0; i < 7; i++) {
+          days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+        }
+        let count = 0;
+        for (const day of days) {
+          const sessions = await storage.getTrainingDataByUserAndDate(userId, day);
+          count += sessions.length;
+        }
+        trainingCount = count;
+      } catch { /* graceful */ }
+
+      // Nutrition log days this week
+      let nutritionLogDays: number | undefined;
+      try {
+        const days: string[] = [];
+        for (let i = 0; i < 7; i++) {
+          days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+        }
+        let loggedDays = 0;
+        for (const day of days) {
+          const meals = await storage.getMealsByUserAndDate(userId, day);
+          if (meals.length > 0) loggedDays++;
+        }
+        nutritionLogDays = loggedDays;
+      } catch { /* graceful */ }
+
+      // Feelings this week from daily checkins
+      let feelingsThisWeek: string[] | undefined;
+      try {
+        const days: string[] = [];
+        for (let i = 0; i < 7; i++) {
+          days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+        }
+        const feelings: string[] = [];
+        for (const day of days) {
+          const checkin = await storage.getCheckinByUserAndDate(userId, day);
+          if (checkin) feelings.push(checkin.feeling);
+        }
+        if (feelings.length > 0) feelingsThisWeek = feelings;
+      } catch { /* graceful */ }
+
+      // User goal
+      let userGoalTitle: string | undefined;
+      try {
+        const [goal] = await db.select().from(userGoals).where(eq(userGoals.userId, userId)).limit(1);
+        if (goal) userGoalTitle = goal.title;
+      } catch { /* graceful */ }
+
+      // Injury notes from this week's training
+      let injuryNotes: string | undefined;
+      try {
+        const days: string[] = [];
+        for (let i = 0; i < 7; i++) {
+          days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+        }
+        const notes: string[] = [];
+        for (const day of days) {
+          const sessions = await storage.getTrainingDataByUserAndDate(userId, day);
+          for (const s of sessions) {
+            if (s.comment && /injur|pain|sore|strain|hurt/i.test(s.comment)) {
+              notes.push(s.comment);
+            }
+          }
+        }
+        if (notes.length > 0) injuryNotes = notes.join('; ');
+      } catch { /* graceful */ }
+
+      // User context for AI personalisation
+      let roastContextSummary: string | undefined;
+      try {
+        const ctx = await storage.getUserContext(userId);
+        if (ctx) {
+          const parts = [
+            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, phase=${ctx.tier2Phase}, emphasis=${ctx.tier2Emphasis}`,
+            `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
+          ];
+          if (ctx.injuryType && ctx.injuryType !== 'None') {
+            parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
+          }
+          roastContextSummary = parts.join('\n');
+        }
+      } catch { /* graceful */ }
+
+      // Generate
+      const payload = await openAIService.generateFitRoast({
+        weekStart,
+        weekEnd,
+        avgFitScore,
+        bestDayScore,
+        worstDayScore,
+        bestDay,
+        worstDay,
+        recoveryTrend,
+        avgRecovery,
+        trainingCount,
+        nutritionLogDays,
+        totalDays: 7,
+        feelingsThisWeek,
+        userGoal: userGoalTitle,
+        injuryNotes,
+        userContextSummary: roastContextSummary,
+      });
+
+      // Store
+      const record = await storage.createFitroast({
+        userId,
+        weekStart,
+        weekEnd,
+        payloadJson: JSON.stringify(payload),
+      });
+
+      console.log(`[FITROAST] Generated and stored for user=${userId} week=${weekEnd}`);
+      res.json({ ...payload, cached: false, created_at: record.createdAt });
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITROAST] Generate error:', message);
+      res.status(500).json({ error: 'Failed to generate FitRoast', details: message });
+    }
+  });
+
+  // ──── User Context ────
+  app.get('/api/context', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const ctx = await storage.getUserContext(userId);
+
+      // Return existing or defaults
+      res.json(ctx ?? {
+        tier1Goal: 'Holistic balance',
+        tier1Priority: 'Balanced with life',
+        tier2Phase: 'Maintenance',
+        tier2Emphasis: 'General health',
+        injuryType: null,
+        injuryLocation: null,
+        rehabStage: null,
+        tier3WeekLoad: 'Normal',
+        tier3Stress: 'Medium',
+        tier3SleepExpectation: 'Uncertain',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[CONTEXT] GET error:', message);
+      res.status(500).json({ error: 'Failed to fetch user context' });
+    }
+  });
+
+  app.post('/api/context', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const body = req.body as Record<string, string | null>;
+
+      // Enforce clearing logic for dependent fields
+      const injuryType = body.injuryType ?? null;
+      const hasInjury = !!injuryType && injuryType !== 'None';
+
+      // If injury cleared, nullify all injury sub-fields
+      const injuryDescription = (hasInjury && injuryType === 'Other') ? (body.injuryDescription ?? null) : null;
+      const bodyRegion = hasInjury ? (body.bodyRegion ?? null) : null;
+      const injuryLocation = hasInjury ? (body.injuryLocation ?? null) : null;
+      const rehabStage = hasInjury ? (body.rehabStage ?? null) : null;
+
+      // If emphasis ≠ Sport-Specific, clear sportSpecific
+      const tier2Emphasis = body.tier2Emphasis ?? undefined;
+      const sportSpecific = tier2Emphasis === 'Sport-Specific' ? (body.sportSpecific ?? null) : null;
+
+      const data = {
+        ...(body.tier1Goal !== undefined && { tier1Goal: body.tier1Goal }),
+        ...(body.tier1Priority !== undefined && { tier1Priority: body.tier1Priority }),
+        ...(body.tier2Phase !== undefined && { tier2Phase: body.tier2Phase }),
+        ...(tier2Emphasis !== undefined && { tier2Emphasis }),
+        sportSpecific,
+        injuryType,
+        injuryDescription,
+        bodyRegion,
+        injuryLocation,
+        rehabStage,
+        ...(body.tier3WeekLoad !== undefined && { tier3WeekLoad: body.tier3WeekLoad }),
+        ...(body.tier3Stress !== undefined && { tier3Stress: body.tier3Stress }),
+        ...(body.tier3SleepExpectation !== undefined && { tier3SleepExpectation: body.tier3SleepExpectation }),
+      };
+
+      const ctx = await storage.upsertUserContext(userId, data);
+      res.json(ctx);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[CONTEXT] POST error:', message);
+      res.status(500).json({ error: 'Failed to save user context' });
     }
   });
 
