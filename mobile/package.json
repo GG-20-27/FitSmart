@@ -15,6 +15,7 @@
   "dependencies": {
     "@0no-co/graphql.web": "^1.2.0",
     "@expo/config": "^12.0.10",
+    "@expo/metro-config": "^54.0.14",
     "@expo/ngrok": "^4.1.0",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "8.4.4",

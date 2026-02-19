@@ -310,12 +310,13 @@ export default function FitScoreScreen() {
   const [showRecoveryAnalysis, setShowRecoveryAnalysis] = useState(false);
   const [triangleAnimating, setTriangleAnimating] = useState(false);
   const triangleHasAnimated = useRef(false);
+  const [showFormulaTooltip, setShowFormulaTooltip] = useState(false);
   const fitScoreFadeAnim = useRef(new Animated.Value(0)).current;
 
   const isToday = selectedDate.toDateString() === new Date().toDateString();
   const hasMeals = meals.length > 0;
   const hasTraining = trainingSessions.length > 0;
-  const canCalculate = hasMeals && hasTraining;
+  const canCalculate = hasMeals; // Training is optional — minimum is one meal
 
   // Load meals and training data when date changes
   useEffect(() => {
@@ -374,7 +375,7 @@ export default function FitScoreScreen() {
     if (!canCalculate) {
       Alert.alert(
         'Missing Data',
-        'Please log both meals and training data before calculating your FitScore.'
+        'Please log at least one meal before calculating your FitScore.'
       );
       return;
     }
@@ -1377,8 +1378,28 @@ export default function FitScoreScreen() {
             />
           </View>
 
-          {/* Formula Text */}
-          <Text style={styles.formulaText}>FitScore = avg(Recovery, Training, Nutrition)</Text>
+          {/* Formula Info — collapsible tooltip */}
+          <TouchableOpacity
+            style={styles.formulaToggle}
+            onPress={() => setShowFormulaTooltip(v => !v)}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="information-circle-outline" size={16} color={colors.textMuted} />
+            <Text style={styles.formulaToggleText}>How is this calculated?</Text>
+            <Ionicons
+              name={showFormulaTooltip ? 'chevron-up' : 'chevron-down'}
+              size={12}
+              color={colors.textMuted}
+            />
+          </TouchableOpacity>
+          {showFormulaTooltip && (
+            <View style={styles.formulaTooltip}>
+              <Text style={styles.formulaTooltipText}>
+                Recovery · Nutrition · Training — each scored 1–10, weighted by today's data quality. The triangle visualises balance across all three pillars.
+              </Text>
+            </View>
+          )}
 
           {/* All Green Celebration */}
           {fitScoreResult.allGreen && (
@@ -1395,7 +1416,7 @@ export default function FitScoreScreen() {
           >
             <View style={styles.coachSummaryHeader}>
               <View style={styles.coachIconContainer}>
-                <Ionicons name="chatbubble-ellipses" size={18} color={colors.accent} />
+                <Ionicons name="chatbubbles" size={18} color={colors.accent} />
               </View>
               <Text style={styles.coachSummaryTitle}>FitCoach</Text>
             </View>
@@ -1435,9 +1456,7 @@ export default function FitScoreScreen() {
         <View style={styles.infoBox}>
           <Ionicons name="information-circle-outline" size={20} color={colors.textMuted} />
           <Text style={styles.infoText}>
-            {!hasMeals
-              ? 'Add at least one meal to continue'
-              : 'Add training details to calculate your FitScore'}
+            {'Add at least one meal to calculate your FitScore'}
           </Text>
         </View>
       )}
@@ -2762,6 +2781,35 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
     marginBottom: spacing.lg,
+  },
+  formulaToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginBottom: spacing.sm,
+    alignSelf: 'center',
+  },
+  formulaToggleText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  formulaTooltip: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: 10,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    marginHorizontal: spacing.lg,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute + '40',
+  },
+  formulaTooltipText: {
+    ...typography.small,
+    color: colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 18,
+    fontSize: 12,
   },
   allGreenBanner: {
     backgroundColor: colors.success + '20',

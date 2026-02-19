@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, uuid, boolean, real } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, uuid, boolean, real, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -98,14 +98,14 @@ export const chatSummaries = pgTable("chat_summaries", {
 });
 
 export const userGoals = pgTable("user_goals", {
-  id: serial("id").primaryKey(),
+  id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
   title: text("title").notNull(),
   category: text("category").notNull(),
   progress: integer("progress").notNull().default(0),
   streak: integer("streak").notNull().default(0),
-  microhabits: text("microhabits"), // JSON string array
-  emoji: text("emoji"),
+  microhabits: jsonb("microhabits"),
+  emoji: text("emoji").notNull().default('🎯'),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

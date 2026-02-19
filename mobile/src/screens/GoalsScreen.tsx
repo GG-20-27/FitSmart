@@ -169,7 +169,7 @@ export default function GoalsScreen() {
           category: goal.category,
           progress: goal.progress,
           streak: goal.streak,
-          microhabits: JSON.stringify(goal.microhabits),
+          microhabits: goal.microhabits,
         }),
       });
       console.log(`[GOALS] Created goal on server: ${result.id}`);
@@ -191,7 +191,7 @@ export default function GoalsScreen() {
           category: goal.category,
           progress: goal.progress,
           streak: goal.streak,
-          microhabits: JSON.stringify(goal.microhabits),
+          microhabits: goal.microhabits,
         }),
       });
       console.log(`[GOALS] Updated goal on server: ${goal.id}`);
@@ -305,8 +305,8 @@ export default function GoalsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Your Goals</Text>
-          <Text style={styles.headerSubtitle}>Small wins build lasting performance.</Text>
+          <Text style={styles.headerTitle}>Goals & Context</Text>
+          <Text style={styles.headerSubtitle}>Personalise your performance assistant with your goals and current life reality.</Text>
         </View>
       </View>
 
@@ -325,6 +325,9 @@ export default function GoalsScreen() {
             </Text>
           </LinearGradient>
         )}
+
+        {/* My Context — 3-tier panel */}
+        <ContextPanel context={context} onUpdate={updateContextField} onBatchUpdate={updateContextBatch} />
 
         {/* Action Buttons */}
         <View style={styles.actionRow}>
@@ -362,9 +365,6 @@ export default function GoalsScreen() {
             <Text style={styles.actionButtonText}>Edit Goals</Text>
           </TouchableOpacity>
         </View>
-
-        {/* My Context — 3-tier panel */}
-        <ContextPanel context={context} onUpdate={updateContextField} onBatchUpdate={updateContextBatch} />
 
         {/* Goals List */}
         {goals.length === 0 ? (
@@ -414,8 +414,8 @@ export default function GoalsScreen() {
               style={styles.coachPanelButton}
               onPress={reviewWithCoach}
             >
+              <Ionicons name="chatbubbles-outline" size={18} color={colors.accent} />
               <Text style={styles.coachPanelButtonText}>Review Goals with FitCoach</Text>
-              <Ionicons name="arrow-forward" size={16} color={colors.accent} />
             </TouchableOpacity>
           </Card>
         )}
@@ -488,7 +488,7 @@ function GoalCard({
           <View style={styles.goalTitleRow}>
             <Text style={styles.goalEmoji}>{goal.emoji}</Text>
             <View style={styles.goalInfo}>
-              <Text style={styles.goalTitle}>{goal.title}</Text>
+              <Text style={styles.goalTitle} numberOfLines={expanded ? undefined : 2} ellipsizeMode="tail">{goal.title}</Text>
               <View style={styles.goalMeta}>
                 <View
                   style={[
@@ -689,17 +689,14 @@ function AddGoalModal({
                     key={cat}
                     style={[
                       styles.categoryButton,
-                      category === cat && {
-                        backgroundColor: categoryColors[cat] + '30',
-                        borderColor: categoryColors[cat],
-                      },
+                      category === cat && styles.categoryButtonActive,
                     ]}
                     onPress={() => setCategory(cat)}
                   >
                     <Text
                       style={[
                         styles.categoryButtonText,
-                        category === cat && { color: categoryColors[cat] },
+                        category === cat && styles.categoryButtonTextActive,
                       ]}
                     >
                       {cat}
@@ -730,14 +727,9 @@ function AddGoalModal({
           </ScrollView>
 
           <TouchableOpacity style={styles.createButton} onPress={handleAdd}>
-            <LinearGradient
-              colors={['#27E9B5', '#6B5BFD']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.createButtonGradient}
-            >
+            <View style={styles.createButtonSolid}>
               <Text style={styles.createButtonText}>Create Goal</Text>
-            </LinearGradient>
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -859,17 +851,14 @@ function EditGoalModal({
                     key={cat}
                     style={[
                       styles.categoryButton,
-                      category === cat && {
-                        backgroundColor: categoryColors[cat] + '30',
-                        borderColor: categoryColors[cat],
-                      },
+                      category === cat && styles.categoryButtonActive,
                     ]}
                     onPress={() => setCategory(cat)}
                   >
                     <Text
                       style={[
                         styles.categoryButtonText,
-                        category === cat && { color: categoryColors[cat] },
+                        category === cat && styles.categoryButtonTextActive,
                       ]}
                     >
                       {cat}
@@ -900,14 +889,9 @@ function EditGoalModal({
           </ScrollView>
 
           <TouchableOpacity style={styles.createButton} onPress={handleSave}>
-            <LinearGradient
-              colors={['#27E9B5', '#6B5BFD']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.createButtonGradient}
-            >
+            <View style={styles.createButtonSolid}>
               <Text style={styles.createButtonText}>Save Changes</Text>
-            </LinearGradient>
+            </View>
           </TouchableOpacity>
         </View>
       </View>
@@ -936,7 +920,6 @@ function ContextPanel({
   return (
     <View style={ctxStyles.wrapper}>
       <Text style={ctxStyles.sectionLabel}>MY CONTEXT</Text>
-      <Text style={ctxStyles.sectionSub}>Helps FitLook, FitRoast & FitCoach personalise your AI.</Text>
 
       {/* Tier 1 — Identity */}
       <ContextTier
@@ -1302,37 +1285,40 @@ const ctxStyles = StyleSheet.create({
     color: colors.accent,
     fontWeight: '700',
   },
-  // Goal cards (Tier 1 primary goal — wider chips with descriptions)
+  // Goal cards (Tier 1 primary goal — strategic identity cards)
   goalCards: {
-    gap: spacing.xs,
+    gap: spacing.sm,
   },
   goalCard: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: 14,
     borderRadius: radii.md,
-    backgroundColor: colors.surfaceMute + '50',
+    backgroundColor: colors.bgSecondary,
     borderWidth: 1,
-    borderColor: colors.surfaceMute,
+    borderColor: colors.surfaceMute + '80',
   },
   goalCardActive: {
-    backgroundColor: colors.accent + '18',
+    backgroundColor: colors.accent + '14',
     borderColor: colors.accent,
+    borderWidth: 2,
   },
   goalCardTitle: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
     color: colors.textPrimary,
-    marginBottom: 2,
+    marginBottom: 3,
+    letterSpacing: -0.1,
   },
   goalCardTitleActive: {
     color: colors.accent,
   },
   goalCardDesc: {
-    fontSize: 12,
+    fontSize: 13,
     color: colors.textMuted,
+    lineHeight: 18,
   },
   goalCardDescActive: {
-    color: colors.accent + 'BB',
+    color: colors.accent + 'AA',
   },
   // Conditional sub-fields (text inputs beneath chip selections)
   subField: {
@@ -1420,14 +1406,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.xs,
     paddingVertical: spacing.md,
-    backgroundColor: colors.surfaceMute,
+    backgroundColor: colors.bgSecondary,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.accent + '30',
+    borderColor: colors.surfaceMute + '80',
   },
-  coachButton: {
-    borderColor: colors.accent + '50',
-  },
+  coachButton: {},
   actionButtonText: {
     ...typography.body,
     fontSize: 14,
@@ -1619,44 +1603,46 @@ const styles = StyleSheet.create({
   },
   coachPanel: {
     marginTop: spacing.lg,
-    padding: spacing.lg,
+    padding: spacing.md,
+    opacity: 0.75,
   },
   coachPanelHeader: {
     flexDirection: 'row',
     gap: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   coachPanelContent: {
     flex: 1,
   },
   coachPanelTitle: {
     ...typography.body,
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '500',
     color: colors.textPrimary,
     marginBottom: spacing.xs,
   },
   coachPanelText: {
     ...typography.body,
-    fontSize: 14,
-    color: colors.textMuted,
+    fontSize: 13,
+    color: colors.textPrimary,
   },
   coachPanelButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing.md,
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
     paddingHorizontal: spacing.lg,
-    backgroundColor: colors.surfaceMute,
+    backgroundColor: 'transparent',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.accent + '30',
+    borderColor: colors.surfaceMute + '60',
   },
   coachPanelButtonText: {
     ...typography.body,
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.textPrimary,
   },
   modalOverlay: {
     flex: 1,
@@ -1743,18 +1729,27 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: '45%',
     paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     backgroundColor: colors.surfaceMute,
     borderRadius: 12,
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
     alignItems: 'center',
+    backgroundColor: colors.bgSecondary,
+  },
+  categoryButtonActive: {
+    backgroundColor: colors.accent + '20',
+    borderColor: colors.accent,
   },
   categoryButtonText: {
     ...typography.body,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '500',
     color: colors.textMuted,
+  },
+  categoryButtonTextActive: {
+    color: colors.accent,
+    fontWeight: '700',
   },
   createButton: {
     marginHorizontal: spacing.lg,
@@ -1762,15 +1757,17 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
-  createButtonGradient: {
+  createButtonSolid: {
+    backgroundColor: colors.accent,
     paddingVertical: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 12,
   },
   createButtonText: {
     ...typography.body,
     fontSize: 16,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: colors.bgPrimary,
   },
 });

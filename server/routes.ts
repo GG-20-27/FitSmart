@@ -2091,24 +2091,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trainingPrediction: `Projected: ${predictedTrainingScore}/10`
       };
 
+      let insightLine1 = '';
+      let insightLine2 = '';
+
       if (recovery >= 70 && sleepScore >= 70) {
-        insight = `💪 Projected FitScore: ${forecast}/10 if you complete planned training and nutrition.
-
-${trainingTip}. ${nutritionTip}.`;
+        insightLine1 = `Forecast: ${forecast}/10 — your body is primed.`;
+        insightLine2 = trainingTip + '.';
       } else if (recovery >= 50 && sleepScore >= 50) {
-        insight = `⚡ Projected FitScore: ${forecast}/10 with moderate training and solid nutrition.
-
-${trainingTip}. ${nutritionTip}.`;
+        insightLine1 = `Forecast: ${forecast}/10 — moderate output expected.`;
+        insightLine2 = trainingTip + '.';
       } else {
-        insight = `🧘 Projected FitScore: ${forecast}/10 — prioritize recovery today.
-
-${trainingTip}. ${nutritionTip}.`;
+        insightLine1 = `Forecast: ${forecast}/10 — recovery takes priority.`;
+        insightLine2 = trainingTip + '.';
       }
+
+      // Keep insight for backward compat
+      insight = `${insightLine1}\n${insightLine2}`;
 
       const response = {
         forecast, // Now 1-10 scale
         factors,
         insight,
+        insightLine1,
+        insightLine2,
         nutritionTip,
         trainingTip,
         updatedAt: new Date().toISOString(),
@@ -2221,16 +2226,22 @@ ${trainingTip}. ${nutritionTip}.`;
 
       console.log(`[GOALS] Inserting goal for user ${userId}: title="${title}", category="${category}", emoji="${emoji}"`);
 
+      const goalId = crypto.randomUUID();
+      const microhabitsValue = typeof microhabits === 'string'
+        ? JSON.parse(microhabits)
+        : (microhabits ?? []);
+
       const newGoal = await db
         .insert(userGoals)
         .values({
+          id: goalId,
           userId,
           title,
-          emoji: emoji || null,
+          emoji: emoji || '🎯',
           category,
           progress: progress || 0,
           streak: streak || 0,
-          microhabits: typeof microhabits === 'string' ? microhabits : (microhabits ? JSON.stringify(microhabits) : null),
+          microhabits: microhabitsValue,
         })
         .returning();
 
@@ -2238,33 +2249,7 @@ ${trainingTip}. ${nutritionTip}.`;
       res.json(newGoal[0]);
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
-      const detail = error?.detail || error?.constraint || '';
-      console.error('[GOALS] Error creating goal:', message, detail);
-
-      // If serial sequence is broken (from old timestamp IDs), try to fix it
-      if (message.includes('duplicate key') || message.includes('unique constraint')) {
-        try {
-          await db.execute(sql`SELECT setval('user_goals_id_seq', (SELECT COALESCE(MAX(id), 0) + 1 FROM user_goals))`);
-          console.log('[GOALS] Reset serial sequence, retrying insert...');
-          const retryGoal = await db
-            .insert(userGoals)
-            .values({
-              userId,
-              title,
-              emoji: emoji || null,
-              category,
-              progress: progress || 0,
-              streak: streak || 0,
-              microhabits: typeof microhabits === 'string' ? microhabits : (microhabits ? JSON.stringify(microhabits) : null),
-            })
-            .returning();
-          console.log(`[GOALS] Retry succeeded: goal ${retryGoal[0].id}`);
-          return res.json(retryGoal[0]);
-        } catch (retryError) {
-          console.error('[GOALS] Retry also failed:', retryError);
-        }
-      }
-
+      console.error('[GOALS] Error creating goal:', message);
       res.status(500).json({ error: 'Failed to create goal', details: message });
     }
   });
@@ -2279,7 +2264,11 @@ ${trainingTip}. ${nutritionTip}.`;
       }
 
       const { id } = req.params;
-      const updates = req.body;
+      const updates = { ...req.body };
+      // Ensure microhabits is stored as object/array, not a double-encoded string
+      if (updates.microhabits && typeof updates.microhabits === 'string') {
+        try { updates.microhabits = JSON.parse(updates.microhabits); } catch { updates.microhabits = []; }
+      }
 
       // Verify goal belongs to user
       const [existingGoal] = await db

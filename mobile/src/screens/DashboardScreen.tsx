@@ -28,6 +28,8 @@ type FitScoreForecast = {
     strain: string;
   };
   insight: string;
+  insightLine1?: string;
+  insightLine2?: string;
   updatedAt: string;
 };
 
@@ -332,10 +334,16 @@ export default function DashboardScreen() {
           {forecast && (
             <>
               <FitScorePulseRing score={forecast.forecast} />
-              <Text style={styles.forecastInsight}>{forecast.insight}</Text>
-              <Text style={styles.updatedTime}>
-                Updated: {formatUpdatedTime(forecast.updatedAt)}
-              </Text>
+              <View style={styles.forecastTextBlock}>
+                <Text style={styles.forecastLine1}>
+                  {forecast.insightLine1 || forecast.insight.split('\n')[0]}
+                </Text>
+                {(forecast.insightLine2 || forecast.insight.split('\n')[1]) ? (
+                  <Text style={styles.forecastLine2}>
+                    {forecast.insightLine2 || forecast.insight.split('\n')[1]}
+                  </Text>
+                ) : null}
+              </View>
             </>
           )}
 
@@ -442,7 +450,7 @@ export default function DashboardScreen() {
             <MetricCard
               icon="moon-outline"
               label="Avg Sleep"
-              value={weeklyMetrics?.averages?.sleep_score_percent ? `${weeklyMetrics.averages.sleep_score_percent}%` : 'N/A'}
+              value={weeklyMetrics?.averages?.sleep_score_percent ? `${Math.round(weeklyMetrics.averages.sleep_score_percent)}%` : 'N/A'}
               delta={weeklyMetrics?.comparison?.vs_last_month?.sleep_percent_delta}
               deltaLabel="vs. last month"
               borderColor={weeklyMetrics?.averages?.sleep_score_percent ? getSleepColor(weeklyMetrics.averages.sleep_score_percent) : undefined}
@@ -451,7 +459,7 @@ export default function DashboardScreen() {
             <MetricCard
               icon="heart-outline"
               label="Avg Recovery"
-              value={weeklyMetrics?.averages?.recovery_score_percent ? `${weeklyMetrics.averages.recovery_score_percent}%` : 'N/A'}
+              value={weeklyMetrics?.averages?.recovery_score_percent ? `${Math.round(weeklyMetrics.averages.recovery_score_percent)}%` : 'N/A'}
               delta={weeklyMetrics?.comparison?.vs_last_month?.recovery_percent_delta}
               deltaLabel="vs. last month"
               borderColor={weeklyMetrics?.averages?.recovery_score_percent ? getRecoveryColor(weeklyMetrics.averages.recovery_score_percent) : undefined}
@@ -539,7 +547,7 @@ const styles = StyleSheet.create({
     height: Math.min(180, SCREEN_WIDTH * 0.45),
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    marginBottom: 0,
   },
   scoreInRing: {
     position: 'absolute',
@@ -551,18 +559,26 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.accent,
   },
-  forecastInsight: {
-    ...typography.body,
-    fontSize: 14,
+  forecastTextBlock: {
+    alignItems: 'center',
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    gap: 6,
+  },
+  forecastLine1: {
+    fontSize: 16,
+    fontWeight: '700',
     textAlign: 'center',
     color: colors.textPrimary,
-    marginBottom: spacing.sm,
-    paddingHorizontal: spacing.md,
-    lineHeight: 20,
+    lineHeight: 22,
   },
-  updatedTime: {
-    ...typography.small,
+  forecastLine2: {
+    fontSize: 13,
+    fontWeight: '400',
+    textAlign: 'center',
     color: colors.textMuted,
+    lineHeight: 19,
+    opacity: 0.8,
   },
   forecastPlaceholder: {
     height: 180,

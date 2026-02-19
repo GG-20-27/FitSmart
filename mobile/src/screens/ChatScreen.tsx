@@ -156,14 +156,28 @@ function ListeningWave() {
   );
 }
 
+// Extract the trailing question paragraph from an AI message (if it stands alone)
+function extractTrailingQuestion(text: string): { main: string; question: string | null } {
+  if (!text.includes('?')) return { main: text, question: null };
+  const paras = text.trim().split(/\n{1,2}/);
+  if (paras.length < 2) return { main: text, question: null };
+  const last = paras[paras.length - 1].trim();
+  // Only treat as a trailing question if the last paragraph ends with ? and is reasonably short
+  if (last.endsWith('?') && last.length < 200) {
+    // Strip leading markdown blockquote > and whitespace
+    const clean = last.replace(/^>\s*/, '').trim();
+    return { main: paras.slice(0, -1).join('\n\n').trim(), question: clean };
+  }
+  return { main: text, question: null };
+}
+
 // Animated Message Component with Streaming Text Effect
 function AnimatedMessage({ message, isNewMessage = false }: { message: Message; isNewMessage?: boolean }) {
   const [fadeAnim] = useState(new Animated.Value(0));
   const [displayedText, setDisplayedText] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // Check if message contains a question (for gradient outline)
-  const hasQuestion = !message.isUser && message.text && message.text.includes('?');
+  const isStreaming = !message.isUser && isNewMessage && displayedText.length < message.text.length;
 
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -215,13 +229,16 @@ function AnimatedMessage({ message, isNewMessage = false }: { message: Message; 
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const { main: mainText, question: trailingQuestion } = !message.isUser && !isStreaming
+    ? extractTrailingQuestion(displayedText)
+    : { main: displayedText, question: null };
+
   return (
     <Animated.View style={{ opacity: fadeAnim }}>
       <View style={[styles.messageRow, message.isUser && styles.userMessageRow]}>
         <View style={[
           styles.messageBubble,
           message.isUser ? styles.userBubbleStyle : styles.assistantBubbleStyle,
-          hasQuestion && styles.questionBubbleStyle
         ]}>
           {message.images && message.images.length > 0 && (
             <ScrollView horizontal style={styles.messageImagesContainer}>
@@ -235,13 +252,15 @@ function AnimatedMessage({ message, isNewMessage = false }: { message: Message; 
           ) : (
             <View>
               <View style={styles.markdownWrapper}>
-                <Markdown
-                  style={markdownStyles}
-                  mergeStyle={true}
-                >
-                  {displayedText}
+                <Markdown style={markdownStyles} mergeStyle={true}>
+                  {mainText}
                 </Markdown>
               </View>
+              {trailingQuestion && (
+                <View style={styles.questionCallout}>
+                  <Text style={styles.questionCalloutText}>{trailingQuestion}</Text>
+                </View>
+              )}
               {displayedText.length > 0 && (
                 <TouchableOpacity
                   style={styles.copyButton}
@@ -951,16 +970,15 @@ export default function ChatScreen() {
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
         <TouchableOpacity style={styles.headerButton} onPress={() => setShowHistoryModal(true)}>
-          <Ionicons name="list-outline" size={24} color={colors.textPrimary} />
+          <Ionicons name="time-outline" size={18} color={colors.textMuted} />
           <Text style={styles.headerButtonText}>History</Text>
         </TouchableOpacity>
-        {CHATGPT_ICON ? (
-          <Image source={CHATGPT_ICON} style={styles.headerIcon} />
-        ) : (
-          <Text style={styles.headerTitle}>FitScore AI</Text>
-        )}
+        <View style={styles.headerCenter}>
+          <Ionicons name="chatbubbles-outline" size={22} color={colors.accent} />
+          <Text style={styles.headerTitle}>FitCoach</Text>
+        </View>
         <TouchableOpacity style={styles.headerButton} onPress={startNewChat}>
-          <Ionicons name="add-circle-outline" size={24} color={colors.textPrimary} />
+          <Ionicons name="add-outline" size={18} color={colors.textMuted} />
           <Text style={styles.headerButtonText}>New</Text>
         </TouchableOpacity>
       </View>
@@ -1238,7 +1256,7 @@ export default function ChatScreen() {
               style={styles.textInput}
               value={inputText}
               onChangeText={setInputText}
-              placeholder="Message FitScore AI"
+              placeholder="Message FitCoach..."
               placeholderTextColor={colors.textMuted}
               multiline
               maxLength={2000}
@@ -1321,12 +1339,23 @@ const styles = StyleSheet.create({
   assistantBubbleStyle: {
     width: '100%',
     backgroundColor: 'transparent',
-    borderLeftWidth: 3,
-    borderLeftColor: colors.accent, // Mint green line
-    paddingLeft: spacing.md,
+    paddingLeft: 0,
   },
-  questionBubbleStyle: {
-    // No extra border styling - uses mint left line from assistantBubbleStyle
+  questionBubbleStyle: {},
+  questionCallout: {
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderWidth: 1,
+    borderColor: colors.accent + '50',
+    borderRadius: radii.md,
+    backgroundColor: colors.accent + '0A',
+  },
+  questionCalloutText: {
+    fontSize: 14,
+    color: colors.textPrimary,
+    lineHeight: 21,
+    fontWeight: '500',
   },
   userMessageText: {
     ...typography.body,
@@ -1521,23 +1550,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
     borderBottomWidth: 1,
-    borderBottomColor: colors.surfaceMute,
+    borderBottomColor: colors.surfaceMute + '60',
+  },
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   headerButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
+    gap: 4,
+    paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
     borderRadius: radii.sm,
-    backgroundColor: colors.bgSecondary,
   },
   headerButtonText: {
-    ...typography.bodyMuted,
-    fontWeight: '600',
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '500',
   },
   headerTitle: {
-    ...typography.title,
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    letterSpacing: 0.2,
   },
   headerIcon: {
     width: 36,
@@ -1698,23 +1735,37 @@ const styles = StyleSheet.create({
   },
 });
 
-// Markdown styles optimized for dark theme
+// Markdown styles optimized for dark theme — rich text formatting
 const markdownStyles = {
   body: {
-    ...typography.body,
+    color: colors.textPrimary,
+    fontSize: 15,
     lineHeight: 24,
   },
   heading1: {
-    ...typography.h1,
-    marginVertical: spacing.md,
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+    letterSpacing: -0.3,
   },
   heading2: {
-    ...typography.h2,
-    marginVertical: spacing.sm,
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginTop: spacing.md,
+    marginBottom: spacing.xs,
+    letterSpacing: -0.2,
   },
   heading3: {
-    ...typography.title,
-    marginVertical: spacing.sm,
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.accent,
+    marginTop: spacing.sm,
+    marginBottom: 4,
+    letterSpacing: 0.2,
+    textTransform: 'uppercase' as const,
   },
   strong: {
     fontWeight: '700',
@@ -1722,32 +1773,35 @@ const markdownStyles = {
   },
   em: {
     fontStyle: 'italic',
-    color: colors.textMuted,
+    color: colors.textSecondary ?? colors.textMuted,
   },
   paragraph: {
-    marginVertical: 8, // Increased from 4 for better breathing room
+    marginVertical: 6,
   },
   bullet_list: {
-    marginVertical: spacing.sm,
+    marginVertical: spacing.xs,
   },
   ordered_list: {
-    marginVertical: spacing.sm,
+    marginVertical: spacing.xs,
   },
   list_item: {
-    flexDirection: 'row',
-    marginVertical: 3,
+    flexDirection: 'row' as const,
+    marginVertical: 4,
   },
   bullet_list_icon: {
-    marginLeft: 0,
+    marginLeft: 4,
     marginRight: spacing.sm,
-    color: colors.textMuted,
-    fontSize: 16,
+    color: colors.accent,
+    fontSize: 14,
+    lineHeight: 24,
   },
   ordered_list_icon: {
-    marginLeft: 0,
+    marginLeft: 4,
     marginRight: spacing.sm,
-    color: colors.textMuted,
-    fontSize: 16,
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 24,
   },
   code_inline: {
     backgroundColor: colors.bgSecondary,

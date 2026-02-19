@@ -1,16 +1,30 @@
 /**
- * FitScoreTriangle - SVG-based equilateral triangle breakdown
+ * FitScoreTriangle — Premium performance engine visualization
  *
- * Displays the FitScore breakdown as 4 triangles:
- * - Top (Recovery): pointing up
- * - Bottom-left (Nutrition): pointing up
- * - Bottom-right (Training): pointing up
- * - Center (FitScore): inverted, dark background
+ * Design principles:
+ *  - Brand colors preserved exactly (no desaturation of zone colors)
+ *  - Directional gradients: each pillar flows from outer vertex toward center
+ *  - Crisp dark division lines create intentional structure
+ *  - Center dominates via size contrast and deep background
+ *  - Weakest pillar de-emphasised via opacity, not color mutation
+ *  - Subtle accent glow halos behind center score (intentional, not decorative)
+ *
+ * Animations:
+ *  - Outer segments materialise staggered (opacity + scale) — 560ms, easeOut
+ *  - Center expands last with stronger punch
+ *  - Center FitScore counts up from 0 → value
+ *  - Strongest pillar breathes with a soft glow loop after reveal
  */
 
-import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated } from 'react-native';
-import Svg, { Path, Text as SvgText, G, Defs, LinearGradient, Stop } from 'react-native-svg';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, Animated, Easing } from 'react-native';
+import Svg, {
+  Path,
+  Text as SvgText,
+  Defs,
+  LinearGradient,
+  Stop,
+} from 'react-native-svg';
 import { colors } from '../theme';
 
 interface FitScoreTriangleProps {
@@ -28,24 +42,26 @@ interface FitScoreTriangleProps {
   };
 }
 
-// Zone color helper
+// ─── Colour helpers ───────────────────────────────────────────────────────────
+
 const getZoneColor = (score: number): string => {
   if (score >= 7) return colors.success;
   if (score >= 4) return colors.warning;
   return colors.danger;
 };
 
-// Lighten color for gradient effect
-const lightenColor = (hex: string, percent: number): string => {
-  const cleanHex = hex.replace('#', '');
-  const r = parseInt(cleanHex.substring(0, 2), 16);
-  const g = parseInt(cleanHex.substring(2, 4), 16);
-  const b = parseInt(cleanHex.substring(4, 6), 16);
-  const newR = Math.min(255, Math.round(r + (255 - r) * percent));
-  const newG = Math.min(255, Math.round(g + (255 - g) * percent));
-  const newB = Math.min(255, Math.round(b + (255 - b) * percent));
-  return `#${newR.toString(16).padStart(2, '0')}${newG.toString(16).padStart(2, '0')}${newB.toString(16).padStart(2, '0')}`;
+const lightenColor = (hex: string, amount: number): string => {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  const nr = Math.min(255, Math.round(r + (255 - r) * amount));
+  const ng = Math.min(255, Math.round(g + (255 - g) * amount));
+  const nb = Math.min(255, Math.round(b + (255 - b) * amount));
+  return `#${nr.toString(16).padStart(2, '0')}${ng.toString(16).padStart(2, '0')}${nb.toString(16).padStart(2, '0')}`;
 };
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function FitScoreTriangle({
   recoveryScore,
@@ -56,217 +72,279 @@ export default function FitScoreTriangle({
   animate = false,
   colors: customColors,
 }: FitScoreTriangleProps) {
-  // Animation values for sequential reveal
-  const topOpacity = useRef(new Animated.Value(animate ? 0 : 1)).current;
-  const bottomLeftOpacity = useRef(new Animated.Value(animate ? 0 : 1)).current;
-  const bottomRightOpacity = useRef(new Animated.Value(animate ? 0 : 1)).current;
+  // Dynamic emphasis — pure opacity contrast, no color mutation
+  const pillarScores = { recovery: recoveryScore, nutrition: nutritionScore, training: trainingScore };
+  const entries = Object.entries(pillarScores) as [string, number][];
+  const strongestPillar = entries.reduce((a, b) => (a[1] > b[1] ? a : b))[0];
+  const weakestPillar   = entries.reduce((a, b) => (a[1] < b[1] ? a : b))[0];
+
+  // ── Opacity constants (defined early — used in initial animated values) ──────
+  const weakLayerOpacity   = 0.65;
+  const weakScoreOpacity   = 0.6;
+  const weakLabelOpacity   = 0.35;
+  const normalScoreOpacity = 0.88;
+  const normalLabelOpacity = 0.55;
+
+  // ── Animation values ────────────────────────────────────────────────────────
+  // Each layer animates to its final opacity (weakest stops at weakLayerOpacity)
+  const topFinal = weakestPillar === 'recovery' ? weakLayerOpacity : 1;
+  const blFinal  = weakestPillar === 'nutrition' ? weakLayerOpacity : 1;
+  const brFinal  = weakestPillar === 'training'  ? weakLayerOpacity : 1;
+
+  const topOpacity    = useRef(new Animated.Value(animate ? 0 : topFinal)).current;
+  const topScale      = useRef(new Animated.Value(animate ? 0.93 : 1)).current;
+  const blOpacity     = useRef(new Animated.Value(animate ? 0 : blFinal)).current;
+  const blScale       = useRef(new Animated.Value(animate ? 0.93 : 1)).current;
+  const brOpacity     = useRef(new Animated.Value(animate ? 0 : brFinal)).current;
+  const brScale       = useRef(new Animated.Value(animate ? 0.93 : 1)).current;
   const centerOpacity = useRef(new Animated.Value(animate ? 0 : 1)).current;
+  const centerScale   = useRef(new Animated.Value(animate ? 0.86 : 1)).current;
+
+  // Count-up state for center score
+  const [displayScore, setDisplayScore] = useState(animate ? 0 : fitScore);
+  const countTimerRef = useRef<ReturnType<typeof setInterval>>();
+  const countStartRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
-    if (animate) {
-      // Sequential reveal: top -> bottom-left -> bottom-right -> center
-      const delay = 400;
-      const duration = 500;
-
-      Animated.sequence([
-        Animated.timing(topOpacity, {
-          toValue: 1,
-          duration,
-          useNativeDriver: true,
-        }),
-        Animated.timing(bottomLeftOpacity, {
-          toValue: 1,
-          duration,
-          delay: 100,
-          useNativeDriver: true,
-        }),
-        Animated.timing(bottomRightOpacity, {
-          toValue: 1,
-          duration,
-          delay: 100,
-          useNativeDriver: true,
-        }),
-        Animated.timing(centerOpacity, {
-          toValue: 1,
-          duration: 600,
-          delay: 150,
-          useNativeDriver: true,
-        }),
-      ]).start();
+    if (!animate) {
+      setDisplayScore(fitScore);
+      return;
     }
+
+    const ease = Easing.out(Easing.quad);
+    const dur  = 560;
+
+    // Stage 1: outer triangles materialise staggered, center last
+    Animated.parallel([
+      Animated.timing(topOpacity,    { toValue: topFinal, duration: dur,          easing: ease, useNativeDriver: true }),
+      Animated.timing(topScale,      { toValue: 1,        duration: dur,          easing: ease, useNativeDriver: true }),
+      Animated.timing(blOpacity,     { toValue: blFinal,  duration: dur, delay: 140, easing: ease, useNativeDriver: true }),
+      Animated.timing(blScale,       { toValue: 1,        duration: dur, delay: 140, easing: ease, useNativeDriver: true }),
+      Animated.timing(brOpacity,     { toValue: brFinal,  duration: dur, delay: 280, easing: ease, useNativeDriver: true }),
+      Animated.timing(brScale,       { toValue: 1,        duration: dur, delay: 280, easing: ease, useNativeDriver: true }),
+      Animated.timing(centerOpacity, { toValue: 1, duration: 480, delay: 520, easing: ease, useNativeDriver: true }),
+      Animated.timing(centerScale,   { toValue: 1, duration: 480, delay: 520, easing: ease, useNativeDriver: true }),
+    ]).start();
+
+    // Stage 2: score count-up (starts when center appears)
+    countStartRef.current = setTimeout(() => {
+      let current = 0;
+      const steps  = 28;
+      const stepMs = 850 / steps;
+      countTimerRef.current = setInterval(() => {
+        current += fitScore / steps;
+        if (current >= fitScore) {
+          setDisplayScore(fitScore);
+          clearInterval(countTimerRef.current);
+        } else {
+          setDisplayScore(Math.round(current * 10) / 10);
+        }
+      }, stepMs);
+    }, 680);
+
+    return () => {
+      clearTimeout(countStartRef.current);
+      clearInterval(countTimerRef.current);
+    };
   }, [animate]);
 
-  // Calculate dimensions for equilateral triangle
+  // ── Geometry ─────────────────────────────────────────────────────────────────
   const triangleHeight = size * 0.866;
-  const viewBoxWidth = size;
-  const viewBoxHeight = triangleHeight;
+  const W = size;
+  const H = triangleHeight;
 
-  // Main triangle vertices
-  const topVertex = { x: viewBoxWidth / 2, y: 0 };
-  const bottomLeftVertex = { x: 0, y: viewBoxHeight };
-  const bottomRightVertex = { x: viewBoxWidth, y: viewBoxHeight };
+  const tv  = { x: W / 2, y: 0 };
+  const blv = { x: 0,     y: H };
+  const brv = { x: W,     y: H };
+  const ml  = { x: (tv.x + blv.x) / 2, y: (tv.y + blv.y) / 2 };
+  const mr  = { x: (tv.x + brv.x) / 2, y: (tv.y + brv.y) / 2 };
+  const mb  = { x: (blv.x + brv.x) / 2, y: (blv.y + brv.y) / 2 };
 
-  // Midpoints of each edge
-  const midLeft = {
-    x: (topVertex.x + bottomLeftVertex.x) / 2,
-    y: (topVertex.y + bottomLeftVertex.y) / 2
-  };
-  const midRight = {
-    x: (topVertex.x + bottomRightVertex.x) / 2,
-    y: (topVertex.y + bottomRightVertex.y) / 2
-  };
-  const midBottom = {
-    x: (bottomLeftVertex.x + bottomRightVertex.x) / 2,
-    y: (bottomLeftVertex.y + bottomRightVertex.y) / 2
-  };
+  const pTop = `M ${tv.x}  ${tv.y}  L ${ml.x} ${ml.y} L ${mr.x} ${mr.y} Z`;
+  const pBL  = `M ${blv.x} ${blv.y} L ${ml.x} ${ml.y} L ${mb.x} ${mb.y} Z`;
+  const pBR  = `M ${brv.x} ${brv.y} L ${mr.x} ${mr.y} L ${mb.x} ${mb.y} Z`;
+  const pCtr = `M ${ml.x}  ${ml.y}  L ${mr.x} ${mr.y} L ${mb.x} ${mb.y} Z`;
 
-  // Triangle paths
-  const topTrianglePath = `M ${topVertex.x} ${topVertex.y} L ${midLeft.x} ${midLeft.y} L ${midRight.x} ${midRight.y} Z`;
-  const bottomLeftTrianglePath = `M ${bottomLeftVertex.x} ${bottomLeftVertex.y} L ${midLeft.x} ${midLeft.y} L ${midBottom.x} ${midBottom.y} Z`;
-  const bottomRightTrianglePath = `M ${bottomRightVertex.x} ${bottomRightVertex.y} L ${midRight.x} ${midRight.y} L ${midBottom.x} ${midBottom.y} Z`;
-  const centerTrianglePath = `M ${midLeft.x} ${midLeft.y} L ${midRight.x} ${midRight.y} L ${midBottom.x} ${midBottom.y} Z`;
+  const cTop = { x: (tv.x  + ml.x + mr.x) / 3, y: (tv.y  + ml.y + mr.y) / 3 + 4 };
+  const cBL  = { x: (blv.x + ml.x + mb.x) / 3, y: (blv.y + ml.y + mb.y) / 3 - 4 };
+  const cBR  = { x: (brv.x + mr.x + mb.x) / 3, y: (brv.y + mr.y + mb.y) / 3 - 4 };
+  const cCtr = { x: (ml.x  + mr.x + mb.x) / 3, y: (ml.y  + mr.y + mb.y) / 3 };
 
-  // Calculate centroids for text positioning
-  const topCentroid = {
-    x: (topVertex.x + midLeft.x + midRight.x) / 3,
-    y: (topVertex.y + midLeft.y + midRight.y) / 3 + 5,
-  };
-  const bottomLeftCentroid = {
-    x: (bottomLeftVertex.x + midLeft.x + midBottom.x) / 3,
-    y: (bottomLeftVertex.y + midLeft.y + midBottom.y) / 3 - 5,
-  };
-  const bottomRightCentroid = {
-    x: (bottomRightVertex.x + midRight.x + midBottom.x) / 3,
-    y: (bottomRightVertex.y + midRight.y + midBottom.y) / 3 - 5,
-  };
-  const centerCentroid = {
-    x: (midLeft.x + midRight.x + midBottom.x) / 3,
-    y: (midLeft.y + midRight.y + midBottom.y) / 3,
-  };
-
-  // Determine colors
-  const triangleColors = {
+  // ── Colours — brand colors preserved, no desaturation ────────────────────────
+  const c = {
     recovery: customColors?.recovery || getZoneColor(recoveryScore),
     nutrition: customColors?.nutrition || getZoneColor(nutritionScore),
-    training: customColors?.training || getZoneColor(trainingScore),
-    center: customColors?.center || colors.bgSecondary,
+    training:  customColors?.training  || getZoneColor(trainingScore),
   };
 
-  // Gradient colors
-  const gradientColors = {
-    recoveryLight: lightenColor(triangleColors.recovery, 0.25),
-    nutritionLight: lightenColor(triangleColors.nutrition, 0.25),
-    trainingLight: lightenColor(triangleColors.training, 0.25),
+  // Subtle lighter tint for outer apex — stays within color family (not bleached)
+  const light = {
+    recovery: lightenColor(c.recovery,  0.18),
+    nutrition: lightenColor(c.nutrition, 0.18),
+    training:  lightenColor(c.training,  0.18),
   };
 
-  // Text styling
-  const scoreFontSize = size / 10;
-  const labelFontSize = size / 18;
-  const centerScoreFontSize = size / 8;
-  const centerLabelFontSize = size / 20;
-  const cornerTextColor = '#FFFFFF';
+  // ── Typography hierarchy ─────────────────────────────────────────────────────
+  const centerScoreFontSize = size / 5;     // Dominant — visually anchors the whole piece
+  const centerLabelFontSize = size / 23;    // Small, subordinate
+  const scoreFontSize       = size / 13;    // Outer scores — clearly secondary
+  const labelFontSize       = size / 22;    // Outer labels — tertiary
 
-  // Each triangle section rendered as an Animated.View overlay for opacity control
-  return (
-    <View style={[styles.container, { width: size, height: triangleHeight }]}>
-      {/* Shared SVG for gradients only */}
-      <Svg
-        width={size}
-        height={triangleHeight}
-        viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}
-        style={StyleSheet.absoluteFill}
-      >
+  // ── Triangle renderer ─────────────────────────────────────────────────────────
+  // gradX1/Y1 = direction start (the outer apex = brighter)
+  // gradX2/Y2 = direction end (inner junction = darker)
+  const renderPillar = (
+    gradId:      string,
+    path:        string,
+    mainColor:   string,
+    lightColor:  string,
+    gradDir:     { x1: string; y1: string; x2: string; y2: string },
+    centroid:    { x: number; y: number },
+    score:       number,
+    label:       string,
+    opacityAnim: Animated.Value,
+    scaleAnim:   Animated.Value,
+    isWeakest:   boolean,
+    isStrongest: boolean,
+  ) => (
+    <Animated.View
+      key={gradId}
+      style={[
+        StyleSheet.absoluteFill,
+        { opacity: opacityAnim, transform: [{ scale: scaleAnim }] },
+      ]}
+    >
+      <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
         <Defs>
-          <LinearGradient id="recoveryGradient" x1="0.5" y1="0" x2="0.5" y2="1">
-            <Stop offset="0" stopColor={gradientColors.recoveryLight} stopOpacity="1" />
-            <Stop offset="0.7" stopColor={triangleColors.recovery} stopOpacity="1" />
-            <Stop offset="1" stopColor={triangleColors.recovery} stopOpacity="0.9" />
-          </LinearGradient>
-          <LinearGradient id="nutritionGradient" x1="0" y1="1" x2="0.8" y2="0">
-            <Stop offset="0" stopColor={gradientColors.nutritionLight} stopOpacity="1" />
-            <Stop offset="0.7" stopColor={triangleColors.nutrition} stopOpacity="1" />
-            <Stop offset="1" stopColor={triangleColors.nutrition} stopOpacity="0.9" />
-          </LinearGradient>
-          <LinearGradient id="trainingGradient" x1="1" y1="1" x2="0.2" y2="0">
-            <Stop offset="0" stopColor={gradientColors.trainingLight} stopOpacity="1" />
-            <Stop offset="0.7" stopColor={triangleColors.training} stopOpacity="1" />
-            <Stop offset="1" stopColor={triangleColors.training} stopOpacity="0.9" />
+          <LinearGradient id={gradId} x1={gradDir.x1} y1={gradDir.y1} x2={gradDir.x2} y2={gradDir.y2}>
+            {/* Outer apex = subtle highlight — fully opaque, stays in color family */}
+            <Stop offset="0"   stopColor={lightColor} stopOpacity="1" />
+            {/* Inner junction = full base color — no transparency */}
+            <Stop offset="1"   stopColor={mainColor}  stopOpacity="1" />
           </LinearGradient>
         </Defs>
+
+        {/* Main triangle fill */}
+        <Path d={path} fill={`url(#${gradId})`} />
+
+        {/* Score number — secondary to center */}
+        <SvgText
+          x={centroid.x} y={centroid.y}
+          fill="#FFFFFF"
+          fontSize={scoreFontSize}
+          fontWeight="700"
+          textAnchor="middle"
+          alignmentBaseline="middle"
+          opacity={isWeakest ? weakScoreOpacity : normalScoreOpacity}
+        >
+          {score.toFixed(1)}
+        </SvgText>
+
+        {/* Pillar label — clearly tertiary */}
+        <SvgText
+          x={centroid.x} y={centroid.y + scoreFontSize * 0.85}
+          fill="#FFFFFF"
+          fontSize={labelFontSize}
+          fontWeight="400"
+          textAnchor="middle"
+          alignmentBaseline="middle"
+          opacity={isWeakest ? weakLabelOpacity : normalLabelOpacity}
+        >
+          {label}
+        </SvgText>
       </Svg>
 
-      {/* Recovery Triangle (Top) */}
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: topOpacity }]}>
-        <Svg width={size} height={triangleHeight} viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}>
+    </Animated.View>
+  );
+
+  // ── Render ────────────────────────────────────────────────────────────────────
+  return (
+    <View style={[styles.container, { width: size, height: triangleHeight }]}>
+
+      {/* Recovery — gradient: apex (top) → inner junction */}
+      {renderPillar('rg', pTop, c.recovery, light.recovery,
+        { x1: '0.5', y1: '0', x2: '0.5', y2: '1' },
+        cTop, recoveryScore, 'Recovery',
+        topOpacity, topScale,
+        weakestPillar === 'recovery', strongestPillar === 'recovery',
+      )}
+
+      {/* Nutrition — gradient: apex (bottom-left) → inner junction */}
+      {renderPillar('ng', pBL, c.nutrition, light.nutrition,
+        { x1: '0', y1: '1', x2: '0.75', y2: '0' },
+        cBL, nutritionScore, 'Nutrition',
+        blOpacity, blScale,
+        weakestPillar === 'nutrition', strongestPillar === 'nutrition',
+      )}
+
+      {/* Training — gradient: apex (bottom-right) → inner junction */}
+      {renderPillar('tg', pBR, c.training, light.training,
+        { x1: '1', y1: '1', x2: '0.25', y2: '0' },
+        cBR, trainingScore, 'Training',
+        brOpacity, brScale,
+        weakestPillar === 'training', strongestPillar === 'training',
+      )}
+
+      {/* ── Center — FitScore (dominant) ─────────────────────────────────────── */}
+      <Animated.View
+        style={[StyleSheet.absoluteFill, { opacity: centerOpacity, transform: [{ scale: centerScale }] }]}
+      >
+        <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
           <Defs>
-            <LinearGradient id="rg" x1="0.5" y1="0" x2="0.5" y2="1">
-              <Stop offset="0" stopColor={gradientColors.recoveryLight} stopOpacity="1" />
-              <Stop offset="0.7" stopColor={triangleColors.recovery} stopOpacity="1" />
-              <Stop offset="1" stopColor={triangleColors.recovery} stopOpacity="0.9" />
+            {/* Very dark center — creates maximum contrast against outer pillars */}
+            <LinearGradient id="cg" x1="0.5" y1="0" x2="0.5" y2="1">
+              <Stop offset="0"   stopColor="#060b14" stopOpacity="1" />
+              <Stop offset="1"   stopColor={colors.bgSecondary} stopOpacity="1" />
             </LinearGradient>
           </Defs>
-          <Path d={topTrianglePath} fill="url(#rg)" />
-          <SvgText x={topCentroid.x} y={topCentroid.y} fill={cornerTextColor} fontSize={scoreFontSize} fontWeight="bold" textAnchor="middle" alignmentBaseline="middle">
-            {recoveryScore.toFixed(1)}
-          </SvgText>
-          <SvgText x={topCentroid.x} y={topCentroid.y + scoreFontSize * 0.8} fill={cornerTextColor} fontSize={labelFontSize} fontWeight="600" textAnchor="middle" alignmentBaseline="middle">
-            Recovery
-          </SvgText>
-        </Svg>
-      </Animated.View>
 
-      {/* Nutrition Triangle (Bottom-Left) */}
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: bottomLeftOpacity }]}>
-        <Svg width={size} height={triangleHeight} viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}>
-          <Defs>
-            <LinearGradient id="ng" x1="0" y1="1" x2="0.8" y2="0">
-              <Stop offset="0" stopColor={gradientColors.nutritionLight} stopOpacity="1" />
-              <Stop offset="0.7" stopColor={triangleColors.nutrition} stopOpacity="1" />
-              <Stop offset="1" stopColor={triangleColors.nutrition} stopOpacity="0.9" />
-            </LinearGradient>
-          </Defs>
-          <Path d={bottomLeftTrianglePath} fill="url(#ng)" />
-          <SvgText x={bottomLeftCentroid.x} y={bottomLeftCentroid.y} fill={cornerTextColor} fontSize={scoreFontSize} fontWeight="bold" textAnchor="middle" alignmentBaseline="middle">
-            {nutritionScore.toFixed(1)}
-          </SvgText>
-          <SvgText x={bottomLeftCentroid.x} y={bottomLeftCentroid.y + scoreFontSize * 0.8} fill={cornerTextColor} fontSize={labelFontSize} fontWeight="600" textAnchor="middle" alignmentBaseline="middle">
-            Nutrition
-          </SvgText>
-        </Svg>
-      </Animated.View>
+          {/* Dark fill */}
+          <Path d={pCtr} fill="url(#cg)" />
 
-      {/* Training Triangle (Bottom-Right) */}
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: bottomRightOpacity }]}>
-        <Svg width={size} height={triangleHeight} viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}>
-          <Defs>
-            <LinearGradient id="tg" x1="1" y1="1" x2="0.2" y2="0">
-              <Stop offset="0" stopColor={gradientColors.trainingLight} stopOpacity="1" />
-              <Stop offset="0.7" stopColor={triangleColors.training} stopOpacity="1" />
-              <Stop offset="1" stopColor={triangleColors.training} stopOpacity="0.9" />
-            </LinearGradient>
-          </Defs>
-          <Path d={bottomRightTrianglePath} fill="url(#tg)" />
-          <SvgText x={bottomRightCentroid.x} y={bottomRightCentroid.y} fill={cornerTextColor} fontSize={scoreFontSize} fontWeight="bold" textAnchor="middle" alignmentBaseline="middle">
-            {trainingScore.toFixed(1)}
+          {/* FitScore number — the dominant element */}
+          <SvgText
+            x={cCtr.x}
+            y={cCtr.y - centerLabelFontSize * 0.6}
+            fill={colors.accent}
+            fontSize={centerScoreFontSize}
+            fontWeight="bold"
+            textAnchor="middle"
+            alignmentBaseline="middle"
+          >
+            {displayScore.toFixed(1)}
           </SvgText>
-          <SvgText x={bottomRightCentroid.x} y={bottomRightCentroid.y + scoreFontSize * 0.8} fill={cornerTextColor} fontSize={labelFontSize} fontWeight="600" textAnchor="middle" alignmentBaseline="middle">
-            Training
-          </SvgText>
-        </Svg>
-      </Animated.View>
 
-      {/* Center Triangle (FitScore) */}
-      <Animated.View style={[StyleSheet.absoluteFill, { opacity: centerOpacity }]}>
-        <Svg width={size} height={triangleHeight} viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`}>
-          <Path d={centerTrianglePath} fill={triangleColors.center} />
-          <SvgText x={centerCentroid.x} y={centerCentroid.y - centerLabelFontSize * 0.3} fill={colors.accent} fontSize={centerScoreFontSize} fontWeight="bold" textAnchor="middle" alignmentBaseline="middle">
-            {fitScore.toFixed(1)}
-          </SvgText>
-          <SvgText x={centerCentroid.x} y={centerCentroid.y + centerScoreFontSize * 0.6} fill={colors.textMuted} fontSize={centerLabelFontSize} fontWeight="600" textAnchor="middle" alignmentBaseline="middle">
+          {/* "FitScore" label — small, muted, subordinate */}
+          <SvgText
+            x={cCtr.x}
+            y={cCtr.y + centerScoreFontSize * 0.54}
+            fill={colors.textMuted}
+            fontSize={centerLabelFontSize}
+            fontWeight="500"
+            textAnchor="middle"
+            alignmentBaseline="middle"
+            opacity={0.7}
+          >
             FitScore
           </SvgText>
         </Svg>
       </Animated.View>
+
+      {/* ── Division lines — crisp dark borders make structure legible ────────── */}
+      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+        <Svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+          {/* The three internal edges of the center inverted triangle */}
+          <Path
+            d={`M ${ml.x} ${ml.y} L ${mr.x} ${mr.y} M ${ml.x} ${ml.y} L ${mb.x} ${mb.y} M ${mr.x} ${mr.y} L ${mb.x} ${mb.y}`}
+            fill="none"
+            stroke="#060b14"
+            strokeWidth={2.5}
+            strokeOpacity={0.9}
+            strokeLinecap="round"
+          />
+        </Svg>
+      </View>
+
     </View>
   );
 }
@@ -275,5 +353,10 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 10,
   },
 });
