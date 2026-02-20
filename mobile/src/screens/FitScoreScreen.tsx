@@ -310,6 +310,9 @@ export default function FitScoreScreen() {
   const [showRecoveryAnalysis, setShowRecoveryAnalysis] = useState(false);
   const [triangleAnimating, setTriangleAnimating] = useState(false);
   const triangleHasAnimated = useRef(false);
+  const triangleViewRef = useRef<any>(null);
+  const fitScoreScrollRef = useRef<any>(null);
+  const visibilityPollRef = useRef<ReturnType<typeof setInterval>>();
   const [showFormulaTooltip, setShowFormulaTooltip] = useState(false);
   const fitScoreFadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -317,6 +320,35 @@ export default function FitScoreScreen() {
   const hasMeals = meals.length > 0;
   const hasTraining = trainingSessions.length > 0;
   const canCalculate = hasMeals; // Training is optional — minimum is one meal
+
+  // ── Triangle visibility detection ─────────────────────────────────────────────
+  // Uses measureInWindow (real screen coords) instead of layout.y (parent-relative)
+  const checkTriangleVisible = () => {
+    if (triangleHasAnimated.current || !triangleViewRef.current) return;
+    triangleViewRef.current.measureInWindow((_x: number, y: number, _w: number, h: number) => {
+      const screenH = Dimensions.get('window').height;
+      if (h > 0 && y < screenH - 40 && y + h > 0) {
+        triangleHasAnimated.current = true;
+        clearInterval(visibilityPollRef.current);
+        setTriangleAnimating(true);
+      }
+    });
+  };
+
+  // When a new FitScore result arrives, reset and start polling until triangle is visible
+  useEffect(() => {
+    if (!fitScoreResult) return;
+    setTriangleAnimating(false);
+    triangleHasAnimated.current = false;
+    clearInterval(visibilityPollRef.current);
+    // Poll every 200ms for up to 15s — stops as soon as triangle enters viewport
+    visibilityPollRef.current = setInterval(checkTriangleVisible, 200);
+    const stopPoll = setTimeout(() => clearInterval(visibilityPollRef.current), 15000);
+    return () => {
+      clearInterval(visibilityPollRef.current);
+      clearTimeout(stopPoll);
+    };
+  }, [fitScoreResult]);
 
   // Load meals and training data when date changes
   useEffect(() => {
@@ -395,7 +427,6 @@ export default function FitScoreScreen() {
 
       // Trigger fade-in animation
       fitScoreFadeAnim.setValue(0);
-      triangleHasAnimated.current = false;
       setTriangleAnimating(false);
       Animated.timing(fitScoreFadeAnim, {
         toValue: 1,
@@ -817,7 +848,12 @@ export default function FitScoreScreen() {
   };
 
   return (
-    <ScrollView style={styles.container}>
+    <ScrollView
+      ref={fitScoreScrollRef}
+      style={styles.container}
+      scrollEventThrottle={100}
+      onScroll={checkTriangleVisible}
+    >
       {/* Loading Indicator */}
       {loading && (
         <View style={styles.loadingOverlay}>
@@ -1034,12 +1070,13 @@ export default function FitScoreScreen() {
               <Ionicons name="barbell-outline" size={48} color={colors.surfaceMute} />
               <Text style={styles.emptyStateText}>Add training context</Text>
               {isToday && (
-                <Button
+                <TouchableOpacity
+                  style={styles.addTrainingEmptyCard}
                   onPress={() => setTrainingEditing(true)}
-                  style={styles.addButton}
                 >
-                  Add Training Details
-                </Button>
+                  <Ionicons name="add-circle-outline" size={28} color={colors.accent} />
+                  <Text style={[styles.addTrainingText, { marginTop: 0 }]}>Add Training Details</Text>
+                </TouchableOpacity>
               )}
             </View>
           ) : trainingEditing ? (
@@ -1354,19 +1391,13 @@ export default function FitScoreScreen() {
             )}
           </View>
 
-          {/* 2. Score Breakdown Title */}
-          <Text style={styles.sectionTitleLarge}>Score Breakdown</Text>
+          {/* 2. FitScore Breakdown Title */}
+          <Text style={styles.sectionTitleLarge}>FitScore Breakdown</Text>
 
           {/* 3. FitScore Triangle Visual - SVG Equilateral Triangle */}
           <View
+            ref={triangleViewRef}
             style={styles.triangleWrapper}
-            onLayout={() => {
-              if (!triangleHasAnimated.current) {
-                triangleHasAnimated.current = true;
-                // Small delay so it starts after the view is visible on screen
-                setTimeout(() => setTriangleAnimating(true), 200);
-              }
-            }}
           >
             <FitScoreTriangle
               recoveryScore={fitScoreResult.breakdown.recovery.score}
@@ -1841,6 +1872,19 @@ const styles = StyleSheet.create({
   },
   addButton: {
     marginTop: spacing.sm,
+  },
+  addTrainingEmptyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surfaceMute + '15',
+    borderRadius: radii.md,
+    borderWidth: 2,
+    borderColor: colors.accent + '40',
+    borderStyle: 'dashed',
   },
   mealsGrid: {
     flexDirection: 'row',

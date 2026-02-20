@@ -25,8 +25,10 @@ export async function getFitRoastCurrent(): Promise<FitRoastResponse> {
 }
 
 /** Generate (or regenerate) this week's FitRoast */
-export async function generateFitRoast(): Promise<FitRoastResponse> {
+export async function generateFitRoast(intensity?: 'Light' | 'Spicy' | 'Savage'): Promise<FitRoastResponse> {
   return apiRequest<FitRoastResponse>('/api/fitroast/generate', {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ intensity }),
   });
 }

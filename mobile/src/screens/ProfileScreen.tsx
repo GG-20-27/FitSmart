@@ -12,6 +12,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiRequest, clearAuthToken, getAuthToken } from '../api/client';
 import { colors, spacing, radii, typography, state } from '../theme';
 import { Card, Button } from '../ui/components';
@@ -46,6 +47,28 @@ export default function ProfileScreen() {
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [icsUrl, setIcsUrl] = useState('');
   const [icsUrlError, setIcsUrlError] = useState('');
+  const [fitRoastEnabled, setFitRoastEnabled] = useState(false);
+  const [roastIntensity, setRoastIntensity] = useState<'Light' | 'Spicy' | 'Savage'>('Spicy');
+
+  // Load FitRoast settings from storage on mount
+  useFocusEffect(useCallback(() => {
+    AsyncStorage.multiGet(['fitRoastEnabled', 'roastIntensity']).then(pairs => {
+      const enabled = pairs[0][1];
+      const intensity = pairs[1][1];
+      if (enabled !== null) setFitRoastEnabled(enabled === 'true');
+      if (intensity === 'Light' || intensity === 'Spicy' || intensity === 'Savage') setRoastIntensity(intensity);
+    });
+  }, []));
+
+  const handleFitRoastToggle = async (value: boolean) => {
+    setFitRoastEnabled(value);
+    await AsyncStorage.setItem('fitRoastEnabled', String(value));
+  };
+
+  const handleIntensityChange = async (level: 'Light' | 'Spicy' | 'Savage') => {
+    setRoastIntensity(level);
+    await AsyncStorage.setItem('roastIntensity', level);
+  };
 
   const loadProfile = useCallback(async () => {
     try {
@@ -328,6 +351,55 @@ export default function ProfileScreen() {
         </View>
       </View>
 
+      {/* FitRoast */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>FitRoast</Text>
+        <View style={styles.toggleCard}>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleInfo}>
+              <Text style={styles.toggleLabel}>Weekly FitRoast</Text>
+              <Text style={styles.toggleDescription}>
+                Get a weekly AI roast of your fitness performance
+              </Text>
+            </View>
+            <Switch
+              value={fitRoastEnabled}
+              onValueChange={handleFitRoastToggle}
+              trackColor={{ false: colors.surfaceMute, true: colors.accent }}
+              thumbColor={fitRoastEnabled ? colors.textPrimary : colors.textMuted}
+            />
+          </View>
+
+          {fitRoastEnabled && (
+            <View style={styles.intensitySection}>
+              <Text style={styles.intensityLabel}>Roast Intensity</Text>
+              <View style={styles.intensitySelector}>
+                {(['Light', 'Spicy', 'Savage'] as const).map((level) => (
+                  <TouchableOpacity
+                    key={level}
+                    style={[
+                      styles.intensityOption,
+                      roastIntensity === level && styles.intensityOptionActive,
+                    ]}
+                    onPress={() => handleIntensityChange(level)}
+                  >
+                    <Text
+                      style={[
+                        styles.intensityOptionText,
+                        roastIntensity === level && styles.intensityOptionTextActive,
+                      ]}
+                    >
+                      {level}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )}
+
+        </View>
+      </View>
+
       {/* Logout */}
       <View style={styles.section}>
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -493,6 +565,46 @@ const styles = StyleSheet.create({
   },
   toggleDescription: {
     ...typography.bodyMuted,
+  },
+  intensitySection: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceMute + '40',
+  },
+  intensityLabel: {
+    ...typography.bodyMuted,
+    marginBottom: spacing.sm,
+  },
+  intensitySelector: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  intensityOption: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.surfaceMute + '80',
+    alignItems: 'center',
+  },
+  intensityOptionActive: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accent + '18',
+  },
+  intensityOptionText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  intensityOptionTextActive: {
+    color: colors.accent,
+  },
+  roastOffNote: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: spacing.md,
+    fontStyle: 'italic',
   },
   logoutButton: {
     backgroundColor: colors.danger,

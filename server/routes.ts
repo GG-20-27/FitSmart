@@ -4846,6 +4846,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch { /* graceful */ }
 
       // Generate
+      const roastIntensity = req.body?.intensity as 'Light' | 'Spicy' | 'Savage' | undefined;
       const payload = await openAIService.generateFitRoast({
         weekStart,
         weekEnd,
@@ -4863,6 +4864,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userGoal: userGoalTitle,
         injuryNotes,
         userContextSummary: roastContextSummary,
+        intensity: roastIntensity,
       });
 
       // Store

@@ -1,16 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated,
   ActivityIndicator, Dimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, spacing, typography, radii } from '../theme';
 import { getFitRoastCurrent, generateFitRoast, type FitRoastResponse, type FitRoastSegment } from '../api/fitroast';
 import FitRoastShareModal from '../components/FitRoastShareModal';
 
 const { width: W, height: H } = Dimensions.get('window');
 
-type ScreenState = 'loading' | 'empty' | 'generating' | 'intro' | 'roast' | 'error';
+type ScreenState = 'loading' | 'off' | 'empty' | 'generating' | 'intro' | 'roast' | 'error';
 
 export default function FitRoastScreen() {
   const [screenState, setScreenState] = useState<ScreenState>('loading');
@@ -18,16 +20,29 @@ export default function FitRoastScreen() {
   const [segmentIndex, setSegmentIndex] = useState(-1); // -1 = intro/headline
   const [error, setError] = useState<string | null>(null);
   const [shareVisible, setShareVisible] = useState(false);
+  const [roastIntensity, setRoastIntensity] = useState<'Light' | 'Spicy' | 'Savage'>('Spicy');
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
   const screenFade = useRef(new Animated.Value(0)).current;
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
     Animated.timing(screenFade, { toValue: 1, duration: 600, useNativeDriver: true }).start();
-    loadRoast();
-  }, []);
+    // Re-check settings every time this tab comes into focus
+    AsyncStorage.multiGet(['fitRoastEnabled', 'roastIntensity']).then(pairs => {
+      const enabled = pairs[0][1];
+      const intensity = pairs[1][1];
+      if (intensity === 'Light' || intensity === 'Spicy' || intensity === 'Savage') {
+        setRoastIntensity(intensity);
+      }
+      if (enabled === 'false') {
+        setScreenState('off');
+      } else {
+        loadRoast();
+      }
+    }).catch(() => loadRoast()); // fallback: load if storage fails
+  }, []));
 
   async function loadRoast() {
     setScreenState('loading');
@@ -50,7 +65,7 @@ export default function FitRoastScreen() {
   async function triggerGenerate() {
     setScreenState('generating');
     try {
-      const data = await generateFitRoast();
+      const data = await generateFitRoast(roastIntensity);
       setRoast(data);
       setSegmentIndex(-1);
       setScreenState('intro');
@@ -115,6 +130,19 @@ export default function FitRoastScreen() {
           <Text style={styles.ctaButtonText}>Try Again</Text>
         </TouchableOpacity>
       </View>
+    );
+  }
+
+  // ── Off — FitRoast disabled in settings ──
+  if (screenState === 'off') {
+    return (
+      <Animated.View style={[styles.fullCenter, { opacity: screenFade }]}>
+        <Ionicons name="flame-outline" size={52} color={colors.surfaceMute} />
+        <Text style={styles.offTitle}>FitRoast is currently off.</Text>
+        <Text style={styles.offSubtitle}>
+          Turn it on in Settings to face your weekly truth.
+        </Text>
+      </Animated.View>
     );
   }
 
@@ -389,6 +417,20 @@ const styles = StyleSheet.create({
   progressDotActive: {
     backgroundColor: colors.accent,
     width: 18,
+  },
+
+  // Off state
+  offTitle: {
+    ...typography.h2,
+    textAlign: 'center',
+    fontWeight: '700',
+    marginTop: spacing.lg,
+  },
+  offSubtitle: {
+    ...typography.bodyMuted,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    lineHeight: 22,
   },
 
   // Empty state

@@ -20,6 +20,43 @@ import Svg, { Circle, LinearGradient, Stop, Defs } from 'react-native-svg';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// ─── Dynamic forecast copy — rotates daily, never the same two days running ──
+
+const FORECAST_COPY: Record<'high' | 'mid' | 'low', Array<{ line1: string; line2: string }>> = {
+  high: [
+    { line1: 'FitScore of {s} is within reach.', line2: 'Precision today determines the outcome.' },
+    { line1: 'Everything aligns for a {s}.', line2: 'Lock in and make every rep count.' },
+    { line1: 'Your body is primed for {s}.', line2: 'Push with intention — not just intensity.' },
+    { line1: '{s} is yours to earn today.', line2: 'Execution separates good from great.' },
+    { line1: 'Conditions are set for a {s}.', line2: 'Stay sharp from the first set to the last.' },
+  ],
+  mid: [
+    { line1: 'A solid {s} is achievable.', line2: 'Smart effort beats hard effort today.' },
+    { line1: 'FitScore of {s} — work with your body.', line2: 'Consistency over intensity this session.' },
+    { line1: 'Moderate output expected at {s}.', line2: 'Nail the fundamentals and build on them.' },
+    { line1: '{s} within reach with disciplined effort.', line2: 'Quality reps count more than quantity.' },
+    { line1: 'Show up clean and earn {s}.', line2: 'Control what you can, let the rest follow.' },
+  ],
+  low: [
+    { line1: 'Recovery day — FitScore sits at {s}.', line2: 'Rest is part of the plan, not a detour.' },
+    { line1: 'Low output day at {s}.', line2: 'Honour the signal and recharge properly.' },
+    { line1: 'FitScore of {s} — your body needs margin.', line2: 'Quality sleep now builds tomorrow\'s score.' },
+    { line1: '{s} — threshold crossed into recovery.', line2: 'Protect your adaptation window today.' },
+    { line1: 'Listen to {s} and dial it back.', line2: 'Conservation today is performance tomorrow.' },
+  ],
+};
+
+function getDynamicForecastLines(score: number): { line1: string; line2: string } {
+  const zone = score >= 7 ? 'high' : score >= 4 ? 'mid' : 'low';
+  const variants = FORECAST_COPY[zone];
+  const dayOfYear = Math.floor(
+    (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
+  );
+  const { line1, line2 } = variants[dayOfYear % variants.length];
+  const s = score.toFixed(1);
+  return { line1: line1.replace('{s}', s), line2: line2.replace('{s}', s) };
+}
+
 type FitScoreForecast = {
   forecast: number;
   factors: {
@@ -331,21 +368,18 @@ export default function DashboardScreen() {
         <View style={styles.forecastSection}>
           <Text style={styles.forecastTitle}>Today's FitScore Forecast</Text>
 
-          {forecast && (
-            <>
-              <FitScorePulseRing score={forecast.forecast} />
-              <View style={styles.forecastTextBlock}>
-                <Text style={styles.forecastLine1}>
-                  {forecast.insightLine1 || forecast.insight.split('\n')[0]}
-                </Text>
-                {(forecast.insightLine2 || forecast.insight.split('\n')[1]) ? (
-                  <Text style={styles.forecastLine2}>
-                    {forecast.insightLine2 || forecast.insight.split('\n')[1]}
-                  </Text>
-                ) : null}
-              </View>
-            </>
-          )}
+          {forecast && (() => {
+            const { line1, line2 } = getDynamicForecastLines(forecast.forecast);
+            return (
+              <>
+                <FitScorePulseRing score={forecast.forecast} />
+                <View style={styles.forecastTextBlock}>
+                  <Text style={styles.forecastLine1}>{line1}</Text>
+                  <Text style={styles.forecastLine2}>{line2}</Text>
+                </View>
+              </>
+            );
+          })()}
 
           {!forecast && !loading && (
             <View style={styles.forecastPlaceholder}>
@@ -573,11 +607,12 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   forecastLine2: {
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '400',
     textAlign: 'center',
-    color: colors.textMuted,
-    lineHeight: 19,
+    color: colors.textPrimary,
+    opacity: 0.75,
+    lineHeight: 20,
     opacity: 0.8,
   },
   forecastPlaceholder: {
