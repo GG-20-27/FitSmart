@@ -84,9 +84,9 @@ export default function FitScoreTriangle({
     training:  customColors?.training  || getZoneColor(trainingScore),
   };
   const light = {
-    recovery:  lightenColor(c.recovery,  0.32),
-    nutrition: lightenColor(c.nutrition, 0.32),
-    training:  lightenColor(c.training,  0.32),
+    recovery:  lightenColor(c.recovery,  0.55),
+    nutrition: lightenColor(c.nutrition, 0.55),
+    training:  lightenColor(c.training,  0.55),
   };
   // All 3 pillars same zone color → center gets color flourish after reveal
   const allSameColor = c.recovery === c.nutrition && c.nutrition === c.training;
@@ -445,9 +445,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.4,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.55,
+    shadowRadius: 32,
+    elevation: 16,
   },
 });

@@ -7,3 +7,4 @@ server/public
 vite.config.ts.*
 *.tar.gzserver/.env
 *.env
+mobile/.expo/

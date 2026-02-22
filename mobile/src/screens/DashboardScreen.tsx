@@ -12,6 +12,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiRequest } from '../api/client';
 import { colors, spacing, radii, typography, state } from '../theme';
 import { Card } from '../ui/components';
@@ -270,6 +271,27 @@ export default function DashboardScreen() {
   const [weeklyMetrics, setWeeklyMetrics] = useState<WeeklyMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [daysOfData, setDaysOfData] = useState<number | null>(null);
+
+  // Trigger backfill once per day — fills last 34 days of missing WHOOP history silently in background
+  const triggerBackfill = useCallback(async () => {
+    try {
+      const THROTTLE_MS = 24 * 60 * 60 * 1000; // once per day
+      const lastRun = await AsyncStorage.getItem('lastBackfillRun_v2');
+      if (lastRun && Date.now() - parseInt(lastRun) < THROTTLE_MS) {
+        // Use cached coverage count from last run
+        const cached = await AsyncStorage.getItem('whoopDaysOfData_v2');
+        if (cached !== null) setDaysOfData(parseInt(cached));
+        return;
+      }
+      const result = await apiRequest<{ daysWithData: number; hasFullMonth: boolean }>('/api/whoop/backfill', { method: 'POST' });
+      setDaysOfData(result.daysWithData);
+      await AsyncStorage.setItem('lastBackfillRun_v2', String(Date.now()));
+      await AsyncStorage.setItem('whoopDaysOfData_v2', String(result.daysWithData));
+    } catch {
+      // Silently fail — non-critical background task
+    }
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -304,7 +326,8 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+    triggerBackfill();
+  }, [loadData, triggerBackfill]);
 
   useFocusEffect(
     useCallback(() => {
@@ -319,7 +342,14 @@ export default function DashboardScreen() {
 
   const calculateDelta = (today: number | undefined, yesterday: number | undefined): number | undefined => {
     if (today === undefined || yesterday === undefined || yesterday === 0) return undefined;
-    return Math.round(((today - yesterday) / yesterday) * 100);
+    const result = Math.round(((today - yesterday) / yesterday) * 100);
+    return isFinite(result) && !isNaN(result) ? result : undefined;
+  };
+
+  // Guard any delta value (including server-computed ones) against Infinity/NaN
+  const safeDelta = (v: number | undefined): number | undefined => {
+    if (v === undefined || !isFinite(v) || isNaN(v)) return undefined;
+    return v;
   };
 
   const formatTime = (isoString: string): string => {
@@ -340,10 +370,14 @@ export default function DashboardScreen() {
   };
 
   // Calculate delta for absolute values (strain, HRV)
-  const calculateAbsoluteDelta = (today: number | undefined, yesterday: number | undefined): number | undefined => {
-    if (today === undefined || yesterday === undefined) return undefined;
+  const calculateAbsoluteDelta = (today: number | undefined | null, yesterday: number | undefined | null): number | undefined => {
+    if (today == null || yesterday == null) return undefined;
     return Math.round((today - yesterday) * 10) / 10;
   };
+
+  // HRV values below 10ms are sensor noise from WHOOP — filter them out before computing deltas
+  const validHRV = (v: number | undefined | null): number | undefined =>
+    (v != null && v >= 10) ? v : undefined;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -388,14 +422,18 @@ export default function DashboardScreen() {
           )}
         </View>
 
-        {/* Today's Metric Cards */}
-        <View style={styles.metricsSection}>
+        {/* Today's Metrics */}
+        <View style={styles.sectionBox}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionAccentBar} />
+            <Text style={styles.sectionTitle}>TODAY'S METRICS</Text>
+          </View>
           <View style={styles.metricRow}>
             <MetricCard
               icon="moon-outline"
               label="Sleep"
               value={todayMetrics?.sleep_score ? `${todayMetrics.sleep_score}%` : 'N/A'}
-              delta={calculateDelta(todayMetrics?.sleep_score, yesterdayMetrics?.sleep_score)}
+              delta={safeDelta(calculateDelta(todayMetrics?.sleep_score, yesterdayMetrics?.sleep_score))}
               borderColor={todayMetrics?.sleep_score ? getSleepColor(todayMetrics.sleep_score) : undefined}
               valueColor={todayMetrics?.sleep_score ? getSleepColor(todayMetrics.sleep_score) : undefined}
             />
@@ -403,7 +441,7 @@ export default function DashboardScreen() {
               icon="heart-outline"
               label="Recovery"
               value={todayMetrics?.recovery_score ? `${todayMetrics.recovery_score}%` : 'N/A'}
-              delta={calculateDelta(todayMetrics?.recovery_score, yesterdayMetrics?.recovery_score)}
+              delta={safeDelta(calculateDelta(todayMetrics?.recovery_score, yesterdayMetrics?.recovery_score))}
               borderColor={todayMetrics?.recovery_score ? getRecoveryColor(todayMetrics.recovery_score) : undefined}
               valueColor={todayMetrics?.recovery_score ? getRecoveryColor(todayMetrics.recovery_score) : undefined}
             />
@@ -413,16 +451,16 @@ export default function DashboardScreen() {
               icon="flame-outline"
               label="Strain"
               value={todayMetrics?.strain ? `${todayMetrics.strain.toFixed(1)}` : 'N/A'}
-              delta={calculateAbsoluteDelta(todayMetrics?.strain, yesterdayMetrics?.strain)}
-              borderColor={todayMetrics?.strain ? getStrainColor(todayMetrics.strain, todayMetrics?.recovery_score) : undefined}
-              valueColor={todayMetrics?.strain ? getStrainColor(todayMetrics.strain, todayMetrics?.recovery_score) : undefined}
+              delta={safeDelta(calculateAbsoluteDelta(todayMetrics?.strain, yesterdayMetrics?.strain))}
+              borderColor={colors.textMuted}
+              valueColor={colors.textMuted}
               neutralDelta={true}
             />
             <MetricCard
               icon="pulse-outline"
               label="HRV"
               value={todayMetrics?.hrv ? `${Math.round(todayMetrics.hrv)} ms` : 'N/A'}
-              delta={calculateAbsoluteDelta(todayMetrics?.hrv, yesterdayMetrics?.hrv)}
+              delta={safeDelta(calculateAbsoluteDelta(validHRV(todayMetrics?.hrv), validHRV(yesterdayMetrics?.hrv)))}
               borderColor={colors.textMuted}
               valueColor={colors.textMuted}
               neutralDelta={true}
@@ -431,14 +469,17 @@ export default function DashboardScreen() {
         </View>
 
         {/* Yesterday's Metrics */}
-        <Text style={styles.sectionTitle}>YESTERDAY'S METRICS</Text>
-        <View style={styles.metricsSection}>
+        <View style={styles.sectionBox}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionAccentBar} />
+            <Text style={styles.sectionTitle}>YESTERDAY'S METRICS</Text>
+          </View>
           <View style={styles.metricRow}>
             <MetricCard
               icon="moon-outline"
               label="Sleep"
               value={yesterdayMetrics?.sleep_score ? `${yesterdayMetrics.sleep_score}%` : 'N/A'}
-              delta={calculateDelta(yesterdayMetrics?.sleep_score, lastWeekMetrics?.sleep_score)}
+              delta={safeDelta(calculateDelta(yesterdayMetrics?.sleep_score, lastWeekMetrics?.sleep_score))}
               deltaLabel="vs. last week"
               borderColor={yesterdayMetrics?.sleep_score ? getSleepColor(yesterdayMetrics.sleep_score) : undefined}
               valueColor={yesterdayMetrics?.sleep_score ? getSleepColor(yesterdayMetrics.sleep_score) : undefined}
@@ -447,7 +488,7 @@ export default function DashboardScreen() {
               icon="heart-outline"
               label="Recovery"
               value={yesterdayMetrics?.recovery_score ? `${yesterdayMetrics.recovery_score}%` : 'N/A'}
-              delta={calculateDelta(yesterdayMetrics?.recovery_score, lastWeekMetrics?.recovery_score)}
+              delta={safeDelta(calculateDelta(yesterdayMetrics?.recovery_score, lastWeekMetrics?.recovery_score))}
               deltaLabel="vs. last week"
               borderColor={yesterdayMetrics?.recovery_score ? getRecoveryColor(yesterdayMetrics.recovery_score) : undefined}
               valueColor={yesterdayMetrics?.recovery_score ? getRecoveryColor(yesterdayMetrics.recovery_score) : undefined}
@@ -458,17 +499,17 @@ export default function DashboardScreen() {
               icon="flame-outline"
               label="Strain"
               value={yesterdayMetrics?.strain ? `${yesterdayMetrics.strain.toFixed(1)}` : 'N/A'}
-              delta={calculateAbsoluteDelta(yesterdayMetrics?.strain, lastWeekMetrics?.strain)}
+              delta={safeDelta(calculateAbsoluteDelta(yesterdayMetrics?.strain, lastWeekMetrics?.strain))}
               deltaLabel="vs. last week"
-              borderColor={yesterdayMetrics?.strain ? getStrainColor(yesterdayMetrics.strain, yesterdayMetrics?.recovery_score) : undefined}
-              valueColor={yesterdayMetrics?.strain ? getStrainColor(yesterdayMetrics.strain, yesterdayMetrics?.recovery_score) : undefined}
+              borderColor={colors.textMuted}
+              valueColor={colors.textMuted}
               neutralDelta={true}
             />
             <MetricCard
               icon="pulse-outline"
               label="HRV"
               value={yesterdayMetrics?.hrv ? `${Math.round(yesterdayMetrics.hrv)} ms` : 'N/A'}
-              delta={calculateAbsoluteDelta(yesterdayMetrics?.hrv, lastWeekMetrics?.hrv)}
+              delta={safeDelta(calculateAbsoluteDelta(validHRV(yesterdayMetrics?.hrv), validHRV(lastWeekMetrics?.hrv)))}
               deltaLabel="vs. last week"
               borderColor={colors.textMuted}
               valueColor={colors.textMuted}
@@ -477,15 +518,29 @@ export default function DashboardScreen() {
           </View>
         </View>
 
+        {/* Data coverage notice — shown until monthly comparisons become available */}
+        {weeklyMetrics?.comparison?.vs_last_month?.sleep_percent_delta === undefined && daysOfData !== null && daysOfData < 28 && (
+          <View style={styles.coverageNotice}>
+            <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
+            <Text style={styles.coverageNoticeText}>
+              Wear WHOOP for at least a month to unlock all comparisons.{' '}
+              <Text style={styles.coverageNoticeCount}>{daysOfData}/28 days synced.</Text>
+            </Text>
+          </View>
+        )}
+
         {/* Weekly Averages */}
-        <Text style={styles.sectionTitle}>WEEKLY AVERAGES</Text>
-        <View style={styles.metricsSection}>
+        <View style={styles.sectionBox}>
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionAccentBar} />
+            <Text style={styles.sectionTitle}>WEEKLY AVERAGES</Text>
+          </View>
           <View style={styles.metricRow}>
             <MetricCard
               icon="moon-outline"
               label="Avg Sleep"
               value={weeklyMetrics?.averages?.sleep_score_percent ? `${Math.round(weeklyMetrics.averages.sleep_score_percent)}%` : 'N/A'}
-              delta={weeklyMetrics?.comparison?.vs_last_month?.sleep_percent_delta}
+              delta={safeDelta(weeklyMetrics?.comparison?.vs_last_month?.sleep_percent_delta)}
               deltaLabel="vs. last month"
               borderColor={weeklyMetrics?.averages?.sleep_score_percent ? getSleepColor(weeklyMetrics.averages.sleep_score_percent) : undefined}
               valueColor={weeklyMetrics?.averages?.sleep_score_percent ? getSleepColor(weeklyMetrics.averages.sleep_score_percent) : undefined}
@@ -494,7 +549,7 @@ export default function DashboardScreen() {
               icon="heart-outline"
               label="Avg Recovery"
               value={weeklyMetrics?.averages?.recovery_score_percent ? `${Math.round(weeklyMetrics.averages.recovery_score_percent)}%` : 'N/A'}
-              delta={weeklyMetrics?.comparison?.vs_last_month?.recovery_percent_delta}
+              delta={safeDelta(weeklyMetrics?.comparison?.vs_last_month?.recovery_percent_delta)}
               deltaLabel="vs. last month"
               borderColor={weeklyMetrics?.averages?.recovery_score_percent ? getRecoveryColor(weeklyMetrics.averages.recovery_score_percent) : undefined}
               valueColor={weeklyMetrics?.averages?.recovery_score_percent ? getRecoveryColor(weeklyMetrics.averages.recovery_score_percent) : undefined}
@@ -505,17 +560,17 @@ export default function DashboardScreen() {
               icon="flame-outline"
               label="Avg Strain"
               value={weeklyMetrics?.averages?.strain_score ? `${weeklyMetrics.averages.strain_score.toFixed(1)}` : 'N/A'}
-              delta={weeklyMetrics?.comparison?.vs_last_month?.strain_delta}
+              delta={safeDelta(weeklyMetrics?.comparison?.vs_last_month?.strain_delta)}
               deltaLabel="vs. last month"
-              borderColor={weeklyMetrics?.averages?.strain_score ? getStrainColor(weeklyMetrics.averages.strain_score) : undefined}
-              valueColor={weeklyMetrics?.averages?.strain_score ? getStrainColor(weeklyMetrics.averages.strain_score) : undefined}
+              borderColor={colors.textMuted}
+              valueColor={colors.textMuted}
               neutralDelta={true}
             />
             <MetricCard
               icon="pulse-outline"
               label="Avg HRV"
               value={weeklyMetrics?.averages?.hrv_ms ? `${Math.round(weeklyMetrics.averages.hrv_ms)} ms` : 'N/A'}
-              delta={weeklyMetrics?.comparison?.vs_last_month?.hrv_ms_delta}
+              delta={safeDelta(weeklyMetrics?.averages?.hrv_ms && weeklyMetrics.averages.hrv_ms >= 10 ? weeklyMetrics?.comparison?.vs_last_month?.hrv_ms_delta : undefined)}
               deltaLabel="vs. last month"
               borderColor={colors.textMuted}
               valueColor={colors.textMuted}
@@ -624,17 +679,32 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textMuted,
   },
+  sectionBox: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute + '40',
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  sectionAccentBar: {
+    width: 3,
+    height: 14,
+    borderRadius: 2,
+    backgroundColor: colors.accent,
+  },
   sectionTitle: {
     ...typography.small,
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11,
+    fontWeight: '700',
     color: colors.textMuted,
-    letterSpacing: 1,
-    marginBottom: spacing.md,
-    marginTop: spacing.md,
-  },
-  metricsSection: {
-    marginBottom: spacing.sm,
+    letterSpacing: 1.2,
   },
   metricRow: {
     flexDirection: 'row',
@@ -677,6 +747,28 @@ const styles = StyleSheet.create({
   metricDeltaText: {
     ...typography.small,
     fontSize: 10,
+  },
+  coverageNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.md,
+    padding: spacing.sm,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute + '30',
+  },
+  coverageNoticeText: {
+    ...typography.small,
+    fontSize: 11,
+    color: colors.textMuted,
+    flex: 1,
+    lineHeight: 16,
+  },
+  coverageNoticeCount: {
+    color: colors.accent,
+    fontWeight: '600',
   },
   chatButton: {
     flexDirection: 'row',

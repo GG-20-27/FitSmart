@@ -16,6 +16,7 @@ import {
   analyzeTraining,
   calculateFitScore,
   getCoachSummary,
+  getStoredFitScore,
   formatDate,
   type MealData,
   type TrainingDataEntry,
@@ -23,6 +24,7 @@ import {
   type FitScoreResponse,
   type CoachSummaryResponse,
   type CoachSlide,
+  type StoredFitScore,
 } from '../api/fitscore';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -302,6 +304,9 @@ export default function FitScoreScreen() {
   const [calculatingFitScore, setCalculatingFitScore] = useState(false);
   const [showFitScoreResult, setShowFitScoreResult] = useState(false);
 
+  // Stored FitScore for past dates (read-only)
+  const [storedScore, setStoredScore] = useState<StoredFitScore | null>(null);
+
   // Coach summary state
   const [coachSummary, setCoachSummary] = useState<CoachSummaryResponse | null>(null);
   const [loadingCoachSummary, setLoadingCoachSummary] = useState(false);
@@ -315,8 +320,15 @@ export default function FitScoreScreen() {
   const visibilityPollRef = useRef<ReturnType<typeof setInterval>>();
   const [showFormulaTooltip, setShowFormulaTooltip] = useState(false);
   const fitScoreFadeAnim = useRef(new Animated.Value(0)).current;
+  // Cache FitScore results by date string so navigating away and back doesn't lose the result
+  const fitScoreCacheRef = useRef<Map<string, FitScoreResponse>>(new Map());
 
   const isToday = selectedDate.toDateString() === new Date().toDateString();
+  const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = selectedDate.toDateString() === yesterday.toDateString();
+  const isPastDate = !isToday && !isYesterday;
+  // When viewing yesterday's FitScore, "yesterdayData" is 2 days ago, so label accordingly
+  const comparisonLabel = isToday ? 'vs yesterday' : 'vs 2 days ago';
   const hasMeals = meals.length > 0;
   const hasTraining = trainingSessions.length > 0;
   const canCalculate = hasMeals; // Training is optional — minimum is one meal
@@ -356,25 +368,54 @@ export default function FitScoreScreen() {
   }, [selectedDate]);
 
   const loadDataForDate = async () => {
+    // Clear stale state FIRST — prevents previous date's data from flashing
+    setFitScoreResult(null);
+    setShowFitScoreResult(false);
+    setStoredScore(null);
+    setMeals([]);
+    setTrainingSessions([]);
     setLoading(true);
+
+    const dateStr = formatDate(selectedDate);
+    const today = new Date();
+    const yest = new Date(); yest.setDate(yest.getDate() - 1);
+    const isDateToday = selectedDate.toDateString() === today.toDateString();
+    const isDateYesterday = selectedDate.toDateString() === yest.toDateString();
+    const isDatePast = !isDateToday && !isDateYesterday;
+
     try {
-      const dateStr = formatDate(selectedDate);
+      if (isDatePast) {
+        // Past dates: read-only — fetch stored FitScore only, never show meals
+        try {
+          const stored = await getStoredFitScore(dateStr);
+          setStoredScore(stored); // null → shows NoScore state
+        } catch {
+          // Silently ignore — storedScore stays null → NoScore state shown
+        }
+      } else {
+        // Today / yesterday — restore cached FitScore result if available
+        const cached = fitScoreCacheRef.current.get(dateStr);
+        if (cached) {
+          setFitScoreResult(cached);
+          setShowFitScoreResult(true);
+        }
 
-      const [mealsData, trainingData] = await Promise.all([
-        getMealsByDate(dateStr),
-        getTrainingDataByDate(dateStr),
-      ]);
-
-      setMeals(mealsData);
-      setTrainingSessions(trainingData);
-
-      console.log(`Loaded ${mealsData.length} meals and ${trainingData.length} training sessions for ${dateStr}`);
-      if (trainingData.length > 0) {
-        console.log('[TRAINING DATA] First session breakdown:', trainingData[0].breakdown);
+        const [mealsData, trainingData] = await Promise.all([
+          getMealsByDate(dateStr),
+          getTrainingDataByDate(dateStr),
+        ]);
+        setMeals(mealsData);
+        setTrainingSessions(trainingData);
+        console.log(`Loaded ${mealsData.length} meals and ${trainingData.length} training sessions for ${dateStr}`);
+        if (trainingData.length > 0) {
+          console.log('[TRAINING DATA] First session breakdown:', trainingData[0].breakdown);
+        }
       }
     } catch (error) {
       console.error('Failed to load data:', error);
-      Alert.alert('Error', 'Failed to load data for this date');
+      if (!isDatePast) {
+        Alert.alert('Error', 'Failed to load data for this date');
+      }
     } finally {
       setLoading(false);
     }
@@ -382,10 +423,16 @@ export default function FitScoreScreen() {
 
   const formatDateDisplay = (date: Date) => {
     const today = new Date();
-    if (date.toDateString() === today.toDateString()) {
-      return 'TODAY';
-    }
+    if (date.toDateString() === today.toDateString()) return 'TODAY';
+    const yest = new Date(); yest.setDate(yest.getDate() - 1);
+    if (date.toDateString() === yest.toDateString()) return 'YESTERDAY';
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const getDateLabel = (): string => {
+    if (isToday) return 'today';
+    if (isYesterday) return 'yesterday';
+    return selectedDate.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   };
 
   const handlePreviousDay = () => {
@@ -424,6 +471,8 @@ export default function FitScoreScreen() {
       console.log(`[FITSCORE] Result received: ${result.fitScore}/10`);
       setFitScoreResult(result);
       setShowFitScoreResult(true);
+      // Cache by date so navigating away and back restores the result
+      fitScoreCacheRef.current.set(formatDate(selectedDate), result);
 
       // Trigger fade-in animation
       fitScoreFadeAnim.setValue(0);
@@ -470,6 +519,7 @@ export default function FitScoreScreen() {
         recoveryBreakdownScore: fitScoreData.breakdown.recovery.score,
         trainingBreakdownScore: fitScoreData.breakdown.training.score,
         nutritionBreakdownScore: fitScoreData.breakdown.nutrition.score,
+        dateLabel: getDateLabel(),
       });
       setCoachSummary(summary);
       console.log('[COACH SUMMARY] Summary received');
@@ -885,11 +935,57 @@ export default function FitScoreScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Meals Section */}
-      <View style={styles.section}>
+      {/* Yesterday shortcut — shown on today's view */}
+      {isToday && (
+        <TouchableOpacity style={styles.yesterdayShortcut} onPress={handlePreviousDay} activeOpacity={0.7}>
+          <Ionicons name="arrow-back-outline" size={13} color={colors.textMuted} />
+          <Text style={styles.yesterdayShortcutText}>Forgot yesterday's score? Add it now</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Retroactive context banner — only for yesterday */}
+      {isYesterday && (
+        <View style={styles.retroBanner}>
+          <Ionicons name="time-outline" size={14} color={colors.accent} />
+          <Text style={styles.retroBannerText}>
+            Adding FitScore for <Text style={styles.retroBannerDate}>YESTERDAY</Text>
+            {' — WHOOP data from that day will be used automatically.'}
+          </Text>
+        </View>
+      )}
+
+      {/* Past Date View — dates older than yesterday: read-only */}
+      {isPastDate && !loading && (
+        storedScore ? (
+          <View style={styles.pastScoreSection}>
+            <View style={[styles.pastScoreCircle, {
+              borderColor: storedScore.score >= 7 ? colors.success : storedScore.score >= 4 ? colors.warning : colors.danger
+            }]}>
+              <Text style={[styles.pastScoreNumber, {
+                color: storedScore.score >= 7 ? colors.success : storedScore.score >= 4 ? colors.warning : colors.danger
+              }]}>
+                {storedScore.score.toFixed(1)}
+              </Text>
+              <Text style={styles.pastScoreFitLabel}>FitScore</Text>
+            </View>
+            <Text style={styles.pastScoreDate}>Logged {formatDateDisplay(selectedDate)}</Text>
+          </View>
+        ) : (
+          <View style={styles.pastEmptySection}>
+            <Ionicons name="calendar-clear-outline" size={64} color={colors.surfaceMute} />
+            <Text style={styles.pastEmptyTitle}>FitScore? More like NoScore.</Text>
+            <Text style={styles.pastEmptyText}>
+              Looks like nothing was logged this day, but let's not make it a habit.
+            </Text>
+          </View>
+        )
+      )}
+
+      {/* Meals section — hidden for past dates (>1 day ago) */}
+      {!isPastDate && (<View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Meals</Text>
-          {hasMeals && isToday && (
+          {hasMeals && (isToday || isYesterday) && (
             <TouchableOpacity
               onPress={() => setIsEditingMeals(!isEditingMeals)}
               style={styles.editButton}
@@ -910,12 +1006,12 @@ export default function FitScoreScreen() {
           <View style={styles.emptyState}>
             <Ionicons name="restaurant-outline" size={48} color={colors.surfaceMute} />
             <Text style={styles.emptyStateText}>No meals logged yet</Text>
-            {isToday && (
+            {(isToday || isYesterday) && (
               <Button
                 onPress={handleAddMealPress}
                 style={styles.addButton}
               >
-                Add Today's Meals
+                {isYesterday ? "Add Yesterday's Meals" : "Add Today's Meals"}
               </Button>
             )}
           </View>
@@ -956,7 +1052,7 @@ export default function FitScoreScreen() {
                 </View>
               </TouchableOpacity>
             ))}
-            {isToday && (
+            {(isToday || isYesterday) && (
               <TouchableOpacity
                 style={styles.addMealCard}
                 onPress={handleAddMealPress}
@@ -967,14 +1063,14 @@ export default function FitScoreScreen() {
             )}
           </View>
         )}
-      </View>
+      </View>)}
 
       {/* Training Section - Only shows after at least 1 meal */}
       {hasMeals && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Training</Text>
-            {hasTraining && isToday && (
+            {hasTraining && (isToday || isYesterday) && (
               <TouchableOpacity
                 onPress={() => setIsEditingTrainings(!isEditingTrainings)}
                 style={styles.editButton}
@@ -1053,7 +1149,7 @@ export default function FitScoreScreen() {
                   </TouchableOpacity>
                 );
               })}
-              {isToday && !trainingEditing && (
+              {(isToday || isYesterday) && !trainingEditing && (
                 <TouchableOpacity
                   style={styles.addTrainingCard}
                   onPress={() => setTrainingEditing(true)}
@@ -1069,7 +1165,7 @@ export default function FitScoreScreen() {
             <View style={styles.emptyState}>
               <Ionicons name="barbell-outline" size={48} color={colors.surfaceMute} />
               <Text style={styles.emptyStateText}>Add training context</Text>
-              {isToday && (
+              {(isToday || isYesterday) && (
                 <TouchableOpacity
                   style={styles.addTrainingEmptyCard}
                   onPress={() => setTrainingEditing(true)}
@@ -1266,7 +1362,7 @@ export default function FitScoreScreen() {
       )}
 
       {/* Calculate FitScore Button */}
-      {canCalculate && isToday && !showFitScoreResult && (
+      {canCalculate && (isToday || isYesterday) && !showFitScoreResult && (
         <View style={styles.calculateSection}>
           <Button
             onPress={handleCalculateFitScore}
@@ -1302,7 +1398,7 @@ export default function FitScoreScreen() {
                     { color: fitScoreResult.whoopData.recoveryScore >= fitScoreResult.yesterdayData.recoveryScore ? colors.success : colors.danger }
                   ]}>
                     {fitScoreResult.whoopData.recoveryScore >= fitScoreResult.yesterdayData.recoveryScore ? '↑' : '↓'}
-                    {Math.abs(fitScoreResult.whoopData.recoveryScore - fitScoreResult.yesterdayData.recoveryScore).toFixed(0)}% vs yesterday
+                    {Math.abs(fitScoreResult.whoopData.recoveryScore - fitScoreResult.yesterdayData.recoveryScore).toFixed(0)}% {comparisonLabel}
                   </Text>
                 )}
               </View>
@@ -1321,7 +1417,7 @@ export default function FitScoreScreen() {
                     { color: fitScoreResult.whoopData.sleepHours >= fitScoreResult.yesterdayData.sleepHours ? colors.success : colors.danger }
                   ]}>
                     {fitScoreResult.whoopData.sleepHours >= fitScoreResult.yesterdayData.sleepHours ? '↑' : '↓'}
-                    {Math.abs(fitScoreResult.whoopData.sleepHours - fitScoreResult.yesterdayData.sleepHours).toFixed(1)}h vs yesterday
+                    {Math.abs(fitScoreResult.whoopData.sleepHours - fitScoreResult.yesterdayData.sleepHours).toFixed(1)}h {comparisonLabel}
                   </Text>
                 )}
               </View>
@@ -1343,7 +1439,7 @@ export default function FitScoreScreen() {
                     { color: fitScoreResult.whoopData.sleepScore >= fitScoreResult.yesterdayData.sleepScore ? colors.success : colors.danger }
                   ]}>
                     {fitScoreResult.whoopData.sleepScore >= fitScoreResult.yesterdayData.sleepScore ? '↑' : '↓'}
-                    {Math.abs(fitScoreResult.whoopData.sleepScore - fitScoreResult.yesterdayData.sleepScore).toFixed(0)}% vs yesterday
+                    {Math.abs(fitScoreResult.whoopData.sleepScore - fitScoreResult.yesterdayData.sleepScore).toFixed(0)}% {comparisonLabel}
                   </Text>
                 )}
               </View>
@@ -1362,7 +1458,7 @@ export default function FitScoreScreen() {
                     { color: fitScoreResult.whoopData.hrv >= fitScoreResult.yesterdayData.hrv ? colors.success : colors.danger }
                   ]}>
                     {fitScoreResult.whoopData.hrv >= fitScoreResult.yesterdayData.hrv ? '↑' : '↓'}
-                    {Math.abs(fitScoreResult.whoopData.hrv - fitScoreResult.yesterdayData.hrv).toFixed(0)} ms vs yesterday
+                    {Math.abs(fitScoreResult.whoopData.hrv - fitScoreResult.yesterdayData.hrv).toFixed(0)} ms {comparisonLabel}
                   </Text>
                 )}
               </View>
@@ -1483,7 +1579,7 @@ export default function FitScoreScreen() {
       )}
 
       {/* Info text when conditions not met */}
-      {!canCalculate && isToday && (
+      {!canCalculate && (isToday || isYesterday) && (
         <View style={styles.infoBox}>
           <Ionicons name="information-circle-outline" size={20} color={colors.textMuted} />
           <Text style={styles.infoText}>
@@ -1827,6 +1923,40 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     minWidth: 120,
     textAlign: 'center',
+  },
+  yesterdayShortcut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    paddingVertical: spacing.sm,
+    marginTop: 2,
+  },
+  yesterdayShortcutText: {
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  retroBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.xs,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    backgroundColor: colors.accent + '15',
+    borderRadius: 8,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.accent + '30',
+  },
+  retroBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: colors.textMuted,
+    lineHeight: 17,
+  },
+  retroBannerDate: {
+    color: colors.accent,
+    fontWeight: '600',
   },
   section: {
     marginTop: spacing.xl,
@@ -3280,5 +3410,58 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.bgPrimary,
     fontWeight: '600',
+  },
+
+  // Past date read-only views
+  pastScoreSection: {
+    alignItems: 'center',
+    paddingVertical: spacing.xxl,
+    paddingHorizontal: spacing.lg,
+  },
+  pastScoreCircle: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    borderWidth: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgSecondary,
+    marginBottom: spacing.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  pastScoreNumber: {
+    fontSize: 52,
+    fontWeight: '800',
+    letterSpacing: -1,
+  },
+  pastScoreFitLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: -4,
+  },
+  pastScoreDate: {
+    ...typography.body,
+    color: colors.textMuted,
+  },
+  pastEmptySection: {
+    alignItems: 'center',
+    paddingVertical: spacing.xxl,
+    paddingHorizontal: spacing.lg,
+    gap: spacing.md,
+  },
+  pastEmptyTitle: {
+    ...typography.title,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+  },
+  pastEmptyText: {
+    ...typography.body,
+    color: colors.textMuted,
+    textAlign: 'center',
+    lineHeight: 22,
   },
 });

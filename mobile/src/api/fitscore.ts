@@ -325,6 +325,28 @@ export interface CoachSummaryResponse {
 }
 
 /**
+ * Stored FitScore for a past date (minimal — only score number)
+ */
+export interface StoredFitScore {
+  date: string;
+  score: number;
+  calculatedAt: string;
+}
+
+/**
+ * Fetch a stored FitScore for a specific past date.
+ * Returns null if no FitScore was calculated for that date.
+ */
+export async function getStoredFitScore(date: string): Promise<StoredFitScore | null> {
+  const data = await apiRequest<{ found: boolean; date?: string; score?: number; calculatedAt?: string }>(
+    `/api/fitscore/date?date=${encodeURIComponent(date)}`,
+    { method: 'GET' }
+  );
+  if (!data.found || data.score == null) return null;
+  return { date: data.date!, score: data.score, calculatedAt: data.calculatedAt! };
+}
+
+/**
  * Get FitCoach daily summary
  * Returns warm, supportive summary without raw numbers
  */
@@ -347,6 +369,7 @@ export async function getCoachSummary(params: {
   recoveryBreakdownScore?: number;
   trainingBreakdownScore?: number;
   nutritionBreakdownScore?: number;
+  dateLabel?: string; // "today" | "yesterday" | "Feb 21"
 }): Promise<CoachSummaryResponse> {
   console.log(`[API] Getting coach summary`);
 

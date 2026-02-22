@@ -23,6 +23,11 @@ export interface TrainingScoreInput {
 
   // User's fitness goal from user_goals table
   fitnessGoal?: string;
+
+  // Context from userContext table — determines expected strain band
+  rehabStage?: string;    // e.g. 'Acute', 'Sub-acute', 'Rehab', 'Return to training'
+  primaryGoal?: string;   // tier1Goal — e.g. 'Balanced Performance', 'High Performance', 'Rehab & Return'
+  weeklyLoad?: string;    // tier3WeekLoad — e.g. 'Light', 'Normal', 'Heavy', 'Competition'
 }
 
 export interface TrainingScoreResult {
@@ -63,7 +68,8 @@ export class TrainingScoreService {
     const strainAppropriatenessScore = this.calculateStrainAppropriateness(
       input.strainScore,
       recoveryZone,
-      input.recoveryScore
+      input.recoveryScore,
+      input
     );
 
     const sessionQualityScore = this.calculateSessionQuality(
@@ -129,49 +135,88 @@ export class TrainingScoreService {
   }
 
   /**
+   * Determine expected strain band based on user context.
+   * Baseline daily movement (normal life, no training) ≈ 6–9 WHOOP strain.
+   * Context overrides recovery-zone defaults.
+   */
+  private getExpectedStrainBand(
+    recoveryZone: 'green' | 'yellow' | 'red',
+    input: TrainingScoreInput
+  ): { min: number; max: number; ideal: number } {
+    const rehab = (input.rehabStage || '').toLowerCase();
+    const goal  = (input.primaryGoal || '').toLowerCase();
+    const load  = (input.weeklyLoad  || '').toLowerCase();
+    const note  = (input.comment     || '').toLowerCase();
+
+    const isAcuteRehab = rehab.includes('acute');
+    const isSubAcuteOrRehab = !isAcuteRehab && (
+      rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return')
+    );
+    const isRehabGoal = goal.includes('rehab') || goal.includes('return');
+    const isDeload    = load === 'light' || note.includes('deload') || note.includes('de-load');
+    const isHighPerf  = load === 'heavy' || load === 'competition' ||
+                        goal.includes('high performance') || goal.includes('performance');
+
+    if (isAcuteRehab) {
+      // Baseline movement only — extra training is overreach
+      return { min: 6, max: 11, ideal: 8 };
+    }
+    if (isSubAcuteOrRehab || isRehabGoal) {
+      // Controlled rehab work OK; large spikes penalised
+      return { min: 8, max: 14, ideal: 10.5 };
+    }
+    if (isDeload) {
+      // Reduced load is correct execution
+      return { min: 5, max: 12, ideal: 8 };
+    }
+    if (isHighPerf) {
+      // Elevated strain expected; low strain = missed opportunity
+      return {
+        green:  { min: 10, max: 19, ideal: 15 },
+        yellow: { min: 8,  max: 14, ideal: 11 },
+        red:    { min: 0,  max: 9,  ideal: 5  },
+      }[recoveryZone];
+    }
+    // Default: standard ranges by recovery zone
+    return {
+      green:  { min: 8, max: 18, ideal: 13  },
+      yellow: { min: 5, max: 12, ideal: 8.5 },
+      red:    { min: 0, max: 8,  ideal: 4   },
+    }[recoveryZone];
+  }
+
+  /**
    * Calculate strain appropriateness (40% of total score = 0-4 points)
-   * Evaluates if the strain level was appropriate for the recovery state
+   * Grades alignment between actual strain and the context-based expected band.
    */
   private calculateStrainAppropriateness(
     strainScore?: number,
     recoveryZone: 'green' | 'yellow' | 'red' = 'yellow',
-    recoveryScore?: number
+    recoveryScore?: number,
+    input: TrainingScoreInput = {} as TrainingScoreInput
   ): number {
-    // If no strain data available, return moderate score
     if (!strainScore) {
-      return 2.4; // 60% of 4 points
+      return 2.4; // No WHOOP data — neutral
     }
 
-    // Define optimal strain ranges for each recovery zone
-    // WHOOP strain typically ranges 0-21
-    const optimalRanges = {
-      green: { min: 8, max: 18, ideal: 13 },   // Can handle high strain
-      yellow: { min: 5, max: 12, ideal: 8.5 }, // Moderate strain
-      red: { min: 0, max: 8, ideal: 4 },       // Light activity or rest
-    };
+    const band = this.getExpectedStrainBand(recoveryZone, input);
 
-    const range = optimalRanges[recoveryZone];
-
-    // Calculate how well the strain matches the optimal range
     let score = 0;
-
-    if (strainScore >= range.min && strainScore <= range.max) {
-      // Within optimal range - calculate how close to ideal
-      const distanceFromIdeal = Math.abs(strainScore - range.ideal);
-      const maxDistance = (range.max - range.min) / 2;
-      score = 4 - (distanceFromIdeal / maxDistance) * 1; // 3-4 points
-    } else if (strainScore < range.min) {
-      // Under-training
-      const underBy = range.min - strainScore;
-      score = Math.max(1.5, 3 - (underBy / range.min) * 1.5); // 1.5-3 points
+    if (strainScore >= band.min && strainScore <= band.max) {
+      const distanceFromIdeal = Math.abs(strainScore - band.ideal);
+      const maxDistance = (band.max - band.min) / 2;
+      score = 4 - (distanceFromIdeal / maxDistance) * 1; // 3–4 pts
+    } else if (strainScore < band.min) {
+      const underBy = band.min - strainScore;
+      score = Math.max(1.5, 3 - (underBy / band.min) * 1.5); // 1.5–3 pts
     } else {
-      // Over-training (more problematic)
-      const overBy = strainScore - range.max;
-      const penalty = (overBy / range.max) * 3;
-      score = Math.max(0.5, 3 - penalty); // 0.5-3 points
+      const overBy = strainScore - band.max;
+      const penalty = (overBy / band.max) * 3;
+      score = Math.max(0.5, 3 - penalty); // 0.5–3 pts
 
-      // Extra penalty for high strain in red zone
-      if (recoveryZone === 'red' && strainScore > 10) {
+      // Extra penalty for overreach in acute rehab or red recovery zone
+      const isAcuteRehab = (input.rehabStage || '').toLowerCase().includes('acute');
+      if ((recoveryZone === 'red' && strainScore > 10) || (isAcuteRehab && strainScore > 12)) {
         score = Math.max(0.5, score - 1);
       }
     }
@@ -340,7 +385,7 @@ export class TrainingScoreService {
   }
 
   /**
-   * Generate human-readable analysis
+   * Generate context-aware human-readable analysis
    */
   private generateAnalysis(
     totalScore: number,
@@ -353,50 +398,92 @@ export class TrainingScoreService {
       injurySafetyModifier: number;
     }
   ): string {
+    const rehab   = (input.rehabStage  || '').toLowerCase();
+    const goal    = (input.primaryGoal || '').toLowerCase();
+    const load    = (input.weeklyLoad  || '').toLowerCase();
+    const note    = (input.comment     || '').toLowerCase();
+
+    const isAcuteRehab     = rehab.includes('acute');
+    const isRehabPhase     = !isAcuteRehab && (rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return') || goal.includes('rehab'));
+    const isDeload         = load === 'light' || note.includes('deload');
+    const isHighPerf       = load === 'heavy' || load === 'competition' || goal.includes('performance');
+    const strainGoodFit    = breakdown.strainAppropriatenessScore >= 3;
+    const strainOverreach  = input.strainScore != null && breakdown.strainAppropriatenessScore < 2 && input.strainScore > (this.getExpectedStrainBand(recoveryZone, input).max);
+
     const parts: string[] = [];
 
-    // Overall assessment
-    if (totalScore >= 8) {
-      parts.push('Excellent training session');
-    } else if (totalScore >= 6) {
-      parts.push('Good training session');
-    } else if (totalScore >= 4) {
-      parts.push('Moderate training session');
-    } else {
-      parts.push('Training could be optimized');
-    }
-
-    // Recovery zone feedback
-    if (recoveryZone === 'green') {
-      parts.push('Your recovery supports high-intensity training');
-    } else if (recoveryZone === 'yellow') {
-      parts.push('Consider monitoring training intensity with moderate recovery');
-    } else {
-      parts.push('Low recovery suggests prioritizing rest or light activity');
-    }
-
-    // Strain appropriateness feedback
-    if (breakdown.strainAppropriatenessScore >= 3.5) {
-      parts.push('Training load was well-matched to your recovery state');
-    } else if (breakdown.strainAppropriatenessScore < 2) {
-      if (input.strainScore && input.strainScore > 15 && recoveryZone !== 'green') {
-        parts.push('Training strain may have been too high for your recovery level');
+    // Context-aware primary statement
+    if (isAcuteRehab) {
+      if (strainGoodFit) {
+        parts.push('Correct execution — staying within baseline movement is exactly right for acute recovery');
+      } else if (strainOverreach) {
+        parts.push('Overreach detected — strain exceeded what is appropriate for acute recovery; protect the healing process');
       } else {
-        parts.push('Consider adjusting training intensity to better match recovery');
+        parts.push('Moderate effort during acute recovery — monitor how the body responds');
+      }
+    } else if (isRehabPhase) {
+      if (strainGoodFit) {
+        parts.push('Smart rehab execution — strain was well within the expected range for your recovery phase');
+      } else if (strainOverreach) {
+        parts.push('Training spike detected — aim to keep sessions controlled during rehabilitation to avoid setbacks');
+      } else {
+        parts.push('Session within acceptable rehab range — keep intensity gradual and progressive');
+      }
+    } else if (isDeload) {
+      if (strainGoodFit) {
+        parts.push('Deload executed correctly — reduced strain is exactly what this phase calls for');
+      } else {
+        parts.push('Moderate deload session — aim for intentional reduction to let the body absorb previous training');
+      }
+    } else if (isHighPerf) {
+      if (strainGoodFit) {
+        parts.push('Strong training load — well-matched to your performance phase');
+      } else if (breakdown.strainAppropriatenessScore < 2 && input.strainScore != null && input.strainScore < 10) {
+        parts.push('Missed training opportunity — this phase calls for elevated strain to drive adaptation');
+      } else {
+        parts.push('Training load recorded — check that session intensity aligns with your performance phase goals');
+      }
+    } else {
+      // Standard fallback
+      if (totalScore >= 8) {
+        parts.push('Excellent training session');
+      } else if (totalScore >= 6) {
+        parts.push('Good training session');
+      } else if (totalScore >= 4) {
+        parts.push('Moderate training session');
+      } else {
+        parts.push('Training could be optimized');
+      }
+
+      if (recoveryZone === 'green') {
+        parts.push('Your recovery supports high-intensity training');
+      } else if (recoveryZone === 'yellow') {
+        parts.push('Consider monitoring training intensity with moderate recovery');
+      } else {
+        parts.push('Low recovery suggests prioritizing rest or light activity');
       }
     }
 
-    // Session quality feedback
+    // Strain appropriateness (only for non-context-specific cases)
+    if (!isAcuteRehab && !isRehabPhase && !isDeload && !isHighPerf) {
+      if (breakdown.strainAppropriatenessScore >= 3.5) {
+        parts.push('Training load was well-matched to your recovery state');
+      } else if (breakdown.strainAppropriatenessScore < 2 && input.strainScore && input.strainScore > 15 && recoveryZone !== 'green') {
+        parts.push('Training strain may have been too high for your recovery level');
+      }
+    }
+
+    // Session quality
     if (breakdown.sessionQualityScore >= 2.5) {
       parts.push(`${input.duration} minutes at ${input.intensity || 'your chosen'} intensity was appropriate`);
     }
 
-    // Goal alignment feedback
+    // Goal alignment
     if (breakdown.goalAlignmentScore >= 1.5 && input.fitnessGoal) {
       parts.push(`This session aligns well with your ${input.fitnessGoal} goal`);
     }
 
-    // Injury safety warnings
+    // Injury safety
     if (breakdown.injurySafetyModifier < 0.8) {
       parts.push('Take care to avoid overtraining and allow adequate recovery');
     }

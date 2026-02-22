@@ -2183,6 +2183,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/fitscore/date — fetch stored FitScore for a specific past date
+  app.get('/api/fitscore/date', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const { date } = req.query;
+      if (!date || typeof date !== 'string') {
+        return res.status(400).json({ error: 'date query param required (YYYY-MM-DD)' });
+      }
+
+      const result = await db
+        .select()
+        .from(fitScores)
+        .where(and(eq(fitScores.userId, userId), eq(fitScores.date, date)))
+        .limit(1);
+
+      if (result.length === 0) {
+        return res.json({ found: false });
+      }
+
+      const row = result[0];
+      return res.json({
+        found: true,
+        date: row.date,
+        score: row.score,
+        calculatedAt: row.calculatedAt,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITSCORE DATE] Error:', message);
+      return res.status(500).json({ error: 'Failed to fetch FitScore', details: message });
+    }
+  });
+
   // Goals endpoints
   // GET /api/goals - Fetch all goals for user
   app.get('/api/goals', requireJWTAuth, async (req, res) => {
@@ -2931,9 +2966,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Try cache first
       let data = await storage.getWhoopDataByUserAndDate(userId, lastWeekDate);
 
-      if (!data) {
-        // Try to fetch from WHOOP API
-        console.log(`[WHOOP LASTWEEK] No cached data for ${lastWeekDate}, fetching from API...`);
+      // Re-fetch from WHOOP API if no data at all, OR if cached data has no sleep/recovery
+      // (strain-only records get stored during initial sync but are incomplete)
+      const isIncomplete = !data || (data.sleepScore === 0 && data.recoveryScore === 0);
+      if (isIncomplete) {
+        console.log(`[WHOOP LASTWEEK] ${data ? 'Incomplete data (sleep=0, recovery=0)' : 'No cached data'} for ${lastWeekDate}, fetching from API...`);
         try {
           const apiData = await whoopApiService.getDataForDate(userId, lastWeekDate);
           if (apiData && (apiData.recoveryScore || apiData.sleepScore || apiData.strainScore)) {
@@ -2944,7 +2981,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
               recoveryScore: Math.round(apiData.recoveryScore || 0),
               sleepScore: Math.round(apiData.sleepScore || 0),
               strainScore: apiData.strainScore || 0,
-              hrv: apiData.hrv || 0,
+              // Only store HRV if it's a physiologically valid value (>= 10ms)
+              hrv: (apiData.hrv && apiData.hrv >= 10) ? apiData.hrv : 0,
               restingHeartRate: Math.round(apiData.restingHeartRate || 0),
             });
             data = await storage.getWhoopDataByUserAndDate(userId, lastWeekDate);
@@ -2969,7 +3007,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sleep_score: data.sleepScore || null,
         recovery_score: data.recoveryScore || null,
         strain: data.strainScore || null,
-        hrv: data.hrv || null
+        // HRV must be >= 10ms to be physiologically valid — values below this are sensor noise
+        hrv: (data.hrv && data.hrv >= 10) ? data.hrv : null,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2978,6 +3017,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
         error: 'Failed to fetch last week WHOOP data',
         details: message
       });
+    }
+  });
+
+  // WHOOP historical backfill — fills last 34 days of missing data from WHOOP API
+  // Returns coverage immediately, processes missing days in background
+  app.post('/api/whoop/backfill', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const tz = process.env.USER_TZ || 'Europe/Zurich';
+      const now = DateTime.now().setZone(tz);
+      const DAYS = 34; // covers both last-week (day 8) and last-month (days 28-34) windows
+
+      // Fast DB scan — find which days are already fully cached vs. missing or incomplete
+      let daysWithData = 0;
+      const missingDates: string[] = [];
+
+      for (let i = 1; i <= DAYS; i++) {
+        const dateStr = now.minus({ days: i }).toISODate()!;
+        const existing = await storage.getWhoopDataByUserAndDate(userId, dateStr);
+
+        // Count the day if any metric exists (for coverage display)
+        const hasAnyData = existing && (existing.recoveryScore > 0 || existing.sleepScore > 0 || existing.strainScore > 0);
+        if (hasAnyData) daysWithData++;
+
+        // Only skip re-fetching if BOTH sleep and recovery are present.
+        // Days with only strain (sleep=0, recovery=0) are re-fetched to fill the gaps.
+        const hasCompleteData = existing && existing.recoveryScore > 0 && existing.sleepScore > 0;
+        if (!hasCompleteData) missingDates.push(dateStr);
+      }
+
+      console.log(`[BACKFILL] user=${userId} daysWithData=${daysWithData}/${DAYS}, missing=${missingDates.length}`);
+
+      // Respond immediately with current coverage so the UI can update right away
+      res.json({
+        daysWithData,
+        totalDays: DAYS,
+        missingDays: missingDates.length,
+        hasFullMonth: daysWithData >= 28,
+        status: missingDates.length > 0 ? 'backfill_started' : 'complete',
+      });
+
+      // Process missing days in background — don't block the response
+      if (missingDates.length > 0) {
+        setImmediate(async () => {
+          console.log(`[BACKFILL] Starting background sync for ${missingDates.length} days`);
+          let synced = 0;
+          for (const dateStr of missingDates) {
+            try {
+              const data = await whoopApiService.getDataForDate(userId, dateStr);
+              if (data && (data.recoveryScore || data.sleepScore || data.strainScore)) {
+                await storage.upsertWhoopData({
+                  userId,
+                  date: dateStr,
+                  recoveryScore: Math.round(data.recoveryScore || 0),
+                  sleepScore: Math.round(data.sleepScore || 0),
+                  strainScore: data.strainScore || 0,
+                  hrv: (data.hrv && data.hrv >= 10) ? data.hrv : 0,
+                  restingHeartRate: Math.round(data.restingHeartRate || 0),
+                });
+                synced++;
+                console.log(`[BACKFILL] ✓ ${dateStr} (${synced}/${missingDates.length})`);
+              }
+            } catch (e) {
+              console.warn(`[BACKFILL] ✗ ${dateStr}:`, e instanceof Error ? e.message : String(e));
+            }
+            // 300ms delay between days to respect WHOOP API rate limits
+            await new Promise(resolve => setTimeout(resolve, 300));
+          }
+          console.log(`[BACKFILL] Complete for user=${userId}: synced=${synced}/${missingDates.length}`);
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[BACKFILL] Error:', message);
+      res.status(500).json({ error: 'Backfill failed', details: message });
     }
   });
 
@@ -4126,37 +4242,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Import the recovery score service
       const { recoveryScoreService } = await import('./services/recoveryScoreService');
 
-      // 1. Get WHOOP data for today using getTodaysData (has working sleep hours)
+      // 1. Get WHOOP data for the target date
+      // For today: use getTodaysData (has reliable sleep_hours from live API)
+      // For historical dates (yesterday, etc.): use getDataForDate
       let whoopData = null;
+      const todayStr = DateTime.now().setZone(tz).toISODate()!;
+      const isTargetToday = targetDate === todayStr;
       try {
-        const todayData = await whoopApiService.getTodaysData(userId);
-        console.log(`[FITSCORE] todayData.sleep_hours: ${todayData?.sleep_hours}`);
-
-        if (todayData) {
-          whoopData = {
-            recoveryScore: todayData.recovery_score,
-            sleepScore: todayData.sleep_score,
-            sleepHours: todayData.sleep_hours ?? todayData.sleepHours,
-            strainScore: todayData.strain,
-            hrv: todayData.hrv,
-            restingHeartRate: todayData.resting_heart_rate,
-          };
+        if (isTargetToday) {
+          const todayData = await whoopApiService.getTodaysData(userId);
+          console.log(`[FITSCORE] todayData.sleep_hours: ${todayData?.sleep_hours}`);
+          if (todayData) {
+            whoopData = {
+              recoveryScore: todayData.recovery_score,
+              sleepScore: todayData.sleep_score,
+              sleepHours: todayData.sleep_hours ?? todayData.sleepHours,
+              strainScore: todayData.strain,
+              hrv: todayData.hrv,
+              restingHeartRate: todayData.resting_heart_rate,
+            };
+          }
+        } else {
+          // Historical date — fetch from WHOOP API or DB cache
+          const histData = await whoopApiService.getDataForDate(userId, targetDate);
+          console.log(`[FITSCORE] Historical WHOOP data for ${targetDate}:`, histData);
+          if (histData) {
+            whoopData = {
+              recoveryScore: histData.recoveryScore,
+              sleepScore: histData.sleepScore,
+              sleepHours: histData.sleepHours,
+              strainScore: histData.strainScore,
+              hrv: histData.hrv,
+              restingHeartRate: histData.restingHeartRate,
+            };
+          }
         }
         console.log(`[FITSCORE] WHOOP data retrieved - sleepHours: ${whoopData?.sleepHours}`);
       } catch (whoopError) {
         console.log(`[FITSCORE] Failed to get WHOOP data: ${whoopError}`);
       }
 
-      // 1b. Get yesterday's WHOOP data for comparison
+      // 1b. Get the day-before's WHOOP data for comparison
+      // (the day before targetDate, so if targetDate=yesterday, this is two days ago)
       let yesterdayData = null;
       try {
-        const yesterdayDate = new Date(targetDate);
-        yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-        const yesterdayStr = yesterdayDate.toISOString().split('T')[0];
-        yesterdayData = await whoopApiService.getDataForDate(userId, yesterdayStr);
-        console.log(`[FITSCORE] Yesterday WHOOP data retrieved:`, yesterdayData);
+        const dayBeforeDate = DateTime.fromISO(targetDate).minus({ days: 1 }).toISODate()!;
+        yesterdayData = await whoopApiService.getDataForDate(userId, dayBeforeDate);
+        console.log(`[FITSCORE] Day-before (${dayBeforeDate}) WHOOP data retrieved:`, yesterdayData);
       } catch (yesterdayError) {
-        console.log(`[FITSCORE] Failed to get yesterday's WHOOP data: ${yesterdayError}`);
+        console.log(`[FITSCORE] Failed to get day-before WHOOP data: ${yesterdayError}`);
       }
 
       // 2. Get HRV baseline (7-day average)
@@ -4182,20 +4316,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // 4. Get Training Sessions and calculate average training score
       const trainingSessions = await storage.getTrainingDataByUserAndDate(userId, targetDate);
-      let trainingScore = 5; // Default if no training
-      let trainingBreakdown = null;
+
+      // Fetch user context (rehab stage, goal, weekly load) once — used for both default and session scoring
+      const [userGoal] = await db.select().from(userGoals).where(eq(userGoals.userId, userId)).limit(1);
+      const [userCtx]  = await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1);
+      const fitnessGoal  = userGoal?.title || undefined;
+      const rehabStage   = userCtx?.rehabStage   || undefined;
+      const primaryGoal  = userCtx?.tier1Goal    || undefined;
+      const weeklyLoad   = userCtx?.tier3WeekLoad || undefined;
+
+      let trainingScore: number;
 
       if (trainingSessions && trainingSessions.length > 0) {
-        // Get user's fitness goal
-        const [userGoal] = await db
-          .select()
-          .from(userGoals)
-          .where(eq(userGoals.userId, userId))
-          .limit(1);
-
-        const fitnessGoal = userGoal?.title || undefined;
-
-        // Calculate scores for each training session
+        // Calculate scores for each training session with full context
         const sessionScores = trainingSessions.map((session: any) => {
           const result = trainingScoreService.calculateTrainingScore({
             type: session.type,
@@ -4207,6 +4340,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
             recoveryScore: whoopData?.recoveryScore,
             strainScore: whoopData?.strainScore,
             fitnessGoal,
+            rehabStage,
+            primaryGoal,
+            weeklyLoad,
           });
           return result.score;
         });
@@ -4214,7 +4350,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trainingScore = sessionScores.reduce((a: number, b: number) => a + b, 0) / sessionScores.length;
         console.log(`[FITSCORE] Training score: ${trainingScore.toFixed(1)}/10 (${trainingSessions.length} sessions)`);
       } else {
-        console.log(`[FITSCORE] No training sessions found, using default score: ${trainingScore}/10`);
+        // No training logged — default score depends on context
+        const rehab = (rehabStage || '').toLowerCase();
+        const load  = (weeklyLoad || '').toLowerCase();
+        const pg    = (primaryGoal || '').toLowerCase();
+
+        if (rehab.includes('acute')) {
+          trainingScore = 7.5; // Rest is correct execution in acute rehab
+        } else if (rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return') || pg.includes('rehab')) {
+          trainingScore = 6;   // Rehab phase — some activity expected but rest is ok
+        } else if (load === 'light') {
+          trainingScore = 6.5; // Light week / deload — scheduled rest is fine
+        } else if (load === 'heavy' || load === 'competition' || pg.includes('performance')) {
+          trainingScore = 4;   // Build/performance phase — missing a session matters
+        } else {
+          trainingScore = 5;   // General default
+        }
+        console.log(`[FITSCORE] No training sessions — context-aware default: ${trainingScore}/10 (rehabStage=${rehabStage}, weeklyLoad=${weeklyLoad})`);
       }
 
       // 5. Get Meals and calculate nutrition score
@@ -4344,6 +4496,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         recoveryBreakdownScore,
         trainingBreakdownScore,
         nutritionBreakdownScore,
+        dateLabel, // e.g. "today", "yesterday", "Feb 21"
       } = req.body;
 
       console.log(`[COACH SUMMARY] Generating summary for user: ${userId}, fitScore: ${fitScore}`);
@@ -4401,6 +4554,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nutritionBreakdownScore,
         todayFeeling,
         userContextSummary: coachContextSummary,
+        dateLabel: dateLabel || 'today',
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);

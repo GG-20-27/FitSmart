@@ -726,6 +726,7 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
     nutritionBreakdownScore?: number;
     todayFeeling?: string; // energized | steady | tired | stressed
     userContextSummary?: string; // pre-built from user_context table
+    dateLabel?: string; // e.g. "today", "yesterday", "Feb 21" — tells AI which day this is for
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -736,6 +737,11 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
 
       // Build tactical context with real metrics
       const contextParts = [];
+
+      // Date context — critical when score is for a historical day
+      if (params.dateLabel && params.dateLabel !== 'today') {
+        contextParts.push(`⚠️ This FitScore is for ${params.dateLabel} (NOT today). Use past tense throughout. Reference "${params.dateLabel}" explicitly in your summary, not "today".`);
+      }
 
       contextParts.push(`FitScore: ${params.fitScore}/10 (zone: ${params.fitScoreZone})`);
 

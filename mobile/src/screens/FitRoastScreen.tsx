@@ -169,11 +169,6 @@ export default function FitRoastScreen() {
         {/* Top bar */}
         <View style={styles.topBar}>
           <Text style={styles.weekLabel}>Week of {formatWeek(roast.week_start)}</Text>
-          {/* TEST ONLY — remove after context testing */}
-          <TouchableOpacity style={styles.regenButton} onPress={triggerGenerate} activeOpacity={0.7}>
-            <Ionicons name="refresh" size={14} color={colors.textMuted} />
-            <Text style={styles.regenButtonText}>Re-generate</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Headline */}

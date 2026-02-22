@@ -311,21 +311,6 @@ export default function GoalsScreen() {
       </View>
 
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        {/* Streak Widget */}
-        {totalStreak > 0 && (
-          <LinearGradient
-            colors={['#27E9B5', '#6B5BFD']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.streakWidget}
-          >
-            <Text style={styles.streakEmoji}>🔥</Text>
-            <Text style={styles.streakText}>
-              {totalStreak}-day streak — keep going!
-            </Text>
-          </LinearGradient>
-        )}
-
         {/* My Context — 3-tier panel */}
         <ContextPanel context={context} onUpdate={updateContextField} onBatchUpdate={updateContextBatch} />
 

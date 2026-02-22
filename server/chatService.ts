@@ -726,7 +726,7 @@ export class ChatService {
         const contentParts: any[] = [
           {
             type: 'text',
-            text: message.trim() || 'Analyze these meal images and provide nutritional insights'
+            text: message.trim() || 'Please analyze this image'
           }
         ];
 
@@ -756,7 +756,7 @@ export class ChatService {
             type: 'image_url',
             image_url: {
               url: imageUrl,
-              detail: 'low' // Use low detail for faster processing and lower cost
+              detail: 'auto'
             }
           });
         });
@@ -961,7 +961,7 @@ export class ChatService {
             type: 'image_url',
             image_url: {
               url: imageUrl,
-              detail: 'low'
+              detail: 'auto'
             }
           });
         });

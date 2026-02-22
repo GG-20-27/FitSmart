@@ -13,7 +13,7 @@ import {
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const SLIDE_WIDTH = SCREEN_WIDTH - spacing.lg * 2;
-const AUTO_ADVANCE_MS = 10000;
+const AUTO_ADVANCE_MS = 15000;
 const PAUSE_AFTER_INTERACTION_MS = 5000;
 
 const FEELINGS: { key: Feeling; label: string; icon: string }[] = [
