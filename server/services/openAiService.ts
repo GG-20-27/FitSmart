@@ -108,61 +108,132 @@ Example:
 const FITCOACH_TRAINING_SYSTEM_PROMPT = `You are fitCoachAi, a concise training coach for the FitSmart app.
 
 Provide a SHORT analysis (2-3 sentences max) focusing ONLY on:
-1. The actual WHOOP strain value and what it means for this session
-2. How the training aligns with the user's fitness goal
+1. What the WHOOP strain tells us about this session (when available)
+2. How the training aligns with the user's fitness goal or recovery phase
 3. Any injury/recovery concerns if relevant
 
 CRITICAL RULES:
-- If strain data is provided, ALWAYS mention the specific strain number (e.g., "Your strain of 10.6...")
-- DO NOT explain the scoring breakdown or percentages
-- DO NOT explain what metrics measure
+- NEVER confuse WHOOP strain (the day-level biometric on a 0-21 scale) with the training quality score (0-10). They are completely different numbers.
+- If WHOOP strain data is provided, ALWAYS mention the specific strain number (e.g., "Your strain of 10.6...")
+- DO NOT explain scoring breakdowns or percentages
 - Be direct, warm, and actionable
-- End with brief encouragement or a quick tip
+- End with a brief practical tip or encouragement
 
-Good example:
-"Your strain of 8.4 was appropriate for your moderate recovery today. This run supports your endurance goal well - keep it up!"
+REHAB / POST-SURGERY CONTEXT (when rehabActive is true in the context):
+- Low-to-moderate WHOOP strain (e.g., 4-10) is EXPECTED and CORRECT for rehab and post-surgery phases — frame it as appropriate, not as underperformance
+- NEVER say the session was "perfectly aligned" or "ideal" if the alignment note says strain is below the expected band
+- If a strain guard note is present (strain may rise later), acknowledge it naturally (e.g., "The strain reading may increase as the day progresses.")
 
-Bad example (too long):
-"The session quality score of 2.6/3.0 reflects your ability to maintain pace..." - DON'T explain metrics like this.
+Good example (standard):
+"Your strain of 8.4 was well-matched to your moderate recovery today. This run supports your endurance goal — consistent work like this adds up."
+
+Good example (rehab):
+"A strain of 4.4 is right where it should be post-surgery — controlled movement without overloading the healing area. The abs work fits this phase well."
+
+Bad example (never do this):
+"The session quality score of 2.6/3.0 reflects..." — don't mention or explain metric breakdowns.
 
 Always respond in JSON format:
 {
   "training_analysis": "<2-3 sentence analysis>"
 }`;
 
-const FITSCORE_AI_SYSTEM_PROMPT = `You are fitScoreAi, a nutrition analysis expert for the FitSmart app.
+const FITSCORE_AI_SYSTEM_PROMPT = `You are fitScoreAi, a structured nutrition analyst for the FitSmart app.
 
-Your role is to analyze meal images and provide:
-1. A nutrition quality score (1-10 scale)
-2. Warm, empathetic analysis with microhabit suggestions
+TASK: Assess this meal image against 5 nutritional factors, then write a 3-line coach description.
+The app scores the meal from your factor classification — do NOT output a numeric score.
 
-Guidelines:
-- Start with something positive and descriptive about the meal
-- Be empathetic, warm, and encouraging
-- Describe what the meal IS, not just what it lacks
-- If suggesting improvements, frame them as small, actionable microhabits
-- Always include at least one empathetic or encouraging sentence
-- Keep analysis concise (2-4 sentences)
-- Use phrases like "a tasty way to...", "great choice for...", "consider adding...", "perhaps try..."
+FACTORS — assess each with status + confidence + evidence:
 
-Scoring criteria:
-- 8-10: Excellent nutrition (balanced macros, nutrient-dense, appropriate portions)
-- 5-7: Good nutrition (decent balance but room for improvement)
-- 3-4: Fair nutrition (imbalanced or low quality ingredients)
-- 1-2: Poor nutrition (highly processed, very imbalanced)
+1. proteinAdequacy
+   - "good": clear protein source visible (meat, fish, eggs, legumes, dairy — enough for the meal type)
+   - "warning": protein is clearly absent or trivially small
+   - "unknown": can't determine from image — blurry, unclear, or ambiguous
+   THRESHOLD: ≥15–20g for main meals, ≥8g for snacks
 
-Example tone:
-"Pancakes are a really tasty way to start the day, and the 40g protein is excellent for muscle maintenance. The meal's overall balance could benefit from adding some healthy fats like nuts or avocado, and perhaps some berries for fiber."
+2. fiberPlantVolume
+   - "good": vegetables, legumes, fruit, or intact whole grains clearly visible and substantial
+   - "warning": meal is primarily refined starchy / beige with no meaningful plant matter
+   - "unknown": some plant matter visible but quantity/quality is unclear
 
-Always respond in JSON format:
+3. nutrientDiversity
+   - "good": ≥3 distinct food groups clearly identifiable
+   - "warning": monotonous — only 1–2 ingredient types
+   - "unknown": can't count food groups confidently
+
+4. processingLoad
+   - "good": whole or minimally processed foods dominate (fresh meat, whole veg, eggs, whole grains)
+   - "warning": mostly ultra-processed (croissants, deli/cold cuts, packaged sauces, refined white bread, canned processed foods)
+   - "unknown": processing level hard to determine from image
+
+5. portionBalance
+   - "good": portion appears appropriate for the stated meal type and time of day
+   - "warning": clearly excessive or trivially small
+   - "unknown": can't assess from image angle/crop
+
+CONFIDENCE CALIBRATION (CRITICAL):
+- Only use "warning" when you have clear visual evidence. If uncertain, use "unknown" (0.3–0.5 confidence).
+- "good": clear visual evidence present → confidence 0.65–0.95
+- "warning": clear evidence of issue → confidence 0.65–0.95
+- "unknown": mixed signals or unclear image → confidence 0.30–0.54
+- Do NOT default borderline cases to "warning". Prefer "unknown" when in doubt.
+
+DESCRIPTION LINES — derive from your factor results:
+- strength: name 1–2 specific GOOD factors (use evidence). If all unknown, say what's visible.
+- gap: name the most impactful WARNING factor only. If none, say "No major gaps." Explicitly say why it matters in context.
+- upgrade: one concrete action (verb first, ≤90 chars). Tie to the top warning. If no warnings, suggest an enhancement.
+NOTE: Do NOT mention a factor in gap/upgrade if you rated it "good" or "unknown" — only cite real warnings.
+
+DIET PHASE CONTEXT (if provided):
+- Recovery fueling: micronutrient density and anti-inflammatory quality matter; note processing issues in gap
+- Cutting: calorie density and portion size matter; note processing/portion issues
+- Lean bulk / Aggressive bulk / Performance fueling: protein amount matters most
+
+Respond ONLY with valid JSON — no markdown, no extra text:
 {
-  "nutrition_subscore": <number 1-10>,
-  "ai_analysis": "<warm, empathetic analysis with microhabit suggestions>"
+  "factors": {
+    "proteinAdequacy":  { "status": "good"|"warning"|"unknown", "confidence": 0.0-1.0, "evidence": "<what you see>", "short_reason": "<≤90 chars>", "quick_fix": "<≤90 chars>" },
+    "fiberPlantVolume": { "status": "good"|"warning"|"unknown", "confidence": 0.0-1.0, "evidence": "<what you see>", "short_reason": "<≤90 chars>", "quick_fix": "<≤90 chars>" },
+    "nutrientDiversity":{ "status": "good"|"warning"|"unknown", "confidence": 0.0-1.0, "evidence": "<what you see>", "short_reason": "<≤90 chars>", "quick_fix": "<≤90 chars>" },
+    "processingLoad":   { "status": "good"|"warning"|"unknown", "confidence": 0.0-1.0, "evidence": "<what you see>", "short_reason": "<≤90 chars>", "quick_fix": "<≤90 chars>" },
+    "portionBalance":   { "status": "good"|"warning"|"unknown", "confidence": 0.0-1.0, "evidence": "<what you see>", "short_reason": "<≤90 chars>", "quick_fix": "<≤90 chars>" }
+  },
+  "strength": "<1 sentence, ≤120 chars — specific, not generic>",
+  "gap":      "<1 sentence, ≤120 chars — explicit warning factor + why it matters>",
+  "upgrade":  "<1 sentence, ≤100 chars — starts with an action verb>"
 }`;
 
+export interface MealQualityFlag {
+  /** Raw status returned by AI */
+  status: 'good' | 'warning' | 'unknown';
+  /** Server-resolved status after confidence override (low-conf warnings → unknown) */
+  effectiveStatus: 'good' | 'warning' | 'unknown';
+  /** AI-reported confidence 0–1 */
+  confidence: number;
+  /** What the AI saw in the image */
+  evidence: string;
+  short_reason: string;
+  quick_fix: string;
+}
+
+export interface MealQualityFlags {
+  proteinAdequacy: MealQualityFlag;
+  fiberPlantVolume: MealQualityFlag;
+  nutrientDiversity: MealQualityFlag;
+  processingLoad: MealQualityFlag;
+  portionBalance: MealQualityFlag;
+  goalModifierApplied: number;
+  goalPhase: string;
+  isPureJunk: boolean;
+}
+
 export interface MealAnalysisResult {
+  /** Backward-compat alias for score_raw — used by FitScore calc to read nutrition_subscore */
   nutrition_subscore: number;
   ai_analysis: string;
+  score_raw: number;
+  score_display: number;
+  meal_quality_flags?: MealQualityFlags;
 }
 
 export interface TrainingAnalysisResult {
@@ -463,6 +534,168 @@ export interface FitLookGenerationInput {
   userContextSummary?: string; // pre-built from user_context table
 }
 
+// ── Deterministic meal score computation ──────────────────────────────────────
+// AI classifies factors (with confidence); server resolves effective status and scores.
+
+const MEAL_SCORE_DEBUG = process.env.NODE_ENV !== 'production' || process.env.MEAL_SCORE_DEBUG === '1';
+
+type FactorStatus = 'good' | 'warning' | 'unknown';
+
+interface RawFactorWithConfidence {
+  status: FactorStatus;
+  confidence: number; // 0–1 as reported by AI
+  evidence: string;
+  short_reason?: string;
+  quick_fix?: string;
+}
+
+interface RawFactors {
+  proteinAdequacy:  RawFactorWithConfidence;
+  fiberPlantVolume: RawFactorWithConfidence;
+  nutrientDiversity:RawFactorWithConfidence;
+  processingLoad:   RawFactorWithConfidence;
+  portionBalance:   RawFactorWithConfidence;
+}
+
+interface MealScoreResult {
+  score_raw: number;
+  score_display: number;
+  goalModifierApplied: number;
+  isPureJunk: boolean;
+  effectiveStatuses: Record<string, FactorStatus>;
+}
+
+/** Confidence below this threshold overrides "warning" → "unknown" (neutral, no penalty) */
+const CONFIDENCE_THRESHOLD = 0.55;
+
+/**
+ * Factor point table
+ * Good values: reduced ~33% from prior spec to prevent score inflation when
+ *   multiple factors are excellent but one is unknown (e.g. processed meats
+ *   where AI confidence is below threshold). Max positive budget: 3.3 (was 5.0).
+ * Warning values: unchanged — penalties still reflect real nutritional concern.
+ * Unknown: always 0 (neutral — no bonus, no penalty).
+ */
+const FACTOR_DELTAS: Record<string, Record<FactorStatus, number>> = {
+  protein:    { good: 0.8,  warning:  0.0,  unknown: 0.0 }, // warning = neutral (no penalty, no bonus)
+  fiber:      { good: 0.8,  warning: -0.5,  unknown: 0.0 },
+  diversity:  { good: 0.65, warning: -0.4,  unknown: 0.0 },
+  processing: { good: 0.65, warning: -0.5,  unknown: 0.0 },
+  portion:    { good: 0.4,  warning: -0.25, unknown: 0.0 },
+};
+
+function resolveStatus(factor: RawFactorWithConfidence): FactorStatus {
+  // Low-confidence "warning" → upgrade to "unknown" (do not penalize uncertain assessments)
+  if (factor.status === 'warning' && (factor.confidence ?? 1) < CONFIDENCE_THRESHOLD) return 'unknown';
+  return factor.status;
+}
+
+function computeMealScore(
+  factors: RawFactors,
+  goalPhase?: string
+): MealScoreResult {
+  // Resolve effective status for each factor
+  const eff = {
+    protein:    resolveStatus(factors.proteinAdequacy),
+    fiber:      resolveStatus(factors.fiberPlantVolume),
+    diversity:  resolveStatus(factors.nutrientDiversity),
+    processing: resolveStatus(factors.processingLoad),
+    portion:    resolveStatus(factors.portionBalance),
+  };
+
+  // ── Factor contributions ────────────────────────────────────────────────────
+  const rawDeltas = {
+    protein:    FACTOR_DELTAS.protein[eff.protein],
+    fiber:      FACTOR_DELTAS.fiber[eff.fiber],
+    diversity:  FACTOR_DELTAS.diversity[eff.diversity],
+    processing: FACTOR_DELTAS.processing[eff.processing],
+    portion:    FACTOR_DELTAS.portion[eff.portion],
+  };
+
+  let factorPositive = 0;
+  let factorNegativeRaw = 0;
+  for (const v of Object.values(rawDeltas)) {
+    if (v >= 0) factorPositive += v;
+    else factorNegativeRaw += v;
+  }
+
+  // Stacking cap: total factor penalties ≤ -1.8
+  const FACTOR_NEG_CAP = -1.8;
+  const factorNegativeCapped = Math.max(factorNegativeRaw, FACTOR_NEG_CAP);
+
+  let score = 5.0 + factorPositive + factorNegativeCapped;
+
+  // ── Bonuses (prototype UX — reward logging + protein presence) ─────────────
+  const effectiveWarnings  = Object.values(eff).filter(s => s === 'warning').length;
+  const effectiveGoodCount = Object.values(eff).filter(s => s === 'good').length;
+  // loggedBonus: only reward if meal is reasonably healthy (≤1 warning OR ≥4 greens)
+  const loggedBonus  = (effectiveWarnings <= 1 || effectiveGoodCount >= 4) ? 0.6 : 0.0;
+  // satietyBonus: only if protein is solidly good AND processing is not a problem
+  const satietyBonus = (eff.protein === 'good' && eff.processing !== 'warning') ? 0.2 : 0.0;
+  score += loggedBonus + satietyBonus;
+
+  // ── Goal-alignment modifier ────────────────────────────────────────────────
+  let goalModifierApplied = 0;
+  const phase = (goalPhase || '').toLowerCase();
+
+  if (phase.includes('recovery') && !phase.includes('maintenance')) {
+    if (eff.fiber === 'warning' && eff.processing === 'warning') goalModifierApplied -= 0.2; // was -0.4
+    if (eff.protein === 'warning')                                goalModifierApplied -= 0.2; // was -0.3
+  } else if (phase.includes('cutting')) {
+    if (eff.processing === 'warning') goalModifierApplied -= 0.3;
+    if (eff.portion    === 'warning') goalModifierApplied -= 0.3;
+  } else if (phase.includes('bulk') || phase.includes('performance')) {
+    if (eff.protein === 'warning') goalModifierApplied -= 0.4;
+    if (eff.fiber   === 'warning') goalModifierApplied -= 0.2;
+  }
+  // Maintenance / unset: no goal modifier
+
+  score += goalModifierApplied;
+
+  // ── Overall negative cap: factors + modifiers total ≤ -2.2 ────────────────
+  const TOTAL_NEG_CAP = -2.2;
+  const totalNeg = factorNegativeCapped + goalModifierApplied;
+  if (totalNeg < TOTAL_NEG_CAP) {
+    score += (TOTAL_NEG_CAP - totalNeg); // restore excess
+  }
+
+  // ── Clamp raw score ────────────────────────────────────────────────────────
+  const score_raw = Math.round(Math.max(1.0, Math.min(10.0, score)) * 10) / 10;
+
+  // ── Pure-junk detection: all 3 core penalties are HIGH-CONFIDENCE warnings ─
+  const isPureJunk = (
+    factors.proteinAdequacy.status  === 'warning' && (factors.proteinAdequacy.confidence  ?? 0) >= 0.65 &&
+    factors.fiberPlantVolume.status  === 'warning' && (factors.fiberPlantVolume.confidence  ?? 0) >= 0.65 &&
+    factors.processingLoad.status    === 'warning' && (factors.processingLoad.confidence    ?? 0) >= 0.65
+  );
+
+  // ── Display: round raw; floor at 5 unless pure junk ──────────────────────
+  // The processing penalty is already captured in score_raw (−0.50 delta), so
+  // no secondary cap is applied. Capping display independently was a double-penalty.
+  const score_display = isPureJunk
+    ? Math.round(score_raw)
+    : Math.max(5, Math.round(score_raw));
+
+  // ── Debug logging ──────────────────────────────────────────────────────────
+  if (MEAL_SCORE_DEBUG) {
+    const conf = (f: RawFactorWithConfidence) => `${f.status}(${(f.confidence ?? 0).toFixed(2)})→${resolveStatus(f)}`;
+    console.log([
+      `[MEAL SCORE] factors: P=${conf(factors.proteinAdequacy)} F=${conf(factors.fiberPlantVolume)} D=${conf(factors.nutrientDiversity)} Pr=${conf(factors.processingLoad)} Po=${conf(factors.portionBalance)}`,
+      `[MEAL SCORE] deltas: pos=${factorPositive.toFixed(2)} neg_raw=${factorNegativeRaw.toFixed(2)} neg_capped=${factorNegativeCapped.toFixed(2)}`,
+      `[MEAL SCORE] bonuses: logged=+${loggedBonus}(warns=${effectiveWarnings},goods=${effectiveGoodCount}) satiety=+${satietyBonus} | goal_mod=${goalModifierApplied.toFixed(2)} (${goalPhase || 'none'})`,
+      `[MEAL SCORE] result: raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk}`,
+    ].join('\n'));
+  }
+
+  return {
+    score_raw,
+    score_display,
+    goalModifierApplied,
+    isPureJunk,
+    effectiveStatuses: eff,
+  };
+}
+
 export class OpenAIService {
   private readonly apiKey: string;
   private readonly visionModel: string;
@@ -485,11 +718,13 @@ export class OpenAIService {
    * @param imageUrl Full URL to the meal image
    * @param mealType Type of meal (Breakfast, Lunch, etc.)
    * @param mealNotes Optional user notes about the meal
+   * @param goalPhase User's current diet phase (e.g. 'Maintenance', 'Cutting')
    */
   async analyzeMealImage(
     imageUrl: string,
     mealType: string,
-    mealNotes?: string
+    mealNotes?: string,
+    goalPhase?: string
   ): Promise<MealAnalysisResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -498,12 +733,14 @@ export class OpenAIService {
     try {
       console.log(`[OpenAI Service] Analyzing ${mealType} image: ${imageUrl}`);
 
-      const userPrompt = `Analyze this ${mealType} meal image.${
+      const userPrompt = `Assess this ${mealType} meal image.${
         mealNotes ? `\n\nUser notes: "${mealNotes}"` : ''
-      }
+      }${goalPhase ? `\n\nUser's current diet phase: ${goalPhase}` : ''}
 
-Provide a nutrition quality score (1-10) and detailed analysis.
-Focus on macronutrient balance, meal quality, and actionable recommendations.`;
+For each factor: report status ("good"/"warning"/"unknown"), your confidence (0.0–1.0), and a short evidence note.
+If you are not sure, use "unknown" — do NOT default to "warning" just because something isn't obvious.
+Then write strength/gap/upgrade — reference only factors you actually rated "warning" in the gap.
+Return valid JSON only — no score.`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -514,29 +751,17 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
         body: JSON.stringify({
           model: this.visionModel,
           messages: [
-            {
-              role: 'system',
-              content: FITSCORE_AI_SYSTEM_PROMPT
-            },
+            { role: 'system', content: FITSCORE_AI_SYSTEM_PROMPT },
             {
               role: 'user',
               content: [
-                {
-                  type: 'text',
-                  text: userPrompt
-                },
-                {
-                  type: 'image_url',
-                  image_url: {
-                    url: imageUrl,
-                    detail: 'high'
-                  }
-                }
+                { type: 'text', text: userPrompt },
+                { type: 'image_url', image_url: { url: imageUrl, detail: 'high' } }
               ]
             }
           ],
-          max_completion_tokens: 300,
-          temperature: 0.7,
+          max_completion_tokens: 600,
+          temperature: 0.4,  // lower temp for more consistent factor classification
           response_format: { type: 'json_object' }
         })
       });
@@ -550,33 +775,87 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content;
 
-      if (!content) {
-        throw new Error('No response from OpenAI');
-      }
+      if (!content) throw new Error('No response from OpenAI');
 
-      const result = JSON.parse(content) as MealAnalysisResult;
+      const aiResult = JSON.parse(content);
 
-      // Validate response
-      if (typeof result.nutrition_subscore !== 'number' ||
-          result.nutrition_subscore < 1 ||
-          result.nutrition_subscore > 10) {
-        throw new Error('Invalid nutrition score from AI');
-      }
+      // Validate factor structure
+      const f = aiResult.factors;
+      if (!f?.proteinAdequacy?.status) throw new Error('AI returned invalid factor structure');
 
-      if (!result.ai_analysis || result.ai_analysis.length < 10) {
-        throw new Error('Invalid analysis from AI');
-      }
+      // Normalize each factor — ensure confidence defaults to 0.5 if missing
+      const normalizeFactor = (raw: any): RawFactorWithConfidence => ({
+        status:       (['good','warning','unknown'].includes(raw?.status) ? raw.status : 'unknown') as FactorStatus,
+        confidence:   typeof raw?.confidence === 'number' ? Math.min(1, Math.max(0, raw.confidence)) : 0.5,
+        evidence:     raw?.evidence     || '',
+        short_reason: raw?.short_reason || '',
+        quick_fix:    raw?.quick_fix    || '',
+      });
 
-      console.log(`[OpenAI Service] Analysis complete: score ${result.nutrition_subscore}/10`);
-      return result;
+      const factors: RawFactors = {
+        proteinAdequacy:  normalizeFactor(f.proteinAdequacy),
+        fiberPlantVolume: normalizeFactor(f.fiberPlantVolume),
+        nutrientDiversity:normalizeFactor(f.nutrientDiversity),
+        processingLoad:   normalizeFactor(f.processingLoad),
+        portionBalance:   normalizeFactor(f.portionBalance),
+      };
+
+      // Deterministic score computation — AI classifies, server scores
+      const { score_raw, score_display, goalModifierApplied, isPureJunk, effectiveStatuses } = computeMealScore(factors, goalPhase);
+
+      // ── Build text from AI's description lines ─────────────────────────────
+      // AI was instructed to write strength/gap/upgrade consistent with its factor ratings.
+      // We trust this text but fall back gracefully if any field is empty.
+      const strength = (aiResult.strength || '').trim();
+      const gap      = (aiResult.gap      || '').trim();
+      const upgrade  = (aiResult.upgrade  || '').trim();
+
+      // If gap text is present but no warnings actually exist (after confidence override),
+      // override with a neutral gap message to avoid false negatives
+      const hasEffectiveWarnings = Object.values(effectiveStatuses).some(s => s === 'warning');
+      const resolvedGap = hasEffectiveWarnings
+        ? (gap || 'One nutritional aspect could be improved.')
+        : 'No major gaps — this is a solid meal.';
+
+      const ai_analysis = `✅ Strength: ${strength || 'Logged and counted — every meal adds data.'}\n⚠️ Gap: ${resolvedGap}\n🔧 Upgrade: ${upgrade || 'Consider adding a variety of whole foods.'}`;
+
+      // ── Build quality flags ────────────────────────────────────────────────
+      const buildFlag = (raw: RawFactorWithConfidence): MealQualityFlag => ({
+        status:          raw.status,
+        effectiveStatus: resolveStatus(raw),
+        confidence:      raw.confidence,
+        evidence:        raw.evidence,
+        short_reason:    raw.short_reason,
+        quick_fix:       raw.quick_fix,
+      });
+
+      const meal_quality_flags: MealQualityFlags = {
+        proteinAdequacy:  buildFlag(factors.proteinAdequacy),
+        fiberPlantVolume: buildFlag(factors.fiberPlantVolume),
+        nutrientDiversity:buildFlag(factors.nutrientDiversity),
+        processingLoad:   buildFlag(factors.processingLoad),
+        portionBalance:   buildFlag(factors.portionBalance),
+        goalModifierApplied,
+        goalPhase: goalPhase || 'Maintenance',
+        isPureJunk,
+      };
+
+      console.log(`[OpenAI Service] Analysis complete: score_raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk} phase=${goalPhase || 'none'}`);
+      return {
+        nutrition_subscore: score_raw, // backward compat
+        ai_analysis,
+        score_raw,
+        score_display,
+        meal_quality_flags,
+      };
 
     } catch (error) {
       console.error('[OpenAI Service] Failed to analyze meal:', error);
-
-      // Return fallback response
       return {
         nutrition_subscore: 5,
-        ai_analysis: 'Meal analysis temporarily unavailable. Please try again later.'
+        ai_analysis: '✅ Strength: Meal logged successfully.\n⚠️ Gap: Analysis temporarily unavailable.\n🔧 Upgrade: Try re-analyzing when connection is stable.',
+        score_raw: 5,
+        score_display: 5,
       };
     }
   }
@@ -603,6 +882,13 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
     sleepScore?: number;
     recoveryZone: 'green' | 'yellow' | 'red';
     userGoal?: string;
+    whoopDataMissing?: boolean;  // when true: WHOOP had no data — do not reference strain/recovery/zones
+    // Rehab context
+    rehabActive?: boolean;       // user is in a rehab or post-surgery phase
+    rehabStage?: string;         // e.g. 'Acute', 'Sub-acute', 'Rehab', 'Return to training'
+    injuryType?: string;         // e.g. 'Post-surgery'
+    injuryLocation?: string;     // e.g. 'Shoulder'
+    strainGuardApplied?: boolean; // session logged before 18:00 — strain may increase later
   }): Promise<TrainingAnalysisResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -617,12 +903,16 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
       // Training details
       contextParts.push(`Training: ${params.trainingType}, ${params.duration} min, ${params.intensity || 'unspecified'} intensity`);
 
-      // WHOOP data - emphasize strain
-      if (params.strainScore) {
-        contextParts.push(`WHOOP Strain: ${params.strainScore.toFixed(1)} (scale 0-21)`);
-      }
-      if (params.recoveryScore) {
-        contextParts.push(`Recovery: ${Math.round(params.recoveryScore)}% (${params.recoveryZone} zone)`);
+      // WHOOP data — only include if actually available
+      if (params.whoopDataMissing) {
+        contextParts.push(`WHOOP biometric data: not available for this date. Do not reference strain, recovery %, or body readiness zones in your analysis.`);
+      } else {
+        if (params.strainScore) {
+          contextParts.push(`WHOOP Strain: ${params.strainScore.toFixed(1)} (scale 0-21)`);
+        }
+        if (params.recoveryScore) {
+          contextParts.push(`Recovery: ${Math.round(params.recoveryScore)}% (${params.recoveryZone} zone)`);
+        }
       }
 
       // Score
@@ -631,6 +921,29 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
       // Goal
       if (params.userGoal) {
         contextParts.push(`Fitness Goal: ${params.userGoal}`);
+      }
+
+      // Rehab context — inject before alignment check so GPT has full framing
+      if (params.rehabActive) {
+        const rehabParts = [`Rehab context: active`];
+        if (params.rehabStage) rehabParts.push(`stage: ${params.rehabStage}`);
+        if (params.injuryType) {
+          rehabParts.push(
+            `injury: ${params.injuryType}${params.injuryLocation ? ` (${params.injuryLocation})` : ''}`
+          );
+        }
+        rehabParts.push('Low-to-moderate strain is expected and correct for this phase — do not frame it as underperformance.');
+        contextParts.push(rehabParts.join(', '));
+      }
+
+      // Strain alignment quality — hard constraint for over-positive language
+      if (!params.whoopDataMissing && params.breakdown.strainAppropriatenessScore < 2.5) {
+        contextParts.push(`Alignment note: strain is below the expected band for this context — do NOT say the session was "perfectly aligned" or "ideal".`);
+      }
+
+      // Strain guard — early-day strain caveat
+      if (params.strainGuardApplied) {
+        contextParts.push(`Strain guard note: session was logged before 18:00 local time — WHOOP strain may continue to increase as the day progresses.`);
       }
 
       // User comment if any
@@ -690,9 +1003,9 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
     } catch (error) {
       console.error('[OpenAI Service] Failed to analyze training:', error);
 
-      // Return fallback response with basic context
-      const strainPart = params.strainScore ? `Your strain of ${params.strainScore.toFixed(1)} ` : 'This ';
-      const basicAnalysis = `${strainPart}${params.trainingType} session scored ${params.score.toFixed(1)}/10 in the ${params.recoveryZone} zone. Keep listening to your body!`;
+      // Return fallback response with basic context (no hallucinated WHOOP values)
+      const zoneRef = params.whoopDataMissing ? '' : ` in the ${params.recoveryZone} zone`;
+      const basicAnalysis = `This ${params.trainingType} session scored ${params.score.toFixed(1)}/10${zoneRef}. Keep listening to your body!`;
 
       return {
         training_analysis: basicAnalysis
@@ -727,6 +1040,13 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
     todayFeeling?: string; // energized | steady | tired | stressed
     userContextSummary?: string; // pre-built from user_context table
     dateLabel?: string; // e.g. "today", "yesterday", "Feb 21" — tells AI which day this is for
+    timingSignals?: {
+      timing_flag_long_gap: boolean;
+      longest_gap_hours?: number;
+      long_gap_window?: string; // e.g. "Breakfast → Dinner"
+      timing_flag_late_meal: boolean;
+      late_meal_time?: string; // HH:MM
+    };
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -793,6 +1113,18 @@ Focus on macronutrient balance, meal quality, and actionable recommendations.`;
 
       if (params.userContextSummary) {
         contextParts.push(params.userContextSummary);
+      }
+
+      // Meal timing nudges (only when triggered)
+      if (params.timingSignals) {
+        const ts = params.timingSignals;
+        if (ts.timing_flag_long_gap && ts.longest_gap_hours != null) {
+          const window = ts.long_gap_window ? ` (${ts.long_gap_window})` : '';
+          contextParts.push(`⏱ Meal timing: ${ts.longest_gap_hours.toFixed(1)}h gap between meals${window} — mention a brief nudge about protein snacking if relevant.`);
+        }
+        if (ts.timing_flag_late_meal && ts.late_meal_time) {
+          contextParts.push(`🌙 Late meal: logged at ${ts.late_meal_time} — mention brief impact on sleep quality if relevant.`);
+        }
       }
 
       const userPrompt = `Generate the FitCoach daily summary with preview and 5 slides. FitScore is ${params.fitScore}/10.

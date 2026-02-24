@@ -1264,29 +1264,51 @@ export class WhoopApiService {
       let targetCycle = null;
       let bestMatch = null;
 
+      // Local-timezone formatter — WHOOP cycles run evening-to-evening so we check both the
+      // UTC-midday window AND the Zurich local-date of cycle start (and the next local day,
+      // since cycles starting ~9pm local on day N cover day N+1 daytime).
+      const localDateFmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Zurich',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+      });
+
       for (const cycle of cycleResponse.data.records) {
         const cycleStart = new Date(cycle.start);
-        const cycleEnd = cycle.end ? new Date(cycle.end) : new Date(); // Ongoing cycles may not have end
-        const cycleStartDate = cycleStart.toISOString().split('T')[0];
 
-        // Also check if target date falls within the cycle period
-        const targetDateTime = new Date(dateStr + 'T12:00:00Z'); // Midday of target date
+        // Guard against empty-string end (truthy but produces Invalid Date)
+        const cycleEndRaw = cycle.end ? new Date(cycle.end) : null;
+        const cycleEndValid = cycleEndRaw && !isNaN(cycleEndRaw.getTime());
+        // For ongoing cycles use 48h from now as a safe upper bound
+        const cycleEnd = cycleEndValid ? cycleEndRaw! : new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+        // Strategy 1: UTC midday of target date falls within cycle window
+        const targetDateTime = new Date(dateStr + 'T12:00:00Z');
         const isWithinCycle = targetDateTime >= cycleStart && targetDateTime <= cycleEnd;
 
-        console.log(`[WHOOP HISTORICAL] Checking cycle: ${cycle.id}, startDate=${cycleStartDate}, start=${cycle.start}, end=${cycle.end || 'ongoing'}, strain=${cycle.score?.strain}, isWithinCycle=${isWithinCycle}`);
+        // Strategy 2: Zurich local date of cycle start (or day after) matches target
+        // Handles cases where UTC midday comparison fails due to boundary edge cases
+        const cycleStartLocalDate    = localDateFmt.format(cycleStart);
+        const dayAfterCycleStart     = new Date(cycleStart.getTime() + 24 * 60 * 60 * 1000);
+        const dayAfterLocalDate      = localDateFmt.format(dayAfterCycleStart);
+        const isLocalDayMatch        = cycleStartLocalDate === dateStr || dayAfterLocalDate === dateStr;
 
-        // Prefer cycle where target date is within the cycle period
-        if (isWithinCycle) {
+        const isMatch = isWithinCycle || isLocalDayMatch;
+
+        console.log(`[WHOOP HISTORICAL] Checking cycle: ${cycle.id}, start=${cycle.start}, end=${cycle.end || 'ongoing'}, strain=${cycle.score?.strain}, isWithinCycle=${isWithinCycle}, isLocalDayMatch=${isLocalDayMatch}`);
+
+        // Prefer cycle where target date is within the cycle period (by either strategy)
+        if (isMatch) {
           if (!bestMatch || (cycle.score?.strain || 0) > (bestMatch.score?.strain || 0)) {
             bestMatch = cycle;
-            console.log(`[WHOOP HISTORICAL] Better match found: ${cycle.id} with strain=${cycle.score?.strain}`);
+            console.log(`[WHOOP HISTORICAL] Better match found: ${cycle.id} with strain=${cycle.score?.strain} (withinCycle=${isWithinCycle}, localMatch=${isLocalDayMatch})`);
           }
         }
 
-        // Fallback: match by start date
+        // Legacy fallback: UTC start-date string match
+        const cycleStartDate = cycleStart.toISOString().split('T')[0];
         if (cycleStartDate === targetDateStr && !bestMatch) {
           targetCycle = cycle;
-          console.log(`[WHOOP HISTORICAL] Start date match: ${cycle.id} for date ${targetDateStr}, strain=${cycle.score?.strain}`);
+          console.log(`[WHOOP HISTORICAL] UTC start-date match: ${cycle.id} for date ${targetDateStr}, strain=${cycle.score?.strain}`);
         }
       }
 

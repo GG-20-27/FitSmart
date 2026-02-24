@@ -34,6 +34,9 @@ interface FitScoreTriangleProps {
   fitScore: number;
   size?: number;
   animate?: boolean;
+  // How many items each pillar aggregates — drives integer vs decimal display
+  nutritionCount?: number; // 1 → integer, 2+ → 1 decimal
+  trainingCount?: number;  // 1 → integer, 2+ → 1 decimal
   colors?: {
     recovery: string;
     nutrition: string;
@@ -70,6 +73,8 @@ export default function FitScoreTriangle({
   fitScore,
   size = 280,
   animate = false,
+  nutritionCount,
+  trainingCount,
   colors: customColors,
 }: FitScoreTriangleProps) {
   const pillarScores = { recovery: recoveryScore, nutrition: nutritionScore, training: trainingScore };
@@ -80,8 +85,8 @@ export default function FitScoreTriangle({
   // ── Colours (computed early — needed inside useEffect closure) ────────────────
   const c = {
     recovery:  customColors?.recovery  || getZoneColor(recoveryScore),
-    nutrition: customColors?.nutrition || getZoneColor(nutritionScore),
-    training:  customColors?.training  || getZoneColor(trainingScore),
+    nutrition: customColors?.nutrition || getZoneColor(nutritionCount === 1 ? Math.round(nutritionScore) : nutritionScore),
+    training:  customColors?.training  || getZoneColor(trainingCount === 1 ? Math.round(trainingScore) : trainingScore),
   };
   const light = {
     recovery:  lightenColor(c.recovery,  0.55),
@@ -257,6 +262,7 @@ export default function FitScoreTriangle({
     scaleAnim:    Animated.Value,
     isWeakest:    boolean,
     isStrongest:  boolean,
+    showDecimal:  boolean = false,
   ) => (
     <Animated.View
       key={gradId}
@@ -282,7 +288,7 @@ export default function FitScoreTriangle({
           alignmentBaseline="middle"
           opacity={scoreOpacity}
         >
-          {displayValue.toFixed(1)}
+          {showDecimal ? displayValue.toFixed(1) : Math.round(displayValue)}
         </SvgText>
         <SvgText
           x={centroid.x} y={centroid.y + scoreFontSize * 0.85}
@@ -309,6 +315,8 @@ export default function FitScoreTriangle({
         cBL, displayNutrition, 'Nutrition',
         blOpacity, blScale,
         weakestPillar === 'nutrition', strongestPillar === 'nutrition',
+        /* showDecimal — integer only when exactly 1 meal (matches single meal card) */
+        nutritionCount !== undefined && nutritionCount !== 1,
       )}
 
       {/* Training — gradient: apex (bottom-right) → inner junction */}
@@ -317,6 +325,8 @@ export default function FitScoreTriangle({
         cBR, displayTraining, 'Training',
         brOpacity, brScale,
         weakestPillar === 'training', strongestPillar === 'training',
+        /* showDecimal — integer only when exactly 1 session (matches training card); 0 sessions = system score, show decimal */
+        trainingCount !== undefined && trainingCount !== 1,
       )}
 
       {/* Recovery — gradient: apex (top) → inner junction */}
@@ -325,6 +335,7 @@ export default function FitScoreTriangle({
         cTop, displayRecovery, 'Recovery',
         topOpacity, topScale,
         weakestPillar === 'recovery', strongestPillar === 'recovery',
+        /* showDecimal */ true,
       )}
 
       {/* ── Center — FitScore (dominant) ─────────────────────────────────────── */}

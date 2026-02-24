@@ -4,6 +4,26 @@
 
 import { apiRequest, API_BASE_URL, getAuthToken } from './client';
 
+export interface MealQualityFlag {
+  status: 'good' | 'warning' | 'unknown';
+  effectiveStatus: 'good' | 'warning' | 'unknown';
+  confidence: number;
+  evidence: string;
+  short_reason: string;
+  quick_fix: string;
+}
+
+export interface MealQualityFlags {
+  proteinAdequacy: MealQualityFlag;
+  fiberPlantVolume: MealQualityFlag;
+  nutrientDiversity: MealQualityFlag;
+  processingLoad: MealQualityFlag;
+  portionBalance: MealQualityFlag;
+  goalModifierApplied: number;
+  goalPhase: string;
+  isPureJunk: boolean;
+}
+
 export interface MealData {
   id: number;
   mealType: string;
@@ -11,8 +31,10 @@ export interface MealData {
   imageUri: string;
   date: string;
   uploadedAt: string;
-  nutritionScore?: number;
-  analysis?: string;
+  nutritionScore?: number;        // score_raw (float)
+  nutritionScoreDisplay?: number; // score_display (int, for UI)
+  analysis?: string;              // structured ✅/⚠️/🔧 text
+  mealQualityFlags?: MealQualityFlags;
 }
 
 export interface TrainingDataEntry {
@@ -123,6 +145,21 @@ export interface FitScoreResponse {
     hrv?: number | null;
   };
   allGreen: boolean;
+  timingSignals?: {
+    timing_flag_long_gap: boolean;
+    timing_flag_late_meal: boolean;
+    longest_gap_hours?: number;
+    long_gap_window?: string;
+    late_meal_time?: string;
+  };
+  nutritionDayContext?: {
+    mealsLogged: number;
+    firstMealTime: string | null;
+    lastMealTime: string | null;
+    longestGapHours: number | null;
+    lateMealFlag: boolean;
+    onlyMealIsPureJunk: boolean;
+  };
   timestamp: string;
 }
 
@@ -203,6 +240,13 @@ export async function uploadMeal(params: {
  */
 export async function getMealsByDate(date: string): Promise<MealData[]> {
   return apiRequest<MealData[]>(`/api/meals/date/${date}`);
+}
+
+/**
+ * Delete a meal by ID
+ */
+export async function deleteMeal(id: number): Promise<void> {
+  await apiRequest(`/api/meals/${id}`, { method: 'DELETE' });
 }
 
 /**
@@ -370,6 +414,13 @@ export async function getCoachSummary(params: {
   trainingBreakdownScore?: number;
   nutritionBreakdownScore?: number;
   dateLabel?: string; // "today" | "yesterday" | "Feb 21"
+  timingSignals?: {
+    timing_flag_long_gap: boolean;
+    timing_flag_late_meal: boolean;
+    longest_gap_hours?: number;
+    long_gap_window?: string;
+    late_meal_time?: string;
+  };
 }): Promise<CoachSummaryResponse> {
   console.log(`[API] Getting coach summary`);
 

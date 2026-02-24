@@ -173,6 +173,8 @@ export const userContext = pgTable("user_context", {
   injuryLocation: text("injury_location"),       // free text "Where exactly?"
   rehabStage: text("rehab_stage"),
   sportSpecific: text("sport_specific"),         // free text when tier2Emphasis = "Sport-Specific"
+  // Diet Phase
+  tier2DietPhase: text("tier2_diet_phase").notNull().default('Maintenance'),
   // Tier 3
   tier3WeekLoad: text("tier3_week_load").notNull().default('Normal'),
   tier3Stress: text("tier3_stress").notNull().default('Medium'),

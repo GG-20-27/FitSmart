@@ -11,6 +11,8 @@ import {
   Modal,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +26,7 @@ import {
   type UserContext,
   DEFAULTS as CTX_DEFAULTS,
   TIER1_GOALS, TIER1_GOAL_DESCRIPTIONS, TIER1_PRIORITIES,
-  TIER2_PHASES, TIER2_EMPHASIS,
+  TIER2_PHASES, TIER2_DIET_PHASES, TIER2_EMPHASIS,
   INJURY_TYPES, BODY_REGIONS, REHAB_STAGES,
   TIER3_WEEK_LOADS, TIER3_STRESS_LEVELS, TIER3_SLEEP_EXPECTATIONS,
 } from '../api/context';
@@ -620,6 +622,10 @@ function AddGoalModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
@@ -629,7 +635,7 @@ function AddGoalModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalScroll}>
+          <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled">
             {/* Title Input */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Goal Title</Text>
@@ -718,6 +724,7 @@ function AddGoalModal({
           </TouchableOpacity>
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -782,6 +789,10 @@ function EditGoalModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
@@ -791,7 +802,7 @@ function EditGoalModal({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalScroll}>
+          <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled">
             {/* Title Input */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Goal Title</Text>
@@ -880,6 +891,7 @@ function EditGoalModal({
           </TouchableOpacity>
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -960,6 +972,13 @@ function ContextPanel({
           options={TIER2_PHASES}
           selected={context.tier2Phase}
           onSelect={v => onUpdate('tier2Phase', v)}
+        />
+
+        <OptionGroup
+          label="DIET PHASE"
+          options={TIER2_DIET_PHASES}
+          selected={context.tier2DietPhase}
+          onSelect={v => onUpdate('tier2DietPhase', v)}
         />
 
         <OptionGroup

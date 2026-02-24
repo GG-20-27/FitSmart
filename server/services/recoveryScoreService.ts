@@ -1,10 +1,11 @@
 /**
  * Recovery Score Service - Calculates recovery quality score (1-10)
  *
- * Scoring Formula (from FITSMART_MASTER_SPEC):
- * - 50% Recovery % (WHOOP recovery score)
- * - 35% Sleep Quality (sleep hours + sleep score)
- * - 15% HRV Trend (vs 7-day baseline)
+ * Scoring Formula:
+ * - 40% Recovery % (WHOOP recovery score)
+ * - 40% Sleep Quality (sleep hours + sleep score)
+ * - 20% HRV Trend (vs 7-day baseline)
+ * Reduced recovery% weight (was 50%) to avoid double-counting — WHOOP recovery already reflects HRV + sleep internally.
  */
 
 export interface RecoveryScoreInput {
@@ -19,9 +20,9 @@ export interface RecoveryScoreInput {
 export interface RecoveryScoreResult {
   score: number; // 1-10
   breakdown: {
-    recoveryScaled: number; // 0-10 (50% weight)
-    sleepQuality: number; // 0-10 (35% weight)
-    hrvScaled: number; // 0-10 (15% weight)
+    recoveryScaled: number; // 0-10 (40% weight)
+    sleepQuality: number; // 0-10 (40% weight)
+    hrvScaled: number; // 0-10 (20% weight)
   };
   analysis: string;
   recoveryZone: 'green' | 'yellow' | 'red';
@@ -40,11 +41,11 @@ export class RecoveryScoreService {
     // Determine recovery zone based on WHOOP recovery %
     const recoveryZone = this.getRecoveryZone(input.recoveryPercent);
 
-    // Apply weighted formula
+    // Apply weighted formula (0.40 / 0.40 / 0.20)
     const totalScore =
-      (recoveryScaled * 0.50) +
-      (sleepQuality * 0.35) +
-      (hrvScaled * 0.15);
+      (recoveryScaled * 0.40) +
+      (sleepQuality * 0.40) +
+      (hrvScaled * 0.20);
 
     // Generate analysis
     const analysis = this.generateAnalysis(

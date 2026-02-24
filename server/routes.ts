@@ -3696,7 +3696,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'No file uploaded' });
       }
 
-      const { mealType, mealNotes, date } = req.body;
+      const { mealType, mealNotes, date, mealTime } = req.body;
 
       if (!mealType) {
         return res.status(400).json({ error: 'Meal type is required' });
@@ -3722,25 +3722,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const baseUrl = req.protocol + '://' + req.get('host');
       const imageUrl = `${baseUrl}/uploads/${meal.filename}`;
 
+      // Fetch user's diet phase for goal-aligned scoring
+      let dietPhase: string | undefined;
+      try {
+        const [ctx] = await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1);
+        dietPhase = ctx?.tier2DietPhase ?? undefined;
+      } catch {
+        // Non-fatal — proceed without diet phase
+      }
+
       // Analyze meal with AI
       console.log('[MEAL UPLOAD] Analyzing meal with AI...');
       const analysis = await openAIService.analyzeMealImage(
         imageUrl,
         mealType,
-        mealNotes || undefined
+        mealNotes || undefined,
+        dietPhase
       );
 
-      // Update meal with analysis result
+      // Update meal with analysis result (include meal_time for timing signal computation)
       const analysisData = {
         nutrition_subscore: analysis.nutrition_subscore,
-        ai_analysis: analysis.ai_analysis
+        score_raw: analysis.score_raw,
+        score_display: analysis.score_display,
+        ai_analysis: analysis.ai_analysis,
+        meal_quality_flags: analysis.meal_quality_flags ?? null,
+        meal_time: (mealTime as string) || null, // HH:MM from mobile time picker
       };
 
       const updatedMeal = await storage.updateMeal(meal.id, {
         analysisResult: JSON.stringify(analysisData)
       });
 
-      console.log(`[MEAL UPLOAD] Analysis complete: score ${analysis.nutrition_subscore}/10`);
+      console.log(`[MEAL UPLOAD] Analysis complete: score_raw=${analysis.score_raw} display=${analysis.score_display}, goalPhase=${dietPhase || 'none'}`);
 
       res.json({
         message: 'Meal uploaded successfully',
@@ -3751,8 +3765,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           imageUri: imageUrl,
           date: updatedMeal.date,
           uploadedAt: updatedMeal.uploadedAt,
-          nutritionScore: analysis.nutrition_subscore,
+          nutritionScore: analysis.score_raw,
+          nutritionScoreDisplay: analysis.score_display,
           analysis: analysis.ai_analysis,
+          mealQualityFlags: analysis.meal_quality_flags ?? null,
         }
       });
     } catch (error) {
@@ -3863,6 +3879,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Delete a meal
+  app.delete('/api/meals/:id', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req) || 'default-user';
+      const mealId = parseInt(req.params.id);
+
+      if (isNaN(mealId)) {
+        return res.status(400).json({ error: 'Invalid meal ID' });
+      }
+
+      // Verify meal belongs to this user before deleting
+      const meal = await storage.getMealById(mealId);
+      if (!meal) {
+        return res.status(404).json({ error: 'Meal not found' });
+      }
+      if (meal.userId !== userId) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+
+      await storage.deleteMeal(mealId);
+      console.log(`[MEAL DELETE] Deleted meal ${mealId} for user ${userId}`);
+      res.json({ message: 'Meal deleted' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('Error deleting meal:', message);
+      res.status(500).json({ error: 'Failed to delete meal', details: message });
+    }
+  });
+
   // ========== Training Data Endpoints ==========
 
   // Create training data with immediate analysis
@@ -3893,20 +3938,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Analyze training session immediately (similar to meal analysis)
       try {
-        // Get WHOOP data for the date
-        const whoopData = await whoopApiService.getDataForDate(userId, trainingDate);
+        // Compute Zurich local hour for the early-day strain guard
+        const sessionLocalHour = new Date().toLocaleString('en-US', {
+          timeZone: 'Europe/Zurich',
+          hour: 'numeric',
+          hour12: false,
+        });
+        const sessionHour = parseInt(sessionLocalHour, 10); // 0-23
+
+        // Get WHOOP data and user context in parallel
+        const [whoopData, userCtxRows, goals] = await Promise.all([
+          whoopApiService.getDataForDate(userId, trainingDate),
+          db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1),
+          db.select().from(userGoals).where(eq(userGoals.userId, userId)).orderBy(desc(userGoals.createdAt)),
+        ]);
+        const userCtx = userCtxRows[0] ?? null;
+
         console.log(`[TRAINING] WHOOP data retrieved for ${trainingDate}:`, JSON.stringify(whoopData, null, 2));
         console.log(`[TRAINING] - Recovery: ${whoopData?.recoveryScore}%`);
         console.log(`[TRAINING] - Strain: ${whoopData?.strainScore}`);
         console.log(`[TRAINING] - Sleep: ${whoopData?.sleepScore}%`);
         console.log(`[TRAINING] - HRV: ${whoopData?.hrv}ms`);
-
-        // Get user goals for goal alignment
-        const goals = await db
-          .select()
-          .from(userGoals)
-          .where(eq(userGoals.userId, userId))
-          .orderBy(desc(userGoals.createdAt));
 
         const fitnessGoal = goals.find(g =>
           g.category && ['fitness', 'training', 'health', 'strength', 'endurance'].some(
@@ -3915,6 +3967,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         )?.title || goals[0]?.title;
 
         console.log(`[TRAINING] User fitness goal: ${fitnessGoal || 'none'}`);
+        console.log(`[TRAINING] User context: rehabStage=${userCtx?.rehabStage || 'none'}, primaryGoal=${userCtx?.tier1Goal || 'none'}, weeklyLoad=${userCtx?.tier3WeekLoad || 'none'}, injuryType=${userCtx?.injuryType || 'none'}`);
+        console.log(`[TRAINING] Session local hour (Zurich): ${sessionHour}`);
 
         // Extract strain and recovery values explicitly
         const strainValue = whoopData?.strainScore !== undefined && whoopData?.strainScore !== null
@@ -3939,6 +3993,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           recoveryScore: recoveryValue,
           strainScore: strainValue,
           fitnessGoal: fitnessGoal || undefined,
+          rehabStage:  userCtx?.rehabStage  || undefined,
+          primaryGoal: userCtx?.tier1Goal   || undefined,
+          weeklyLoad:  userCtx?.tier3WeekLoad || undefined,
+          injuryType:  (userCtx?.injuryType && userCtx.injuryType !== 'None') ? userCtx.injuryType : undefined,
+          sessionLocalHour: sessionHour,
         });
 
         console.log(`[TRAINING] Score calculated: ${scoreResult.score}/10`);
@@ -3947,6 +4006,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[TRAINING] - Session Quality: ${scoreResult.breakdown.sessionQualityScore.toFixed(1)}/3.0`);
         console.log(`[TRAINING] - Goal Alignment: ${scoreResult.breakdown.goalAlignmentScore.toFixed(1)}/2.0`);
         console.log(`[TRAINING] - Injury Safety: ${scoreResult.breakdown.injurySafetyModifier.toFixed(1)}/1.0`);
+        console.log(`[TRAINING] - rehabActive: ${scoreResult.rehabActive}`);
+        console.log(`[TRAINING] - strainGuardApplied: ${scoreResult.strainGuardApplied}`);
 
         // Get GPT analysis - use same extracted values
         const sleepValue = whoopData?.sleepScore !== undefined && whoopData?.sleepScore !== null
@@ -3966,17 +4027,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sleepScore: sleepValue,
           recoveryZone: scoreResult.recoveryZone,
           userGoal: fitnessGoal || undefined,
+          whoopDataMissing: !whoopData,
+          rehabActive: scoreResult.rehabActive,
+          rehabStage: userCtx?.rehabStage || undefined,
+          injuryType: (userCtx?.injuryType && userCtx.injuryType !== 'None') ? userCtx.injuryType : undefined,
+          injuryLocation: userCtx?.injuryLocation || undefined,
+          strainGuardApplied: scoreResult.strainGuardApplied,
         });
 
         console.log(`[TRAINING] GPT analysis complete`);
         console.log(`[TRAINING] GPT analysis text: ${gptAnalysis.training_analysis.substring(0, 100)}...`);
+
+        // When WHOOP data is absent, report zone as 'unknown' — internal scoring still used
+        // 'yellow' as a conservative band default, but we don't expose that as a real zone.
+        const reportedZone = whoopData ? scoreResult.recoveryZone : 'unknown';
 
         // Store analysis result with extracted values
         const analysisData = {
           score: scoreResult.score,
           breakdown: scoreResult.breakdown,
           analysis: gptAnalysis.training_analysis,
-          recoveryZone: scoreResult.recoveryZone,
+          recoveryZone: reportedZone,
+          whoopDataMissing: !whoopData,
           whoopData: {
             recoveryScore: recoveryValue,
             strainScore: strainValue,
@@ -3988,8 +4060,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           score: analysisData.score,
           breakdown: analysisData.breakdown,
           recoveryZone: analysisData.recoveryZone,
+          whoopDataMissing: analysisData.whoopDataMissing,
           hasAnalysis: !!analysisData.analysis,
-          whoopData: analysisData.whoopData,
         });
 
         // Update training entry with analysis
@@ -4008,7 +4080,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             score: scoreResult.score,
             analysis: gptAnalysis.training_analysis,
             breakdown: scoreResult.breakdown,
-            recoveryZone: scoreResult.recoveryZone,
+            recoveryZone: reportedZone,
           },
         });
 
@@ -4350,47 +4422,155 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trainingScore = sessionScores.reduce((a: number, b: number) => a + b, 0) / sessionScores.length;
         console.log(`[FITSCORE] Training score: ${trainingScore.toFixed(1)}/10 (${trainingSessions.length} sessions)`);
       } else {
-        // No training logged — default score depends on context
+        // No training logged — default score depends on context, capped when body is in red zone
         const rehab = (rehabStage || '').toLowerCase();
         const load  = (weeklyLoad || '').toLowerCase();
         const pg    = (primaryGoal || '').toLowerCase();
+        const noSessionRecoveryZone = recoveryResult.recoveryZone;
 
         if (rehab.includes('acute')) {
-          trainingScore = 7.5; // Rest is correct execution in acute rehab
+          // Rest is correct execution — but red zone caps it (day is still constrained)
+          trainingScore = noSessionRecoveryZone === 'red' ? 6.5 : 7.5;
         } else if (rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return') || pg.includes('rehab')) {
-          trainingScore = 6;   // Rehab phase — some activity expected but rest is ok
+          // Rehab phase — some activity expected but rest is ok
+          trainingScore = noSessionRecoveryZone === 'red' ? 5.5 : 6.0;
         } else if (load === 'light') {
-          trainingScore = 6.5; // Light week / deload — scheduled rest is fine
+          // Light week / deload — scheduled rest is fine
+          trainingScore = noSessionRecoveryZone === 'red' ? 5.5 : 6.5;
         } else if (load === 'heavy' || load === 'competition' || pg.includes('performance')) {
-          trainingScore = 4;   // Build/performance phase — missing a session matters
+          // Build/performance phase — missing a session matters a lot
+          trainingScore = 4.0;
         } else {
-          trainingScore = 5;   // General default
+          // General default
+          trainingScore = noSessionRecoveryZone === 'red' ? 4.5 : 5.0;
         }
-        console.log(`[FITSCORE] No training sessions — context-aware default: ${trainingScore}/10 (rehabStage=${rehabStage}, weeklyLoad=${weeklyLoad})`);
+        console.log(`[FITSCORE] No training sessions — context-aware default: ${trainingScore}/10 (rehabStage=${rehabStage}, weeklyLoad=${weeklyLoad}, recoveryZone=${noSessionRecoveryZone})`);
       }
 
-      // 5. Get Meals and calculate nutrition score
+      // 5. Get Meals, compute daily nutrition score with day-level penalties, and build day context
       const meals = await storage.getMealsByUserAndDate(userId, targetDate);
-      let nutritionScore = 1; // Default if no meals (per spec)
+      let nutritionScore = 1; // Default if no meals
       let mealScores: number[] = [];
 
+      // Day-level nutrition context — single source of truth for zone, weak link, and FitCoach prompt
+      let nutritionDayContext: {
+        mealsLogged: number;
+        firstMealTime: string | null;
+        lastMealTime: string | null;
+        longestGapHours: number | null;
+        lateMealFlag: boolean;
+        onlyMealIsPureJunk: boolean;
+      } = {
+        mealsLogged: 0,
+        firstMealTime: null,
+        lastMealTime: null,
+        longestGapHours: null,
+        lateMealFlag: false,
+        onlyMealIsPureJunk: false,
+      };
+
+      // Timing signals (kept for backward compat with FitCoach endpoint)
+      let timingSignals: {
+        timing_flag_long_gap: boolean;
+        timing_flag_late_meal: boolean;
+        longest_gap_hours?: number;
+        long_gap_window?: string;
+        late_meal_time?: string;
+      } = {
+        timing_flag_long_gap: false,
+        timing_flag_late_meal: false,
+      };
+
       if (meals && meals.length > 0) {
-        mealScores = meals.map((meal: any) => {
+        // Parse each meal once: score + isPureJunk + meal_time
+        interface ParsedMeal { score: number; isPureJunk: boolean; meal_time: string | null; mealType: string }
+        const parsedMeals: ParsedMeal[] = meals.map((meal: any) => {
+          let score = 5;
+          let isPureJunk = false;
+          let meal_time: string | null = null;
           if (meal.analysisResult) {
             try {
-              const parsed = JSON.parse(meal.analysisResult);
-              return parsed.nutrition_subscore || 5;
-            } catch (e) {
-              return 5;
-            }
+              const p = JSON.parse(meal.analysisResult);
+              score = p.nutrition_subscore || 5;
+              isPureJunk = p.meal_quality_flags?.isPureJunk === true;
+              meal_time = p.meal_time || null;
+            } catch {}
           }
-          return 5;
-        }).filter((score: number) => score > 0);
+          return { score, isPureJunk, meal_time, mealType: meal.mealType || 'Meal' };
+        });
 
+        mealScores = parsedMeals.map(m => m.score).filter(s => s > 0);
         if (mealScores.length > 0) {
           nutritionScore = mealScores.reduce((a, b) => a + b, 0) / mealScores.length;
         }
-        console.log(`[FITSCORE] Nutrition score: ${nutritionScore.toFixed(1)}/10 (${meals.length} meals)`);
+
+        // ── Day-level completeness penalty ──────────────────────────────────────
+        const mealsLogged = meals.length;
+        if (mealsLogged === 1) nutritionScore -= 2.0;
+        else if (mealsLogged === 2) nutritionScore -= 0.75;
+        // 3+ meals: no completeness penalty
+
+        // Late meal penalty (≥22:00)
+        const lateMealFlag = parsedMeals.some(
+          m => m.meal_time !== null && parseInt(m.meal_time.split(':')[0], 10) >= 22
+        );
+        if (lateMealFlag) nutritionScore -= 0.5;
+
+        // Clamp [1, 10]
+        nutritionScore = Math.max(1, Math.min(10, nutritionScore));
+
+        const hasPureJunk = parsedMeals.some(m => m.isPureJunk);
+        const onlyMealIsPureJunk = mealsLogged === 1 && hasPureJunk;
+
+        // If only meal is pure junk, cap score at 4.5 (forces RED zone)
+        if (onlyMealIsPureJunk) {
+          nutritionScore = Math.min(nutritionScore, 4.5);
+        }
+
+        // ── Timing signals ──────────────────────────────────────────────────────
+        const timed = parsedMeals
+          .filter(m => m.meal_time !== null)
+          .sort((a, b) => a.meal_time!.localeCompare(b.meal_time!));
+
+        let timing_flag_long_gap = false;
+        let longest_gap_hours: number | undefined;
+        let long_gap_window: string | undefined;
+        let late_meal_time: string | undefined;
+
+        for (let i = 1; i < timed.length; i++) {
+          const [ph, pm] = timed[i-1].meal_time!.split(':').map(Number);
+          const [ch, cm] = timed[i].meal_time!.split(':').map(Number);
+          const gapH = (ch * 60 + cm - (ph * 60 + pm)) / 60;
+          if (gapH >= 5 && (!longest_gap_hours || gapH > longest_gap_hours)) {
+            timing_flag_long_gap = true;
+            longest_gap_hours = Math.round(gapH * 10) / 10;
+            long_gap_window = `${timed[i-1].mealType} → ${timed[i].mealType}`;
+          }
+        }
+        for (const m of timed) {
+          if (parseInt(m.meal_time!.split(':')[0], 10) >= 22) late_meal_time = m.meal_time!;
+        }
+
+        // Longest gap for day context (all gaps, not just ≥5h)
+        let longestGapHours: number | null = null;
+        for (let i = 1; i < timed.length; i++) {
+          const [ph, pm] = timed[i-1].meal_time!.split(':').map(Number);
+          const [ch, cm] = timed[i].meal_time!.split(':').map(Number);
+          const gapH = (ch * 60 + cm - (ph * 60 + pm)) / 60;
+          if (longestGapHours === null || gapH > longestGapHours) longestGapHours = Math.round(gapH * 10) / 10;
+        }
+
+        timingSignals = { timing_flag_long_gap, timing_flag_late_meal: lateMealFlag, longest_gap_hours, long_gap_window, late_meal_time };
+        nutritionDayContext = {
+          mealsLogged,
+          firstMealTime: timed[0]?.meal_time ?? null,
+          lastMealTime: timed[timed.length - 1]?.meal_time ?? null,
+          longestGapHours: timed.length >= 2 ? longestGapHours : null,
+          lateMealFlag,
+          onlyMealIsPureJunk,
+        };
+
+        console.log(`[FITSCORE] Nutrition score: ${nutritionScore.toFixed(1)}/10 (${mealsLogged} meals, onlyJunk=${onlyMealIsPureJunk}, late=${lateMealFlag})`);
       } else {
         console.log(`[FITSCORE] No meals found, using default score: ${nutritionScore}/10`);
       }
@@ -4402,10 +4582,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`[FITSCORE] Final FitScore: ${roundedFitScore}/10`);
       console.log(`[FITSCORE] Breakdown: Recovery=${recoveryResult.score}, Training=${trainingScore.toFixed(1)}, Nutrition=${nutritionScore.toFixed(1)}`);
 
-      // Determine overall zone based on FitScore
+      // Zone helpers — single source of truth
       const getScoreZone = (score: number): 'green' | 'yellow' | 'red' => {
         if (score >= 7) return 'green';
         if (score >= 4) return 'yellow';
+        return 'red';
+      };
+      // Nutrition uses tighter thresholds: RED <5, YELLOW 5–6.9, GREEN ≥7
+      const getNutritionZone = (score: number): 'green' | 'yellow' | 'red' => {
+        if (nutritionDayContext.onlyMealIsPureJunk) return 'red';
+        if (score >= 7.0) return 'green';
+        if (score >= 5.0) return 'yellow';
         return 'red';
       };
 
@@ -4427,7 +4614,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           },
           nutrition: {
             score: Math.round(nutritionScore * 10) / 10,
-            zone: getScoreZone(nutritionScore),
+            zone: getNutritionZone(nutritionScore),
             mealsCount: meals?.length || 0,
             mealScores,
           },
@@ -4448,7 +4635,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         allGreen: recoveryResult.recoveryZone === 'green' &&
                   getScoreZone(trainingScore) === 'green' &&
-                  getScoreZone(nutritionScore) === 'green',
+                  getNutritionZone(nutritionScore) === 'green',
+        timingSignals,
+        nutritionDayContext,
         timestamp: new Date().toISOString(),
       };
 
@@ -4497,6 +4686,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trainingBreakdownScore,
         nutritionBreakdownScore,
         dateLabel, // e.g. "today", "yesterday", "Feb 21"
+        timingSignals,
       } = req.body;
 
       console.log(`[COACH SUMMARY] Generating summary for user: ${userId}, fitScore: ${fitScore}`);
@@ -4555,6 +4745,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         todayFeeling,
         userContextSummary: coachContextSummary,
         dateLabel: dateLabel || 'today',
+        timingSignals: timingSignals || undefined,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);

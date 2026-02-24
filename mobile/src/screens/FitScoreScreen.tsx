@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
@@ -9,6 +11,7 @@ import FitScoreTriangle from '../components/FitScoreTriangle';
 import {
   uploadMeal,
   getMealsByDate,
+  deleteMeal as deleteMealAPI,
   saveTrainingData,
   getTrainingDataByDate,
   updateTrainingData,
@@ -255,7 +258,223 @@ function CoachModal({
   );
 }
 
+// ─── Weak Link Logic ──────────────────────────────────────────────────────────
+
+type WeakLinkPillar = 'Nutrition' | 'Training' | 'Recovery';
+
+interface WeakLinkResult {
+  pillar: WeakLinkPillar;
+  displayScore: number;
+  reason: string;
+  secondReason?: string; // shown only in extreme cases (two high-severity issues)
+  ctaMessage: string;
+  zoneColor: string;
+}
+
+function getWorstMealFactor(mealList: MealData[]): string | null {
+  const counts: Record<string, number> = {
+    fiberPlantVolume: 0, processingLoad: 0,
+    proteinAdequacy: 0,  nutrientDiversity: 0, portionBalance: 0,
+  };
+  for (const meal of mealList) {
+    const f = meal.mealQualityFlags;
+    if (!f) continue;
+    if (f.fiberPlantVolume?.effectiveStatus  === 'warning') counts.fiberPlantVolume++;
+    if (f.processingLoad?.effectiveStatus    === 'warning') counts.processingLoad++;
+    if (f.proteinAdequacy?.effectiveStatus   === 'warning') counts.proteinAdequacy++;
+    if (f.nutrientDiversity?.effectiveStatus === 'warning') counts.nutrientDiversity++;
+    if (f.portionBalance?.effectiveStatus    === 'warning') counts.portionBalance++;
+  }
+  const top = Object.entries(counts).filter(([, c]) => c > 0).sort(([, a], [, b]) => b - a)[0];
+  if (!top) return null;
+  const labels: Record<string, string> = {
+    fiberPlantVolume:  'Low fiber and plant volume',
+    processingLoad:    'High processing load in meals',
+    proteinAdequacy:   'Protein intake was low',
+    nutrientDiversity: 'Low nutrient diversity',
+    portionBalance:    'Portion balance was off',
+  };
+  return labels[top[0]] ?? null;
+}
+
+function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[]): WeakLinkResult {
+  const nutRaw = result.breakdown.nutrition.score;
+  const traRaw = result.breakdown.training.score;
+  const recRaw = result.breakdown.recovery.score;
+
+  // Weakest pillar; ties (within 0.5) broken by priority: Nutrition > Training > Recovery
+  const minRaw = Math.min(nutRaw, traRaw, recRaw);
+  const TIE = 0.5;
+  let pillar: WeakLinkPillar;
+  if (nutRaw <= minRaw + TIE) {
+    pillar = 'Nutrition';
+  } else if (traRaw <= minRaw + TIE) {
+    pillar = 'Training';
+  } else {
+    pillar = 'Recovery';
+  }
+
+  const rawScore = pillar === 'Nutrition' ? nutRaw : pillar === 'Training' ? traRaw : recRaw;
+  const displayScore = Math.round(rawScore);
+
+  // Zone color mirrors triangle display logic: single session/meal uses rounded value
+  const mealCount    = result.breakdown.nutrition.mealsCount;
+  const sessionCount = result.breakdown.training.sessionsCount;
+  const scoreForZone =
+    pillar === 'Nutrition' && mealCount    === 1 ? Math.round(rawScore) :
+    pillar === 'Training'  && sessionCount === 1 ? Math.round(rawScore) :
+    rawScore;
+  const zoneColor = scoreForZone >= 7 ? colors.success : scoreForZone >= 4 ? colors.warning : colors.danger;
+
+  // Generate reason (and optional secondReason for extreme cases)
+  const timing = result.timingSignals;
+  const dayCtx = result.nutritionDayContext;
+  const whoop  = result.whoopData;
+  let reason = '';
+  let secondReason: string | undefined;
+
+  if (pillar === 'Nutrition') {
+    // ── Issue candidates with severity ──────────────────────────────────────
+    interface Issue { text: string; severity: number }
+    const candidates: Issue[] = [];
+
+    if (dayCtx) {
+      // Severe: only meal and it's junk food
+      if (dayCtx.mealsLogged === 1 && dayCtx.onlyMealIsPureJunk && dayCtx.lateMealFlag) {
+        candidates.push({ text: 'Only meal was junk food eaten late at night', severity: 4 });
+      } else if (dayCtx.mealsLogged === 1 && dayCtx.onlyMealIsPureJunk) {
+        candidates.push({ text: 'Only meal logged was low-quality junk food', severity: 3 });
+      } else if (dayCtx.mealsLogged === 1) {
+        candidates.push({ text: 'Only 1 meal logged today', severity: 3 });
+      }
+      // Gap issues
+      if (dayCtx.longestGapHours !== null) {
+        if (dayCtx.longestGapHours >= 7) {
+          candidates.push({ text: `${Math.round(dayCtx.longestGapHours)}h gap between meals`, severity: 2 });
+        } else if (dayCtx.longestGapHours >= 5) {
+          candidates.push({ text: `${Math.round(dayCtx.longestGapHours)}h gap between meals`, severity: 1 });
+        }
+      }
+      // Late meal
+      if (dayCtx.lateMealFlag && dayCtx.lastMealTime && dayCtx.mealsLogged > 1) {
+        candidates.push({ text: `Late meal at ${dayCtx.lastMealTime} may affect sleep`, severity: 1 });
+      }
+    } else {
+      // Fallback to timing signals when dayCtx not available
+      if (timing?.timing_flag_long_gap) {
+        candidates.push({ text: timing.long_gap_window ? `Long meal gap: ${timing.long_gap_window}` : 'Long gap between meals', severity: 2 });
+      }
+      if (timing?.timing_flag_late_meal) {
+        candidates.push({ text: 'Late meal may affect overnight recovery', severity: 1 });
+      }
+      if (result.breakdown.nutrition.mealsCount < 2) {
+        candidates.push({ text: `Only ${result.breakdown.nutrition.mealsCount} meal logged today`, severity: 3 });
+      }
+    }
+
+    // Quality fallback if no structural issues found
+    if (candidates.length === 0) {
+      const qualityIssue = getWorstMealFactor(mealList);
+      candidates.push({ text: qualityIssue ?? 'Fuel quality can be tighter', severity: 1 });
+    }
+
+    candidates.sort((a, b) => b.severity - a.severity);
+    reason = candidates[0].text;
+
+    // Show second reason only in extreme cases: top severity ≥3 AND second severity ≥2
+    const second = candidates[1];
+    if (second && candidates[0].severity >= 3 && second.severity >= 2) {
+      secondReason = second.text;
+    }
+  } else if (pillar === 'Training') {
+    if (result.breakdown.training.sessionsCount === 0) {
+      reason = 'No training session logged today';
+    } else if (traRaw < 5) {
+      reason = 'Session load could better match your readiness';
+    } else {
+      reason = 'Session quality has room to improve';
+    }
+  } else {
+    if (whoop.sleepHours !== undefined && whoop.sleepHours < 6) {
+      reason = `Short sleep — ${whoop.sleepHours.toFixed(1)}h logged`;
+    } else if (whoop.recoveryScore !== undefined && whoop.recoveryScore < 40) {
+      reason = `Recovery dipped to ${Math.round(whoop.recoveryScore)}%`;
+    } else if (whoop.hrv && whoop.hrvBaseline && whoop.hrv < whoop.hrvBaseline - 3) {
+      reason = 'HRV trending below baseline';
+    } else {
+      reason = 'Recovery consistency needs attention';
+    }
+  }
+
+  // Build CTA message — display values mirror the triangle exactly:
+  //   single session/meal → integer (Math.round); multiple → 1 decimal; recovery always 1 decimal
+  const nutDisp = mealCount    === 1 ? String(Math.round(nutRaw)) : nutRaw.toFixed(1);
+  const traDisp = sessionCount === 1 ? String(Math.round(traRaw)) : traRaw.toFixed(1);
+  const recDisp = recRaw.toFixed(1);
+  const pillarDisp = pillar === 'Nutrition' ? nutDisp : pillar === 'Training' ? traDisp : recDisp;
+  const msgParts: string[] = [
+    `Today's weak link is ${pillar} (${pillarDisp}/10). ${reason}.`,
+    `Day snapshot — FitScore: ${result.fitScore.toFixed(1)}/10, Recovery: ${recDisp}/10, Training: ${traDisp}/10, Nutrition: ${nutDisp}/10.`,
+  ];
+  if (whoop.sleepHours) msgParts.push(`Sleep: ${whoop.sleepHours.toFixed(1)}h.`);
+  if (whoop.recoveryScore) msgParts.push(`WHOOP recovery: ${Math.round(whoop.recoveryScore)}%.`);
+
+  // Rich pillar context so FitCoach can give specific, session/meal-aware advice
+  if (pillar === 'Training' && sessions.length > 0) {
+    const sessionDetails = sessions
+      .filter(s => !s.skipped)
+      .map(s => {
+        const parts: string[] = [`${s.type} (${s.duration}min`];
+        if (s.intensity) parts[0] += `, ${s.intensity} intensity`;
+        parts[0] += ')';
+        if (s.goal) parts.push(`goal: ${s.goal}`);
+        if (s.comment) parts.push(`notes: "${s.comment}"`);
+        if (s.score !== undefined) parts.push(`score ${Math.round(s.score)}/10`);
+        return parts.join(' — ');
+      })
+      .join('; ');
+    if (sessionDetails) msgParts.push(`Training logged: ${sessionDetails}.`);
+  } else if (pillar === 'Nutrition') {
+    if (mealList.length > 0) {
+      const mealDetails = mealList.map(m => {
+        const score = m.nutritionScore !== undefined ? ` (${m.nutritionScoreDisplay ?? Math.round(m.nutritionScore)}/10)` : '';
+        return `${m.mealType}${score}`;
+      }).join(', ');
+      msgParts.push(`Meals today: ${mealDetails}.`);
+      // Weakest meal analysis excerpt
+      const worstMeal = mealList
+        .filter(m => m.nutritionScore !== undefined)
+        .sort((a, b) => (a.nutritionScore ?? 10) - (b.nutritionScore ?? 10))[0];
+      if (worstMeal?.analysis) {
+        const excerpt = worstMeal.analysis.slice(0, 200).replace(/\n/g, ' ');
+        msgParts.push(`Weakest meal (${worstMeal.mealType}) AI notes: ${excerpt}.`);
+      }
+    }
+    // Compact nutrition day context so FitCoach knows the full picture
+    if (dayCtx) {
+      const ctxParts = [
+        `Meals logged: ${dayCtx.mealsLogged}`,
+        dayCtx.firstMealTime ? `First: ${dayCtx.firstMealTime}` : null,
+        dayCtx.lastMealTime  ? `Last: ${dayCtx.lastMealTime}`  : null,
+        dayCtx.longestGapHours !== null ? `Longest gap: ${dayCtx.longestGapHours}h` : null,
+        `Late meal: ${dayCtx.lateMealFlag ? 'yes' : 'no'}`,
+        `Only meal junk: ${dayCtx.onlyMealIsPureJunk ? 'yes' : 'no'}`,
+      ].filter(Boolean).join(', ');
+      msgParts.push(`Nutrition day context: ${ctxParts}.`);
+    }
+  }
+
+  msgParts.push('Give me 2-3 practical fixes for tomorrow that fit my goal and current context.');
+
+  return { pillar, displayScore, reason, secondReason, ctaMessage: msgParts.join(' '), zoneColor };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function FitScoreScreen() {
+  const navigation = useNavigation();
+  const [weakLink, setWeakLink] = useState<WeakLinkResult | null>(null);
+
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [meals, setMeals] = useState<MealData[]>([]);
   const [trainingSessions, setTrainingSessions] = useState<TrainingDataEntry[]>([]);
@@ -281,6 +500,9 @@ export default function FitScoreScreen() {
 
   // Analyzing meal state
   const [analyzingMeal, setAnalyzingMeal] = useState(false);
+
+  // Training IDs currently being re-analyzed after an edit (card-level overlay, not full-screen)
+  const [analyzingTrainingIds, setAnalyzingTrainingIds] = useState<Set<number>>(new Set());
 
   // Training analysis state (for individual training view)
   const [selectedTraining, setSelectedTraining] = useState<TrainingDataEntry | null>(null);
@@ -323,6 +545,29 @@ export default function FitScoreScreen() {
   // Cache FitScore results by date string so navigating away and back doesn't lose the result
   const fitScoreCacheRef = useRef<Map<string, FitScoreResponse>>(new Map());
 
+  // Load persisted FitScore cache from AsyncStorage on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const cacheKeys = keys.filter(k => k.startsWith('fitScoreCache_'));
+        if (cacheKeys.length === 0) return;
+        const pairs = await AsyncStorage.multiGet(cacheKeys);
+        pairs.forEach(([key, value]) => {
+          if (value) {
+            try {
+              const dateStr = key.replace('fitScoreCache_', '');
+              fitScoreCacheRef.current.set(dateStr, JSON.parse(value) as FitScoreResponse);
+            } catch {}
+          }
+        });
+        console.log(`[FITSCORE] Loaded ${cacheKeys.length} cached FitScore(s) from AsyncStorage`);
+      } catch (err) {
+        console.warn('[FITSCORE] Failed to load AsyncStorage cache:', err);
+      }
+    })();
+  }, []);
+
   const isToday = selectedDate.toDateString() === new Date().toDateString();
   const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
   const isYesterday = selectedDate.toDateString() === yesterday.toDateString();
@@ -361,6 +606,15 @@ export default function FitScoreScreen() {
       clearTimeout(stopPoll);
     };
   }, [fitScoreResult]);
+
+  // Compute weak link whenever FitScore result, meals, or training sessions change
+  useEffect(() => {
+    if (fitScoreResult) {
+      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions));
+    } else {
+      setWeakLink(null);
+    }
+  }, [fitScoreResult, meals, trainingSessions]);
 
   // Load meals and training data when date changes
   useEffect(() => {
@@ -471,8 +725,9 @@ export default function FitScoreScreen() {
       console.log(`[FITSCORE] Result received: ${result.fitScore}/10`);
       setFitScoreResult(result);
       setShowFitScoreResult(true);
-      // Cache by date so navigating away and back restores the result
-      fitScoreCacheRef.current.set(formatDate(selectedDate), result);
+      // Cache by date so navigating away and back restores the result (in-memory + persisted)
+      fitScoreCacheRef.current.set(dateStr, result);
+      AsyncStorage.setItem(`fitScoreCache_${dateStr}`, JSON.stringify(result)).catch(() => {});
 
       // Trigger fade-in animation
       fitScoreFadeAnim.setValue(0);
@@ -520,6 +775,7 @@ export default function FitScoreScreen() {
         trainingBreakdownScore: fitScoreData.breakdown.training.score,
         nutritionBreakdownScore: fitScoreData.breakdown.nutrition.score,
         dateLabel: getDateLabel(),
+        timingSignals: fitScoreData.timingSignals,
       });
       setCoachSummary(summary);
       console.log('[COACH SUMMARY] Summary received');
@@ -709,7 +965,7 @@ export default function FitScoreScreen() {
     }
   };
 
-  const handleDeleteMeal = (mealId: string) => {
+  const handleDeleteMeal = (mealId: number) => {
     Alert.alert(
       'Delete Meal',
       'Are you sure you want to delete this meal?',
@@ -721,7 +977,15 @@ export default function FitScoreScreen() {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => setMeals(meals.filter(m => m.id !== mealId)),
+          onPress: async () => {
+            try {
+              await deleteMealAPI(mealId);
+              setMeals(prev => prev.filter(m => m.id !== mealId));
+            } catch (err) {
+              console.error('[MEAL DELETE] Failed:', err);
+              Alert.alert('Error', 'Could not delete meal. Please try again.');
+            }
+          },
         },
       ]
     );
@@ -767,13 +1031,29 @@ export default function FitScoreScreen() {
       let savedTraining: TrainingDataEntry;
 
       if (wasEditing && editId) {
-        // Update existing
-        setLoading(true);
-        savedTraining = await updateTrainingData(editId, params);
-        setTrainingSessions(currentSessions =>
-          currentSessions.map(t => t.id === editId ? savedTraining : t)
-        );
-        setLoading(false);
+        // Show card-level "Updating training..." overlay (same animation as new session)
+        setAnalyzingTrainingIds(prev => new Set([...prev, editId]));
+        try {
+          savedTraining = await updateTrainingData(editId, params);
+          // Full re-analysis so AI sees all updated fields
+          const reanalysis = await analyzeTraining(formatDate(selectedDate));
+          const analyzed = reanalysis.sessions.find(s => s.sessionId === editId);
+          setTrainingSessions(currentSessions =>
+            currentSessions.map(t =>
+              t.id === editId
+                ? analyzed
+                  ? { ...savedTraining, score: analyzed.score, breakdown: analyzed.breakdown, analysis: analyzed.analysis, recoveryZone: analyzed.recoveryZone }
+                  : savedTraining
+                : t
+            )
+          );
+        } finally {
+          setAnalyzingTrainingIds(prev => {
+            const next = new Set(prev);
+            next.delete(editId);
+            return next;
+          });
+        }
       } else {
         // Add new - create placeholder first with analyzing state
         const tempTraining: TrainingDataEntry = {
@@ -1105,18 +1385,20 @@ export default function FitScoreScreen() {
                       styles.trainingCardCompact,
                       isEditingTrainings && styles.trainingCardEditing
                     ]}
-                    onPress={() => training.id !== -1 && handleTrainingPress(training)}
-                    disabled={training.id === -1}
+                    onPress={() => training.id !== -1 && !analyzingTrainingIds.has(training.id) && handleTrainingPress(training)}
+                    disabled={training.id === -1 || analyzingTrainingIds.has(training.id)}
                   >
-                    {training.id === -1 && (
+                    {(training.id === -1 || analyzingTrainingIds.has(training.id)) && (
                       <View style={styles.trainingAnalyzingOverlay}>
                         <ActivityIndicator size="small" color={colors.accent} />
-                        <Text style={styles.trainingAnalyzingText}>Analyzing...</Text>
+                        <Text style={styles.trainingAnalyzingText}>
+                          {analyzingTrainingIds.has(training.id) ? 'Updating training...' : 'Analyzing...'}
+                        </Text>
                       </View>
                     )}
                     <View style={styles.trainingCardHeaderRow}>
                       <Text style={styles.trainingCardType} numberOfLines={1}>{training.type}</Text>
-                      {training.id !== -1 && training.score && !isEditingTrainings && (
+                      {training.id !== -1 && !analyzingTrainingIds.has(training.id) && training.score && !isEditingTrainings && (
                         <View style={[
                           styles.trainingScoreBadge,
                           { backgroundColor: getScoreColor(training.score) }
@@ -1502,6 +1784,8 @@ export default function FitScoreScreen() {
               fitScore={fitScoreResult.fitScore}
               size={280}
               animate={triangleAnimating}
+              nutritionCount={meals.length}
+              trainingCount={trainingSessions.length}
             />
           </View>
 
@@ -1562,6 +1846,40 @@ export default function FitScoreScreen() {
             )}
           </TouchableOpacity>
 
+          {/* Today's Weakest Link */}
+          {weakLink ? (
+            <View style={[styles.weakLinkCard, { borderLeftColor: weakLink.zoneColor }]}>
+              <View style={styles.weakLinkHeader}>
+                <View style={[styles.weakLinkIconContainer, { backgroundColor: weakLink.zoneColor + '20' }]}>
+                  <Ionicons name="trending-up" size={15} color={weakLink.zoneColor} />
+                </View>
+                <Text style={styles.weakLinkTitle}>Today's Weakest Link</Text>
+              </View>
+              <Text style={[styles.weakLinkPillar, { color: weakLink.zoneColor }]}>
+                {weakLink.pillar} · {weakLink.displayScore}/10
+              </Text>
+              <Text style={styles.weakLinkReason}>
+                {weakLink.secondReason ? `• ${weakLink.reason}` : weakLink.reason}
+              </Text>
+              {weakLink.secondReason ? (
+                <Text style={styles.weakLinkReason}>• {weakLink.secondReason}</Text>
+              ) : null}
+              <TouchableOpacity
+                style={styles.weakLinkCTA}
+                onPress={() =>
+                  (navigation as any).navigate('FitCoach', {
+                    prefilledMessage: weakLink.ctaMessage,
+                    autoSubmit: false,
+                  })
+                }
+                activeOpacity={0.75}
+              >
+                <Text style={styles.weakLinkCTAText}>Fix this with FitCoach</Text>
+                <Ionicons name="arrow-forward" size={13} color={colors.bgPrimary} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
           {/* Recalculate Button */}
           <TouchableOpacity
             style={styles.recalculateButton}
@@ -1604,6 +1922,10 @@ export default function FitScoreScreen() {
         animationType="slide"
         onRequestClose={() => setShowMealModal(false)}
       >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
         <View style={styles.modalOverlay}>
           <View style={styles.mealModalContent}>
             {/* Header */}
@@ -1626,7 +1948,7 @@ export default function FitScoreScreen() {
               <View style={{ width: 28 }} />
             </View>
 
-            <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {/* Image Preview */}
               {pendingMealImage && (
                 <Image source={{ uri: pendingMealImage }} style={styles.mealPreviewImage} />
@@ -1736,6 +2058,7 @@ export default function FitScoreScreen() {
             </View>
           </View>
         </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Meal Analysis Modal */}
@@ -1766,17 +2089,54 @@ export default function FitScoreScreen() {
                   {selectedMeal.nutritionScore && (
                     <View style={styles.mealAnalysisScoreSection}>
                       <View style={[styles.mealAnalysisScoreBadge, { backgroundColor: getScoreColor(selectedMeal.nutritionScore) }]}>
-                        <Text style={styles.mealAnalysisScoreValue}>{Math.round(selectedMeal.nutritionScore)}</Text>
+                        <Text style={styles.mealAnalysisScoreValue}>
+                          {selectedMeal.nutritionScoreDisplay ?? Math.round(selectedMeal.nutritionScore)}
+                        </Text>
                         <Text style={styles.mealAnalysisScoreMax}>/10</Text>
                       </View>
                     </View>
                   )}
 
-                  {selectedMeal.analysis && (
-                    <View style={styles.mealAnalysisTextSection}>
-                      <Text style={styles.mealAnalysisText}>{selectedMeal.analysis}</Text>
-                    </View>
-                  )}
+                  {selectedMeal.analysis && (() => {
+                    // Parse ✅/⚠️/🔧 structured format if present
+                    const strengthMatch = selectedMeal.analysis.match(/✅ Strength:\s*(.+?)(?=\n⚠️|$)/s);
+                    const gapMatch      = selectedMeal.analysis.match(/⚠️ Gap:\s*(.+?)(?=\n🔧|$)/s);
+                    const upgradeMatch  = selectedMeal.analysis.match(/🔧 Upgrade:\s*(.+?)$/s);
+
+                    if (strengthMatch && gapMatch && upgradeMatch) {
+                      return (
+                        <View style={styles.mealAnalysisTextSection}>
+                          <View style={styles.mealAnalysisRow}>
+                            <Text style={styles.mealAnalysisRowIcon}>✅</Text>
+                            <View style={styles.mealAnalysisRowBody}>
+                              <Text style={styles.mealAnalysisRowLabel}>Strength</Text>
+                              <Text style={styles.mealAnalysisRowText}>{strengthMatch[1].trim()}</Text>
+                            </View>
+                          </View>
+                          <View style={styles.mealAnalysisRow}>
+                            <Text style={styles.mealAnalysisRowIcon}>⚠️</Text>
+                            <View style={styles.mealAnalysisRowBody}>
+                              <Text style={styles.mealAnalysisRowLabel}>Gap</Text>
+                              <Text style={styles.mealAnalysisRowText}>{gapMatch[1].trim()}</Text>
+                            </View>
+                          </View>
+                          <View style={[styles.mealAnalysisRow, { borderBottomWidth: 0 }]}>
+                            <Text style={styles.mealAnalysisRowIcon}>🔧</Text>
+                            <View style={styles.mealAnalysisRowBody}>
+                              <Text style={styles.mealAnalysisRowLabel}>Upgrade</Text>
+                              <Text style={styles.mealAnalysisRowText}>{upgradeMatch[1].trim()}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      );
+                    }
+                    // Fallback: plain text for legacy meals
+                    return (
+                      <View style={styles.mealAnalysisTextSection}>
+                        <Text style={styles.mealAnalysisText}>{selectedMeal.analysis}</Text>
+                      </View>
+                    );
+                  })()}
                 </View>
               )}
             </ScrollView>
@@ -2821,11 +3181,42 @@ const styles = StyleSheet.create({
   },
   mealAnalysisTextSection: {
     paddingHorizontal: spacing.md,
+    gap: 0,
   },
   mealAnalysisText: {
     ...typography.body,
     color: colors.textPrimary,
     lineHeight: 24,
+  },
+  mealAnalysisRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceMute + '40',
+    gap: 10,
+  },
+  mealAnalysisRowIcon: {
+    fontSize: 20,
+    lineHeight: 24,
+    width: 26,
+    textAlign: 'center',
+  },
+  mealAnalysisRowBody: {
+    flex: 1,
+    gap: 2,
+  },
+  mealAnalysisRowLabel: {
+    ...typography.caption,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    fontWeight: '600',
+  },
+  mealAnalysisRowText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    lineHeight: 22,
   },
   // Training Analysis Modal Styles
   trainingAnalysisScrollContent: {
@@ -3105,6 +3496,61 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.accent,
     fontWeight: '600',
+  },
+  // Weak Link Card Styles
+  weakLinkCard: {
+    backgroundColor: colors.surfaceMute + '20',
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+  },
+  weakLinkHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    marginBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  weakLinkIconContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.accent + '20',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  weakLinkTitle: {
+    ...typography.body,
+    fontWeight: '700' as const,
+    color: colors.textPrimary,
+  },
+  weakLinkPillar: {
+    ...typography.body,
+    fontWeight: '600' as const,
+    color: colors.accent,
+    marginBottom: spacing.xs,
+  },
+  weakLinkReason: {
+    ...typography.small,
+    color: colors.textMuted,
+    lineHeight: 18,
+    marginBottom: spacing.md,
+  },
+  weakLinkCTA: {
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing.xs,
+  },
+  weakLinkCTAText: {
+    ...typography.small,
+    fontWeight: '600' as const,
+    color: colors.bgPrimary,
   },
   // Coach Summary Styles
   coachPreviewCard: {

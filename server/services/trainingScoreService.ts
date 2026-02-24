@@ -28,6 +28,8 @@ export interface TrainingScoreInput {
   rehabStage?: string;    // e.g. 'Acute', 'Sub-acute', 'Rehab', 'Return to training'
   primaryGoal?: string;   // tier1Goal — e.g. 'Balanced Performance', 'High Performance', 'Rehab & Return'
   weeklyLoad?: string;    // tier3WeekLoad — e.g. 'Light', 'Normal', 'Heavy', 'Competition'
+  injuryType?: string;    // e.g. 'Post-surgery', 'Muscle strain' — used for rehabActive detection
+  sessionLocalHour?: number; // 0-23, Zurich local hour when session was logged
 }
 
 export interface TrainingScoreResult {
@@ -40,6 +42,8 @@ export interface TrainingScoreResult {
   };
   analysis: string;
   recoveryZone: 'green' | 'yellow' | 'red';
+  rehabActive?: boolean;       // true when user is in any rehab/post-surgery context
+  strainGuardApplied?: boolean; // true when early-day strain guard was applied
 }
 
 export class TrainingScoreService {
@@ -64,6 +68,25 @@ export class TrainingScoreService {
     // Determine recovery zone
     const recoveryZone = this.getRecoveryZone(input.recoveryScore);
 
+    // Determine rehabActive for result exposure (same logic as getExpectedStrainBand)
+    const rehab = (input.rehabStage  || '').toLowerCase();
+    const goal  = (input.primaryGoal || '').toLowerCase();
+    const fg    = (input.fitnessGoal || '').toLowerCase();
+    const inj   = (input.injuryType  || '').toLowerCase();
+    const rehabActive =
+      rehab.includes('acute')  ||
+      rehab.includes('sub')    ||
+      rehab.includes('rehab')  ||
+      rehab.includes('return') ||
+      goal.includes('rehab')   ||
+      goal.includes('return')  ||
+      fg.includes('surgery')   ||
+      fg.includes('post-op')   ||
+      fg.includes('post op')   ||
+      fg.includes('recover from') ||
+      inj.includes('post-surgery') ||
+      inj.includes('post-op');
+
     // Calculate each component
     const strainAppropriatenessScore = this.calculateStrainAppropriateness(
       input.strainScore,
@@ -87,15 +110,35 @@ export class TrainingScoreService {
     const injurySafetyModifier = this.calculateInjurySafety(
       input.recoveryScore,
       input.intensity,
-      input.comment
+      input.comment,
+      rehabActive,
+      input.type
     );
 
     // Total score (0-10 scale)
-    const totalScore =
+    let totalScore =
       strainAppropriatenessScore +
       sessionQualityScore +
       goalAlignmentScore +
       injurySafetyModifier;
+
+    // Cap at 7.0 when WHOOP strain is missing — can't fully validate appropriateness
+    if (!input.strainScore) {
+      totalScore = Math.min(totalScore, 7.0);
+    }
+
+    // Determine if early-day strain guard was applied
+    // (mirrors the guard logic in calculateStrainAppropriateness)
+    const band = input.strainScore !== undefined
+      ? this.getExpectedStrainBand(recoveryZone, input)
+      : null;
+    const strainGuardApplied = !!(
+      band &&
+      input.strainScore !== undefined &&
+      input.strainScore < band.min &&
+      input.sessionLocalHour !== undefined &&
+      input.sessionLocalHour < 18
+    );
 
     // Generate analysis
     const analysis = this.generateAnalysis(
@@ -120,6 +163,8 @@ export class TrainingScoreService {
       },
       analysis,
       recoveryZone,
+      rehabActive,
+      strainGuardApplied,
     };
   }
 
@@ -137,34 +182,63 @@ export class TrainingScoreService {
   /**
    * Determine expected strain band based on user context.
    * Baseline daily movement (normal life, no training) ≈ 6–9 WHOOP strain.
-   * Context overrides recovery-zone defaults.
+   *
+   * Priority order:
+   * 1. rehabActive (post-surgery / rehab stage) → stage-specific band, ignores recovery zone
+   * 2. Deload week → light band
+   * 3. High performance week → elevated band by recovery zone
+   * 4. Default → standard band by recovery zone
    */
   private getExpectedStrainBand(
     recoveryZone: 'green' | 'yellow' | 'red',
     input: TrainingScoreInput
   ): { min: number; max: number; ideal: number } {
-    const rehab = (input.rehabStage || '').toLowerCase();
+    const rehab = (input.rehabStage  || '').toLowerCase();
     const goal  = (input.primaryGoal || '').toLowerCase();
     const load  = (input.weeklyLoad  || '').toLowerCase();
     const note  = (input.comment     || '').toLowerCase();
+    const fg    = (input.fitnessGoal || '').toLowerCase();
+    const inj   = (input.injuryType  || '').toLowerCase();
 
-    const isAcuteRehab = rehab.includes('acute');
-    const isSubAcuteOrRehab = !isAcuteRehab && (
-      rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return')
-    );
-    const isRehabGoal = goal.includes('rehab') || goal.includes('return');
-    const isDeload    = load === 'light' || note.includes('deload') || note.includes('de-load');
-    const isHighPerf  = load === 'heavy' || load === 'competition' ||
-                        goal.includes('high performance') || goal.includes('performance');
+    // rehabActive: any rehab or post-surgery context overrides recovery-zone bands entirely.
+    // A user recovering from surgery with green recovery is still in rehab — do not use green default bands.
+    const rehabActive =
+      rehab.includes('acute')  ||
+      rehab.includes('sub')    ||
+      rehab.includes('rehab')  ||
+      rehab.includes('return') ||
+      goal.includes('rehab')   ||
+      goal.includes('return')  ||
+      fg.includes('surgery')   ||
+      fg.includes('post-op')   ||
+      fg.includes('post op')   ||
+      fg.includes('recover from') ||
+      inj.includes('post-surgery') ||
+      inj.includes('post-op');
 
-    if (isAcuteRehab) {
-      // Baseline movement only — extra training is overreach
-      return { min: 6, max: 11, ideal: 8 };
+    if (rehabActive) {
+      // Use stage-specific rehab bands — recovery zone does NOT change the band.
+      // Rehab sessions with green recovery are not "ready to push" — they're healing.
+      if (rehab.includes('acute')) {
+        // Acute: post-op / acute injury — baseline movement only, extra training is overreach
+        return { min: 6, max: 11, ideal: 8 };
+      }
+      if (rehab.includes('sub')) {
+        // Sub-acute: gentle controlled work beginning
+        return { min: 7, max: 12, ideal: 9.5 };
+      }
+      if (rehab.includes('return') || goal.includes('return')) {
+        // Return-to-training: progressive ramp, still below full load
+        return { min: 9, max: 15, ideal: 12 };
+      }
+      // Default rehab band: covers 'Rehab' stage, post-surgery goal, post-op injury, unspecified stage
+      return { min: 8, max: 13, ideal: 10.5 };
     }
-    if (isSubAcuteOrRehab || isRehabGoal) {
-      // Controlled rehab work OK; large spikes penalised
-      return { min: 8, max: 14, ideal: 10.5 };
-    }
+
+    const isDeload   = load === 'light' || note.includes('deload') || note.includes('de-load');
+    const isHighPerf = load === 'heavy' || load === 'competition' ||
+                       goal.includes('high performance') || goal.includes('performance');
+
     if (isDeload) {
       // Reduced load is correct execution
       return { min: 5, max: 12, ideal: 8 };
@@ -196,25 +270,38 @@ export class TrainingScoreService {
     input: TrainingScoreInput = {} as TrainingScoreInput
   ): number {
     if (!strainScore) {
-      return 2.4; // No WHOOP data — neutral
+      return 2.0; // No WHOOP data — below neutral (can't score appropriateness without the signal)
     }
 
     const band = this.getExpectedStrainBand(recoveryZone, input);
 
+    const distanceFromIdeal = Math.abs(strainScore - band.ideal);
     let score = 0;
-    if (strainScore >= band.min && strainScore <= band.max) {
-      const distanceFromIdeal = Math.abs(strainScore - band.ideal);
-      const maxDistance = (band.max - band.min) / 2;
-      score = 4 - (distanceFromIdeal / maxDistance) * 1; // 3–4 pts
-    } else if (strainScore < band.min) {
-      const underBy = band.min - strainScore;
-      score = Math.max(1.5, 3 - (underBy / band.min) * 1.5); // 1.5–3 pts
-    } else {
-      const overBy = strainScore - band.max;
-      const penalty = (overBy / band.max) * 3;
-      score = Math.max(0.5, 3 - penalty); // 0.5–3 pts
 
-      // Extra penalty for overreach in acute rehab or red recovery zone
+    if (strainScore >= band.min && strainScore <= band.max) {
+      // Inside band — piecewise distance from ideal
+      if (distanceFromIdeal <= 2)      score = 4.0;
+      else if (distanceFromIdeal <= 4) score = 3.5;
+      else if (distanceFromIdeal <= 6) score = 3.0;
+      else                             score = 2.5;
+    } else if (strainScore < band.min) {
+      // Below band — undertraining
+      const underBy = band.min - strainScore;
+      score = underBy <= 3 ? 2.0 : 1.5;
+
+      // Early-day guard: WHOOP strain accumulates throughout the day.
+      // If the session was logged before 18:00 Zurich, the day-level strain reading
+      // does not yet reflect the full training load — clamp min to 2.0 to avoid
+      // false undertraining penalties on morning and midday sessions.
+      if (input.sessionLocalHour !== undefined && input.sessionLocalHour < 18) {
+        score = Math.max(score, 2.0);
+      }
+    } else {
+      // Above band — overtraining
+      const overBy = strainScore - band.max;
+      score = overBy <= 3 ? 2.0 : 1.0;
+
+      // Extra penalty for dangerous overreach
       const isAcuteRehab = (input.rehabStage || '').toLowerCase().includes('acute');
       if ((recoveryZone === 'red' && strainScore > 10) || (isAcuteRehab && strainScore > 12)) {
         score = Math.max(0.5, score - 1);
@@ -268,6 +355,11 @@ export class TrainingScoreService {
       score += 0.4; // No comment = neutral
     }
 
+    // Short-session inflation guard: token sessions can't score highly
+    if (duration < 25 && (intensityLower === 'low' || !intensity)) {
+      score = Math.min(score, 1.4);
+    }
+
     return Math.max(0, Math.min(3, score));
   }
 
@@ -316,9 +408,9 @@ export class TrainingScoreService {
       }
     }
 
-    // If no alignment found, give moderate score
+    // If no alignment found, penalise lightly — training is logged but goal mismatch is meaningful
     if (alignmentScore === 0) {
-      alignmentScore = 1.2; // 60% - training is still valuable
+      alignmentScore = 0.8; // 40% — not punitive, but differentiated from partial alignment
     }
 
     return Math.max(0, Math.min(2, alignmentScore));
@@ -331,8 +423,26 @@ export class TrainingScoreService {
   private calculateInjurySafety(
     recoveryScore?: number,
     intensity?: string,
-    comment?: string
+    comment?: string,
+    rehabActive?: boolean,
+    type?: string
   ): number {
+    // ── Hard override: rehab context + high-impact session type + severe pain ──
+    // This combination is clinically unsafe — floor injurySafety to 0.0 immediately.
+    if (rehabActive && type && comment) {
+      const typeLower    = type.toLowerCase();
+      const commentLower = comment.toLowerCase();
+      const HIGH_IMPACT  = ['sprint', 'plyometric', 'hiit', 'max effort', 'jump', 'explosive', 'box jump'];
+      const SEVERE_PAIN  = ['hurt a lot', 'severe pain', 'sharp pain', "couldn't walk", "can't walk",
+                            'couldnt walk', 'excruciating', 'extreme pain', 'agony', 'unbearable pain'];
+      const isHighImpact  = HIGH_IMPACT.some(t => typeLower.includes(t));
+      const hasSeverePain = SEVERE_PAIN.some(k => commentLower.includes(k));
+      if (isHighImpact && hasSeverePain) {
+        console.log('[TRAINING] injuryOverrideApplied: rehab + high-impact + severe pain → injurySafety = 0.0');
+        return 0.0;
+      }
+    }
+
     let score = 1.0; // Start with full points
 
     // Check for red flags in comment
@@ -402,9 +512,13 @@ export class TrainingScoreService {
     const goal    = (input.primaryGoal || '').toLowerCase();
     const load    = (input.weeklyLoad  || '').toLowerCase();
     const note    = (input.comment     || '').toLowerCase();
+    const fg      = (input.fitnessGoal || '').toLowerCase();
+    const inj     = (input.injuryType  || '').toLowerCase();
 
     const isAcuteRehab     = rehab.includes('acute');
-    const isRehabPhase     = !isAcuteRehab && (rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return') || goal.includes('rehab'));
+    const isRehabFromStage = !isAcuteRehab && (rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return') || goal.includes('rehab'));
+    const isRehabFromGoal  = fg.includes('surgery') || fg.includes('post-op') || fg.includes('post op') || fg.includes('recover from') || inj.includes('post-surgery') || inj.includes('post-op');
+    const isRehabPhase     = isRehabFromStage || isRehabFromGoal;
     const isDeload         = load === 'light' || note.includes('deload');
     const isHighPerf       = load === 'heavy' || load === 'competition' || goal.includes('performance');
     const strainGoodFit    = breakdown.strainAppropriatenessScore >= 3;

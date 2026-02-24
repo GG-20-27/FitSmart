@@ -293,29 +293,50 @@ export default function DashboardScreen() {
     }
   }, []);
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
+  const CACHE_KEY = 'dashboard_cache_v3';
 
-      const [forecastData, todayData, yesterdayData, weeklyData] = await Promise.all([
+  const loadData = useCallback(async (isRefresh = false) => {
+    try {
+      // ── 1. Show cached data instantly (stale-while-revalidate) ──────────────
+      if (!isRefresh) {
+        const raw = await AsyncStorage.getItem(CACHE_KEY);
+        if (raw) {
+          try {
+            const cached = JSON.parse(raw);
+            setForecast(cached.forecast ?? null);
+            setTodayMetrics(cached.today ?? null);
+            setYesterdayMetrics(cached.yesterday ?? null);
+            setWeeklyMetrics(cached.weekly ?? null);
+            setLastWeekMetrics(cached.lastWeek ?? null);
+          } catch { /* ignore corrupt cache */ }
+        } else {
+          setLoading(true); // only show spinner on very first ever load
+        }
+      }
+
+      // ── 2. Fetch all 5 in parallel ──────────────────────────────────────────
+      const [forecastData, todayData, yesterdayData, weeklyData, lastWeekData] = await Promise.all([
         apiRequest<FitScoreForecast>('/api/fitscore/forecast').catch(() => null),
         apiRequest<DailyMetrics>('/api/whoop/today').catch(() => null),
         apiRequest<YesterdayMetrics>('/api/whoop/yesterday').catch(() => null),
         apiRequest<WeeklyMetrics>('/api/whoop/weekly').catch(() => null),
+        apiRequest<LastWeekMetrics>('/api/whoop/lastweek').catch(() => null),
       ]);
 
       setForecast(forecastData);
       setTodayMetrics(todayData);
       setYesterdayMetrics(yesterdayData);
       setWeeklyMetrics(weeklyData);
+      setLastWeekMetrics(lastWeekData);
 
-      // Try to load last week's metrics for yesterday comparison
-      try {
-        const lastWeekData = await apiRequest<LastWeekMetrics>('/api/whoop/lastweek');
-        setLastWeekMetrics(lastWeekData);
-      } catch (error) {
-        console.log('No last week metrics available');
-      }
+      // ── 3. Persist fresh data for next launch ───────────────────────────────
+      AsyncStorage.setItem(CACHE_KEY, JSON.stringify({
+        forecast: forecastData,
+        today: todayData,
+        yesterday: yesterdayData,
+        weekly: weeklyData,
+        lastWeek: lastWeekData,
+      })).catch(() => {});
     } catch (error) {
       console.error('Failed to load dashboard data:', error);
     } finally {
@@ -337,7 +358,7 @@ export default function DashboardScreen() {
 
   const onRefresh = useCallback(() => {
     setRefreshing(true);
-    loadData();
+    loadData(true);
   }, [loadData]);
 
   const calculateDelta = (today: number | undefined, yesterday: number | undefined): number | undefined => {

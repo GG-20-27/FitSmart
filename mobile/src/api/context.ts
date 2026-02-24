@@ -11,6 +11,7 @@ export interface UserContext {
 
   // Tier 2: Phase + Constraints
   tier2Phase: string;
+  tier2DietPhase: string;
   tier2Emphasis: string;
   sportSpecific: string | null;      // free text when tier2Emphasis = "Sport-Specific"
   injuryType: string | null;
@@ -29,6 +30,7 @@ export const DEFAULTS: UserContext = {
   tier1Goal: 'Balanced Performance',
   tier1Priority: 'Balanced with Life',
   tier2Phase: 'Maintaining',
+  tier2DietPhase: 'Maintenance',
   tier2Emphasis: 'General Fitness',
   sportSpecific: null,
   injuryType: null,
@@ -88,6 +90,16 @@ export const TIER2_PHASES = [
   'Deload',
   'Competition Prep',
   'Rehab',
+];
+
+export const TIER2_DIET_PHASES = [
+  'Cutting',
+  'Recomp (slow change)',
+  'Maintenance',
+  'Lean bulk',
+  'Aggressive bulk',
+  'Performance fueling',
+  'Recovery fueling',
 ];
 
 export const TIER2_EMPHASIS = [
