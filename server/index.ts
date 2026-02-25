@@ -13,6 +13,7 @@ if (!process.env.N8N_SECRET_TOKEN) {
 
 console.log('[STARTUP] Importing express...');
 import express, { type Request, Response, NextFunction } from "express";
+import rateLimit from "express-rate-limit";
 
 console.log('[STARTUP] Importing routes...');
 import { registerRoutes } from "./routes";
@@ -21,6 +22,7 @@ console.log('[STARTUP] Importing services...');
 import { whoopApiService } from "./whoopApiService";
 import { userService } from "./userService";
 import { jwtAuthMiddleware } from "./jwtAuth";
+import { whoopTokenStorage } from "./whoopTokenStorage";
 
 console.log('[STARTUP] All imports complete');
 
@@ -37,33 +39,38 @@ app.use(jwtAuthMiddleware);
 
 console.log(`[JWT] JWT-based authentication configured`);
 
-// Background token refresh service
+// Background token refresh service — covers ALL authenticated users
 function startTokenRefreshService() {
   console.log('[TOKEN SERVICE] Starting background token refresh service...');
-  
-  // Check and refresh tokens every 5 minutes
+
   const refreshTokens = async () => {
     try {
-      // Get admin WHOOP ID from environment
-      const adminWhoopId = process.env.ADMIN_WHOOP_ID || '25283528';
-      const adminUserId = `whoop_${adminWhoopId}`;
-      
-      // Try to find admin user by ID
-      const adminUser = await userService.getUserById(adminUserId);
-      if (adminUser) {
-        await whoopApiService.getValidWhoopToken(adminUser.id);
-        console.log('[TOKEN SERVICE] Token validation completed successfully for admin user');
-      } else {
-        console.log(`[TOKEN SERVICE] Admin user not found (ID: ${adminUserId}). User may need to authenticate via WHOOP OAuth first.`);
+      const allTokens = await whoopTokenStorage.getAllTokens();
+      if (allTokens.length === 0) {
+        console.log('[TOKEN SERVICE] No users with tokens found. Waiting for first OAuth login.');
+        return;
       }
+      console.log(`[TOKEN SERVICE] Checking tokens for ${allTokens.length} user(s)...`);
+      let refreshed = 0;
+      let failed = 0;
+      for (const { userId } of allTokens) {
+        try {
+          await whoopApiService.getValidWhoopToken(userId);
+          refreshed++;
+        } catch {
+          failed++;
+          console.log(`[TOKEN SERVICE] Token refresh failed for user ${userId} — they may need to re-authenticate`);
+        }
+      }
+      console.log(`[TOKEN SERVICE] Complete: ${refreshed} ok, ${failed} failed`);
     } catch (error) {
-      console.log('[TOKEN SERVICE] Token validation failed, user may need to re-authenticate');
+      console.error('[TOKEN SERVICE] Unexpected error in refresh cycle:', error);
     }
   };
 
   // Run immediately and then every 5 minutes
   refreshTokens();
-  setInterval(refreshTokens, 5 * 60 * 1000); // 5 minutes
+  setInterval(refreshTokens, 5 * 60 * 1000);
 }
 // CORS configuration - must be before express.json()
 app.use((req, res, next) => {
@@ -99,6 +106,33 @@ app.use((req, res, next) => {
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
+
+// ── Rate limiting ──────────────────────────────────────────────────────────────
+// General API limit: 300 req/min per IP (generous for active use, stops abuse)
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please slow down.' },
+  skip: (req) => req.method === 'OPTIONS', // Never block preflight
+});
+
+// AI/compute-heavy endpoints: 20 req/min per IP
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'AI request limit reached. Please wait a moment.' },
+});
+
+app.use('/api/', generalLimiter);
+app.use('/api/fitscore/calculate', aiLimiter);
+app.use('/api/meals/analyze', aiLimiter);
+app.use('/api/training/analyze', aiLimiter);
+app.use('/api/coach/summary', aiLimiter);
+// ──────────────────────────────────────────────────────────────────────────────
 
 app.use((req, res, next) => {
   const start = Date.now();

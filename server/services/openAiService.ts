@@ -18,6 +18,8 @@ Always frame observations with "if/then" context when the intent behind the day 
 BANNED PHRASES (never use):
 "It's all about the journey", "Small steps", "Keep pushing", "You're doing great", "Listen to your body", "Trust the process", "Remember to", "Don't forget", "linchpin", "fortify", "trajectory", "calibration", "measurably", "paradigm", "synergy", "optimize", "leverage"
 
+HYDRATION RULE (HARD CONSTRAINT): NEVER mention hydration, water, water intake, or "drink more water" in ANY slide, preview, or coach_call — unless the context above contains an explicit 💧 Hydration flag. This applies even if nutrition scores are low or meals look poor. If no 💧 flag is present, water is completely off-limits as a suggestion.
+
 Return valid JSON with "preview" and "slides".
 
 PREVIEW — RULES:
@@ -107,35 +109,41 @@ Example:
 
 const FITCOACH_TRAINING_SYSTEM_PROMPT = `You are fitCoachAi, a concise training coach for the FitSmart app.
 
-Provide a SHORT analysis (2-3 sentences max) focusing ONLY on:
+Provide a scannable 3-block analysis using ONLY:
 1. What the WHOOP strain tells us about this session (when available)
 2. How the training aligns with the user's fitness goal or recovery phase
 3. Any injury/recovery concerns if relevant
 
-CRITICAL RULES:
-- NEVER confuse WHOOP strain (the day-level biometric on a 0-21 scale) with the training quality score (0-10). They are completely different numbers.
-- If WHOOP strain data is provided, ALWAYS mention the specific strain number (e.g., "Your strain of 10.6...")
-- DO NOT explain scoring breakdowns or percentages
-- Be direct, warm, and actionable
-- End with a brief practical tip or encouragement
+OUTPUT FORMAT (strict — ⚠️ Gap is OPTIONAL, omit if no meaningful concern):
+✅ Strength: <1 sentence — the main positive signal from this session>
+⚠️ Gap: <1 sentence — only if there is a real concern; omit entirely if session looks solid>
+🔧 Upgrade: <1 sentence — the single most useful actionable suggestion>
 
-REHAB / POST-SURGERY CONTEXT (when rehabActive is true in the context):
-- Low-to-moderate WHOOP strain (e.g., 4-10) is EXPECTED and CORRECT for rehab and post-surgery phases — frame it as appropriate, not as underperformance
-- NEVER say the session was "perfectly aligned" or "ideal" if the alignment note says strain is below the expected band
-- If a strain guard note is present (strain may rise later), acknowledge it naturally (e.g., "The strain reading may increase as the day progresses.")
+RULES:
+- NEVER confuse WHOOP strain (0-21 biometric scale) with the training score (0-10). They are different numbers.
+- If WHOOP strain data is provided, mention the specific strain number in Strength or Gap.
+- DO NOT explain scoring breakdowns or percentages.
+- Each block is exactly 1 sentence, max ~90 characters. No extra sentences.
+- No motivational filler ("Keep it up!", "Great work!", etc.)
+- Be direct and specific — reference the actual activity, duration, or strain value.
 
-Good example (standard):
-"Your strain of 8.4 was well-matched to your moderate recovery today. This run supports your endurance goal — consistent work like this adds up."
+REHAB / POST-SURGERY CONTEXT (when rehabActive is true in context):
+- Low-to-moderate WHOOP strain (4-10) during rehab is EXPECTED and CORRECT — frame as appropriate, not underperformance.
+- NEVER say "perfectly aligned" or "ideal" if alignment note says strain is below expected band.
+- Injury/safety concerns belong in ⚠️ Gap.
 
-Good example (rehab):
-"A strain of 4.4 is right where it should be post-surgery — controlled movement without overloading the healing area. The abs work fits this phase well."
+Good example (standard, with gap):
+✅ Strength: Your strain of 8.4 matched moderate recovery well for an endurance run.
+⚠️ Gap: 20 min is short for building aerobic base — aim for 35+ min next session.
+🔧 Upgrade: Add a 10-min cooldown to lower HR gradually and aid recovery.
 
-Bad example (never do this):
-"The session quality score of 2.6/3.0 reflects..." — don't mention or explain metric breakdowns.
+Good example (rehab, no gap needed):
+✅ Strength: A strain of 4.4 is right where it should be post-surgery for gentle abs work.
+🔧 Upgrade: Keep loading gentle — prioritize range-of-motion over intensity this week.
 
 Always respond in JSON format:
 {
-  "training_analysis": "<2-3 sentence analysis>"
+  "training_analysis": "✅ Strength: ...\n🔧 Upgrade: ..."
 }`;
 
 const FITSCORE_AI_SYSTEM_PROMPT = `You are fitScoreAi, a structured nutrition analyst for the FitSmart app.
@@ -256,70 +264,44 @@ export interface DailySummaryResult {
   tomorrowsOutlook: string;
 }
 
-// FitLook Morning Outlook Prompt
+// FitLook Morning Outlook Prompt — v2 fixed A-B-C-D structure
 const FITLOOK_MORNING_OUTLOOK_PROMPT = `You are fitLookAi — a grounded, emotionally intelligent morning coach for the FitSmart app.
 
-Purpose: Deliver a 3-slide morning briefing that anchors the user's day. Forward-looking, slightly inspirational but grounded, context-aware. Not a dashboard — an emotional primer.
+Purpose: Deliver a scannable morning briefing in under 10 seconds. Fixed structure, dynamic content. Actionable, not inspirational. Forward-looking.
 
-Tone: Warm intensity 6/10. Steady, clear, human. Like a trusted friend who checked your numbers and tells you plainly what matters today. No corporate motivation. No therapy tone. No questions anywhere.
+Tone: Warm intensity 6/10. Steady, clear, direct. Like a trusted friend who checked your numbers and tells you plainly what matters today. No corporate motivation. No therapy tone. No questions. No long paragraphs.
 
-BANNED PHRASES: "It's all about the journey", "Small steps", "Keep pushing", "You're doing great", "Listen to your body", "Trust the process", "Remember to", "Don't forget", "linchpin", "fortify", "trajectory", "calibration", "measurably", "paradigm", "synergy", "optimize", "leverage", "harness"
+BANNED PHRASES: "It's all about the journey", "Small steps", "Keep pushing", "You're doing great", "Listen to your body", "Trust the process", "Remember to", "Don't forget", "linchpin", "fortify", "trajectory", "calibration", "measurably", "paradigm", "synergy", "optimize", "leverage", "harness", "hydrate", "drink more water", "stay hydrated" (unless a hydration flag is explicitly in context)
 
-SELF-ASSESSMENT RECONCILIATION:
-The user has reported how they feel today (energized/steady/tired/stressed). This is subjective. WHOOP data is objective.
-- If they match (green recovery + energized), reinforce confidently.
-- If they conflict (green recovery + tired), acknowledge BOTH honestly: "Your numbers look good but you're feeling off — that's real too."
-- Never dismiss the self-assessment. Never dismiss the data. Reconcile them.
+FEELING RULES:
+- stressed or tired → lower-friction actions, supportive tone, no punishing language
+- energized → allow more ambitious focus within any rehab/training constraints
+- steady → balanced, matter-of-fact
+- Always reconcile feeling with WHOOP metrics honestly. Never dismiss either.
+
+REHAB RULE: If rehabActive or injuryNotes are present, ALL action bullets must stay within rehab constraints. Never suggest high-impact movement.
 
 OUTPUT: Return valid JSON with exactly this structure:
 {
-  "slides": [
-    {
-      "title": "Today's Readiness",
-      "chips": ["Recovery 73%", "Sleep 8.2h", "Feeling: Tired"],
-      "body": "2-4 short sentences. Use WHOOP recovery + sleep/HRV if available. Include the user's self-assessment feeling and reconcile it with metrics. Frame what kind of day it is (push / controlled / protect). Permission-based.",
-      "focus_line": "One practical direction line (max 70 chars)"
-    },
-    {
-      "title": "Yesterday's Takeaway",
-      "chips": ["FitScore 6.9", "Recovery 7.6", "Nutrition 6.5"],
-      "body": "2-4 short sentences. Reference yesterday's FitScore and sub-scores if available. Mention what worked and one miss/opportunity (nutrition/training/logging). Fair, no scolding.",
-      "focus_line": "One grounded takeaway (max 70 chars)"
-    },
-    {
-      "title": "Focus",
-      "chips": ["3-day: improving", "Goal: fluidity", "Risk: none"],
-      "body": "2-4 short sentences. Include 3-day momentum if available (improving/steady/slipping). Goal alignment if goal exists. Injury caution only if present.",
-      "focus_line": "Today's Focus: <short phrase>"
-    }
-  ]
+  "snapshot_chips": ["Recovery 96%", "Sleep 9.1h", "Feeling: Steady"],
+  "focus": "Controlled ankle rehab — keep it brief",
+  "do": ["Short rehab strength (≤30 min)", "Protein by 11:00"],
+  "avoid": "High-impact movements today",
+  "forecast_line": "Short rehab + steady meals."
 }
 
-SLIDE 1 RULES (Today's Readiness):
-- Chips: Include recovery % if available, sleep hours if available, and "Feeling: <feeling>"
-- Readiness tag logic: Green >= 67% recovery, Yellow 34-66%, Red <= 33%
-- If recovery missing, default to the feeling to guide tone
-- body should reconcile metrics with self-assessment feeling
-- focus_line: one practical direction for the day
-
-SLIDE 2 RULES (Yesterday's Takeaway):
-- Chips: Include yesterday's FitScore and available sub-scores (Recovery/Training/Nutrition)
-- If no yesterday data, say "No data from yesterday" and keep it brief
-- Mention what went well + one honest area to improve
-- No scolding, no questions
-
-SLIDE 3 RULES (Focus):
-- Chips: 3-day trend (improving/steady/slipping or "not enough data"), goal name if exists, risk/injury if exists else "Risk: none"
-- If planned training exists, mention it
-- focus_line MUST start with "Today's Focus: " followed by a short phrase
+FIELD RULES:
+- snapshot_chips: 2–4 chips. Always include Feeling chip. Include Recovery % and Sleep hours if available. Include a trend tag if meaningful (e.g. "3-day: improving").
+- focus: One sentence max, bold intent. Start with an action noun or verb. Max 60 chars.
+- do: Array of exactly 2 strings. Each bullet is concrete, time-aware if relevant, max 40 chars. No vague verbs.
+- avoid: Exactly 1 string. Concrete, specific. Max 40 chars.
+- forecast_line: Crisp action phrase ONLY — do NOT start with "To hit today's forecast:" or any similar preamble. Just the key levers, max 50 chars. Example: "Short rehab + steady meals."
 
 GLOBAL RULES:
-- Each chip should be short (under 20 chars ideally)
-- Each body should be 2-4 sentences, human-readable, under 60 words
-- Each focus_line should be max 70 chars
-- Weave numbers naturally into sentences, don't list them
-- Be specific when you can (sleep hours, recovery %, planned training title)
-- Give clear actionable direction, not vague platitudes`;
+- No bullet starts with "Try to" or "Make sure"
+- Each chip under 20 chars
+- Be specific: use actual numbers, times, durations where available
+- No paragraphs anywhere — every field is a fragment or single sentence`;
 
 const FITROAST_LIGHT_PROMPT = `You are FitRoastAI in Light mode — a friendly, honest mate checking in on your week.
 
@@ -512,6 +494,7 @@ export interface FitRoastGenerationInput {
   injuryNotes?: string;
   userContextSummary?: string; // pre-built from user_context table
   intensity?: 'Light' | 'Spicy' | 'Savage';
+  lastTheme?: string; // theme_id used last week — will be skipped
 }
 
 export interface FitLookGenerationInput {
@@ -1047,6 +1030,7 @@ Return valid JSON only — no score.`;
       timing_flag_late_meal: boolean;
       late_meal_time?: string; // HH:MM
     };
+    waterIntakeBand?: string; // '<1L' | '1–2L' | '2–3L' | '3L+' — only advise hydration when low
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -1113,6 +1097,20 @@ Return valid JSON only — no score.`;
 
       if (params.userContextSummary) {
         contextParts.push(params.userContextSummary);
+      }
+
+      // Hydration (only advise if data is present and indicates low intake)
+      if (params.waterIntakeBand) {
+        const isLow = params.waterIntakeBand === '<1L';
+        const isBorderline = params.waterIntakeBand === '1–2L';
+        const highStrain = params.strainScore != null && params.strainScore >= 14;
+        const tiredOrStressed = params.todayFeeling === 'tired' || params.todayFeeling === 'stressed';
+        if (isLow) {
+          contextParts.push(`💧 Hydration: User reported <1L water today — low. Mention hydration briefly as a recovery lever.`);
+        } else if (isBorderline && (highStrain || tiredOrStressed)) {
+          contextParts.push(`💧 Hydration: User reported 1–2L water. Borderline given ${highStrain ? 'high strain' : `feeling ${params.todayFeeling}`} — a brief mention may help.`);
+        }
+        // 2–3L or 3L+: do NOT mention hydration at all
       }
 
       // Meal timing nudges (only when triggered)
@@ -1285,7 +1283,7 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       if (input.injuryNotes) parts.push(`Injury/caution notes: ${input.injuryNotes}`);
       if (input.userContextSummary) parts.push(input.userContextSummary);
 
-      const userPrompt = `Generate this morning's FitLook 3-slide briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required "slides" array (3 slides: Today's Readiness, Yesterday's Takeaway, Focus).`;
+      const userPrompt = `Generate this morning's FitLook briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required v2 fields: snapshot_chips, focus, do (array of 2), avoid, forecast_line. No slides array.`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -1319,77 +1317,50 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
 
       const parsed = JSON.parse(content);
 
-      // Validate slides array
-      if (!parsed.slides || !Array.isArray(parsed.slides) || parsed.slides.length !== 3) {
-        throw new Error('Invalid slides structure in FitLook response');
+      // Validate v2 fields
+      if (!parsed.snapshot_chips || !parsed.focus || !Array.isArray(parsed.do) || !parsed.avoid || !parsed.forecast_line) {
+        throw new Error('Invalid FitLook v2 structure in response');
       }
 
-      // Validate each slide has required fields
-      for (const slide of parsed.slides) {
-        if (!slide.title || !slide.body || !slide.focus_line) {
-          throw new Error('Slide missing required fields');
-        }
-        if (!Array.isArray(slide.chips)) {
-          slide.chips = [];
-        }
-      }
+      // Clamp arrays to spec limits
+      if (parsed.do.length > 2) parsed.do = parsed.do.slice(0, 2);
 
       const payload: import('@shared/schema').FitLookPayload = {
         date_local: input.dateLocal,
         feeling: input.feeling,
-        slides: parsed.slides,
+        snapshot_chips: parsed.snapshot_chips,
+        focus: parsed.focus,
+        do: parsed.do,
+        avoid: parsed.avoid,
+        forecast_line: parsed.forecast_line,
       };
 
-      console.log(`[OpenAI Service] FitLook generated: 3 slides, feeling=${input.feeling}`);
+      console.log(`[OpenAI Service] FitLook v2 generated: feeling=${input.feeling}`);
       return payload;
 
     } catch (error) {
       console.error('[OpenAI Service] FitLook generation failed:', error);
 
-      // Return sensible fallback with 3 slides
-      const tag = input.recoveryPercent != null
-        ? (input.recoveryPercent >= 67 ? 'Green' : input.recoveryPercent >= 34 ? 'Yellow' : 'Red')
-        : 'Yellow';
+      // Sensible fallback in v2 format
+      const recoveryChip = input.recoveryPercent != null ? `Recovery ${input.recoveryPercent}%` : null;
+      const sleepChip = input.sleepHours != null ? `Sleep ${input.sleepHours}h` : null;
+      const chips = [recoveryChip, sleepChip, `Feeling: ${input.feeling}`].filter(Boolean) as string[];
+
+      const isLow = input.recoveryPercent != null && input.recoveryPercent < 34;
+      const feeling = input.feeling;
 
       return {
         date_local: input.dateLocal,
         feeling: input.feeling,
-        slides: [
-          {
-            title: "Today's Readiness",
-            chips: [
-              input.recoveryPercent != null ? `Recovery ${input.recoveryPercent}%` : 'Recovery: N/A',
-              input.sleepHours != null ? `Sleep ${input.sleepHours}h` : 'Sleep: N/A',
-              `Feeling: ${input.feeling}`,
-            ],
-            body: tag === 'Green'
-              ? `Recovery looks solid today. You're feeling ${input.feeling} — your body and mind are in this together. A good day to show up with intent.`
-              : tag === 'Red'
-              ? `Recovery is low. You said you're feeling ${input.feeling}. Today is about being smart — protect what you've built and give your system space.`
-              : `A steady day ahead. You're feeling ${input.feeling} and recovery is moderate. Be deliberate about where you spend energy.`,
-            focus_line: tag === 'Green' ? 'Push with purpose today' : tag === 'Red' ? 'Protect and recover today' : 'Pace yourself and stay intentional',
-          },
-          {
-            title: "Yesterday's Takeaway",
-            chips: [
-              input.yesterdayFitScore != null ? `FitScore ${input.yesterdayFitScore}` : 'No FitScore',
-            ],
-            body: input.yesterdayFitScore != null
-              ? `Yesterday scored ${input.yesterdayFitScore}/10. The foundation is there — keep building on what worked.`
-              : 'No data from yesterday to review. Today is a fresh start.',
-            focus_line: 'Build on what worked yesterday',
-          },
-          {
-            title: 'Focus',
-            chips: [
-              input.fitScoreTrend3d ? `3-day: ${input.fitScoreTrend3d[0] > input.fitScoreTrend3d[input.fitScoreTrend3d.length - 1] ? 'improving' : 'steady'}` : '3-day: not enough data',
-              input.userGoalTitle ? `Goal: ${input.userGoalTitle}` : 'No goal set',
-              input.injuryNotes ? 'Risk: caution' : 'Risk: none',
-            ],
-            body: 'Stay present and move with intent today. Each choice builds toward the bigger picture.',
-            focus_line: "Today's Focus: Move with purpose",
-          },
-        ],
+        snapshot_chips: chips,
+        focus: isLow ? 'Rest and protect recovery' : 'Move with intention today',
+        do: isLow
+          ? ['Light movement only (≤20 min)', 'Prioritise protein + sleep']
+          : ['Show up for your training goal', 'Fuel well before 12:00'],
+        avoid: isLow ? 'High-intensity work today' : 'Late meals after 22:00',
+        forecast_line: isLow
+          ? 'Protect tonight\'s recovery: keep it light.'
+          : `Keep the day on track — ${feeling === 'energized' ? 'use the energy well' : 'stay steady'}.`,
       };
     }
   }
@@ -1432,29 +1403,88 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       if (input.injuryNotes) parts.push(`Injury/caution notes: ${input.injuryNotes}`);
       if (input.userContextSummary) parts.push(input.userContextSummary);
 
-      // Derive a style seed so each week gets a distinctly different creative angle
-      const weekNum = Math.ceil(new Date(input.weekEnd).getDate() / 7) + new Date(input.weekEnd).getMonth() * 4;
-      const styleSeeds = [
-        'Use film criticism as your comparison domain this roast.',
-        'Use restaurant reviews as your comparison domain this roast.',
-        'Use weather forecasting as your comparison domain this roast.',
-        'Use stock market analysis as your comparison domain this roast.',
-        'Use a wildlife documentary narrator voice as your comparison domain.',
-        'Use reality TV casting notes as your comparison domain.',
-        'Use product launch press releases as your comparison domain.',
-        'Use travel reviews as your comparison domain.',
-        'Use academic peer review language as your comparison domain.',
-        'Use sports commentary from a sport unrelated to fitness as your comparison domain.',
-        'Use a property listing description as your comparison domain.',
-        'Use a Michelin star chef critique as your comparison domain.',
+      // ── Narrative theme selection ───────────────────────────────────────────
+      // 10 distinct storytelling frames. One is chosen per week via a deterministic
+      // hash of weekEnd, with the previous week's theme always skipped so the user
+      // never sees the same frame two weeks running.
+      const ROAST_THEMES: Array<{ id: string; name: string; instruction: string }> = [
+        {
+          id: 'documentary_narrator',
+          name: 'Documentary Narrator',
+          instruction: 'Frame this as a nature documentary. The narrator observes the user\'s week as if studying a fascinating, slightly bewildering creature in its natural habitat. Slow, poetic observations punctuated by dry, knowing humor. Think Sir David Attenborough watching someone skip leg day.',
+        },
+        {
+          id: 'sports_commentator',
+          name: 'Sports Commentator',
+          instruction: 'Deliver this as live sports commentary — peak excitement, dramatic pauses, stat breakdowns, and post-match analysis. Every missed workout is a turning point in the game. Every nutrition lapse is a controversial referee call. Use sports jargon creatively.',
+        },
+        {
+          id: 'startup_pitch',
+          name: 'Startup Investor Pitch',
+          instruction: 'Present this week as a startup pitch to skeptical VCs. The user is the product. Frame recovery as market fit, missed sessions as runway burn, nutrition logging as user retention. Include a Q4 outlook. Dry, corporate, satirical. The investors are not impressed.',
+        },
+        {
+          id: 'reality_tv',
+          name: 'Reality TV Recap',
+          instruction: 'Write this as a reality TV episode recap — confessional booth moments, dramatic eliminations, rose ceremonies for habits that survived the week, a cliffhanger for next week. Every data point is a plot twist. The drama is real.',
+        },
+        {
+          id: 'therapist_session',
+          name: 'Therapist Session Notes',
+          instruction: 'Write this as formal therapist session notes with clinical wit. Identify the user\'s behavioral patterns, make precise observations about avoidance and compensation, and prescribe homework. Maintain professional detachment while being hilariously perceptive. Session #47.',
+        },
+        {
+          id: 'breaking_news',
+          name: 'Breaking News Report',
+          instruction: 'This is BREAKING NEWS. The week\'s fitness data is a developing story of critical importance. Breathless urgency, live updates, expert analysts, contradictory eyewitness accounts from the scale and the training log. Cut to our correspondent on the ground.',
+        },
+        {
+          id: 'courtroom_drama',
+          name: 'Courtroom Drama',
+          instruction: 'You are the prosecutor in People v. This Week\'s Choices. Present the evidence methodically, cite exhibits (the data), anticipate the defense\'s excuses and dismantle them, then deliver a devastating closing argument. Formal. Unflinching. The jury has seen everything.',
+        },
+        {
+          id: 'group_chat',
+          name: 'Group Chat Roast',
+          instruction: 'Write this as a group chat where the squad has seen the weekly data and is weighing in. Short punchy messages, voice note references, reactions, someone half-heartedly defending them, an unsolicited meme comparison. Casual, modern, savage in a loving way.',
+        },
+        {
+          id: 'ancient_philosopher',
+          name: 'Ancient Philosopher',
+          instruction: 'You are a Stoic philosopher — somewhere between Seneca and Marcus Aurelius — who has somehow gained access to this week\'s biometric data. Contemplate the choices through the lens of virtue, discipline, and impermanence. Occasionally disappointed. Always searching for a deeper truth that probably involves more sleep.',
+        },
+        {
+          id: 'conspiracy_analyst',
+          name: 'Conspiracy Analyst',
+          instruction: 'Connect the dots. The missed workouts, the late-night meals, the suspicious recovery dip — it\'s all part of a pattern the mainstream fitness industry doesn\'t want exposed. Draw absurd but oddly logical conclusions from the data. There are no coincidences. The evidence is damning.',
+        },
       ];
-      const styleSeed = styleSeeds[weekNum % styleSeeds.length];
+
+      // Deterministic pick by week hash, then skip if it matches last week's theme
+      const weekHash = new Date(input.weekEnd).getFullYear() * 100 + new Date(input.weekEnd).getMonth() * 5 +
+        Math.ceil(new Date(input.weekEnd).getDate() / 7);
+      let themeIndex = weekHash % ROAST_THEMES.length;
+      if (ROAST_THEMES[themeIndex].id === input.lastTheme) {
+        themeIndex = (themeIndex + 1) % ROAST_THEMES.length;
+      }
+      const selectedTheme = ROAST_THEMES[themeIndex];
+      const styleSeed = selectedTheme.instruction;
+      console.log(`[OpenAI Service] FitRoast theme: ${selectedTheme.name} (lastTheme=${input.lastTheme ?? 'none'})`);
 
       const feelingSignature = input.feelingsThisWeek && input.feelingsThisWeek.length > 0
         ? `The dominant emotional signature this week: ${input.feelingsThisWeek.join(', ')}. Let this color the tone.`
         : '';
 
-      const userPrompt = `Generate this week's FitRoast. Week ending ${input.weekEnd}.\n\nCreative direction: ${styleSeed} ${feelingSignature}\n\nWeekly data:\n${parts.join('\n')}\n\nIMPORTANT: This roast must feel completely unlike any previous generation. The headline must reflect the specific data of this week, not a generic fitness line. Return JSON only with "headline" and "segments" (exactly 5 segments: Recovery, Training, Nutrition, Pattern, Final Challenge).`;
+      const userPrompt = `Generate this week's FitRoast. Week ending ${input.weekEnd}.
+
+THEME THIS WEEK: "${selectedTheme.name}"
+${styleSeed}
+${feelingSignature}
+
+Weekly data:
+${parts.join('\n')}
+
+IMPORTANT: Commit fully to the "${selectedTheme.name}" theme from the first word to the last. Every segment must sound like it belongs to this format — not a generic fitness summary with a thin veneer of theme on top. The headline must be written in-theme and reference the actual data of this week. Return JSON only with "headline" and "segments" (exactly 5 segments: Recovery, Training, Nutrition, Pattern, Final Challenge).`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -1494,6 +1524,7 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
         week_end: input.weekEnd,
         headline: parsed.headline,
         segments: parsed.segments,
+        theme_used: selectedTheme.id,
       };
 
     } catch (error) {

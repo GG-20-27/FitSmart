@@ -28,6 +28,7 @@ import {
   type CoachSummaryResponse,
   type CoachSlide,
   type StoredFitScore,
+  type WaterIntakeBand,
 } from '../api/fitscore';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -297,34 +298,36 @@ function getWorstMealFactor(mealList: MealData[]): string | null {
   return labels[top[0]] ?? null;
 }
 
-function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[]): WeakLinkResult {
+function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[], waterBand?: WaterIntakeBand | null): WeakLinkResult {
   const nutRaw = result.breakdown.nutrition.score;
   const traRaw = result.breakdown.training.score;
   const recRaw = result.breakdown.recovery.score;
 
-  // Weakest pillar; ties (within 0.5) broken by priority: Nutrition > Training > Recovery
-  const minRaw = Math.min(nutRaw, traRaw, recRaw);
-  const TIE = 0.5;
+  // Pick the actual lowest pillar. Exact ties broken by priority: Nutrition > Training > Recovery.
   let pillar: WeakLinkPillar;
-  if (nutRaw <= minRaw + TIE) {
+  if (nutRaw <= Math.min(traRaw, recRaw)) {
     pillar = 'Nutrition';
-  } else if (traRaw <= minRaw + TIE) {
+  } else if (traRaw <= recRaw) {
     pillar = 'Training';
   } else {
     pillar = 'Recovery';
   }
 
   const rawScore = pillar === 'Nutrition' ? nutRaw : pillar === 'Training' ? traRaw : recRaw;
-  const displayScore = Math.round(rawScore);
 
-  // Zone color mirrors triangle display logic: single session/meal uses rounded value
+  // Must read counts before displayScore — triangle rounds to integer when count === 1
   const mealCount    = result.breakdown.nutrition.mealsCount;
   const sessionCount = result.breakdown.training.sessionsCount;
-  const scoreForZone =
-    pillar === 'Nutrition' && mealCount    === 1 ? Math.round(rawScore) :
-    pillar === 'Training'  && sessionCount === 1 ? Math.round(rawScore) :
-    rawScore;
-  const zoneColor = scoreForZone >= 7 ? colors.success : scoreForZone >= 4 ? colors.warning : colors.danger;
+
+  // Match triangle display exactly:
+  //   1 meal/session  → Math.round  (triangle showDecimal=false)
+  //   2+ or Recovery  → toFixed(1)  (triangle showDecimal=true)
+  const displayScore =
+    (pillar === 'Nutrition' && mealCount    === 1) ? Math.round(rawScore) :
+    (pillar === 'Training'  && sessionCount === 1) ? Math.round(rawScore) :
+    parseFloat(rawScore.toFixed(1));
+
+  const zoneColor = displayScore >= 7 ? colors.success : displayScore >= 4 ? colors.warning : colors.danger;
 
   // Generate reason (and optional secondReason for extreme cases)
   const timing = result.timingSignals;
@@ -464,6 +467,10 @@ function computeWeakLink(result: FitScoreResponse, mealList: MealData[], session
     }
   }
 
+  if (waterBand === '<1L') {
+    msgParts.push('Hydration: Less than 1L of water today — flagged as very low.');
+  }
+
   msgParts.push('Give me 2-3 practical fixes for tomorrow that fit my goal and current context.');
 
   return { pillar, displayScore, reason, secondReason, ctaMessage: msgParts.join(' '), zoneColor };
@@ -485,6 +492,7 @@ export default function FitScoreScreen() {
   // Meal modal state
   const [showMealModal, setShowMealModal] = useState(false);
   const [pendingMealImage, setPendingMealImage] = useState<string | null>(null);
+  const [pendingMealAssetId, setPendingMealAssetId] = useState<string | null>(null); // for image cache pre-fill
   const [selectedMealType, setSelectedMealType] = useState('');
   const [mealNotes, setMealNotes] = useState('');
   const [editingMealId, setEditingMealId] = useState<number | null>(null);
@@ -515,11 +523,25 @@ export default function FitScoreScreen() {
   const [trainingType, setTrainingType] = useState('');
   const [trainingDurationHours, setTrainingDurationHours] = useState(0);
   const [trainingDurationMinutes, setTrainingDurationMinutes] = useState(40);
+
+  // Training analysis modal state
+  const [showTrainingBreakdown, setShowTrainingBreakdown] = useState(false);
+
+  // Training autocomplete
+  type TrainingHistoryEntry = {
+    type: string; goal?: string; intensity?: string; comment?: string;
+    durationHours: number; durationMinutes: number;
+  };
+  const [trainingTypeHistory, setTrainingTypeHistory] = useState<TrainingHistoryEntry[]>([]);
+  const [trainingSuggestions, setTrainingSuggestions] = useState<TrainingHistoryEntry[]>([]);
   const [showTrainingDurationPicker, setShowTrainingDurationPicker] = useState(false);
   const [trainingGoal, setTrainingGoal] = useState('');
   const [trainingIntensity, setTrainingIntensity] = useState('');
   const [trainingComment, setTrainingComment] = useState('');
   const [trainingSkipped, setTrainingSkipped] = useState(false);
+
+  // Hydration picker — stored per date in AsyncStorage
+  const [waterIntakeBand, setWaterIntakeBand] = useState<WaterIntakeBand | null>(null);
 
   // FitScore calculation state
   const [fitScoreResult, setFitScoreResult] = useState<FitScoreResponse | null>(null);
@@ -539,32 +561,70 @@ export default function FitScoreScreen() {
   const triangleHasAnimated = useRef(false);
   const triangleViewRef = useRef<any>(null);
   const fitScoreScrollRef = useRef<any>(null);
+  const mealScrollRef = useRef<ScrollView>(null);
   const visibilityPollRef = useRef<ReturnType<typeof setInterval>>();
   const [showFormulaTooltip, setShowFormulaTooltip] = useState(false);
   const fitScoreFadeAnim = useRef(new Animated.Value(0)).current;
   // Cache FitScore results by date string so navigating away and back doesn't lose the result
   const fitScoreCacheRef = useRef<Map<string, FitScoreResponse>>(new Map());
 
-  // Load persisted FitScore cache from AsyncStorage on mount
+  // FitScore ready reveal overlay
+  const [showReadyReveal, setShowReadyReveal] = useState(false);
+  const revealOpacity = useRef(new Animated.Value(0)).current;
+  const revealScale = useRef(new Animated.Value(0.92)).current;
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // All-green banner — only shown after triangle animation fully completes
+  const [showAllGreenBanner, setShowAllGreenBanner] = useState(false);
+  const allGreenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerReadyReveal = () => {
+    revealOpacity.setValue(0);
+    revealScale.setValue(0.92);
+    setShowReadyReveal(true);
+    Animated.parallel([
+      Animated.timing(revealOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.spring(revealScale, { toValue: 1, damping: 22, stiffness: 210, useNativeDriver: true }),
+    ]).start();
+    revealTimerRef.current = setTimeout(() => dismissReadyReveal(), 3000);
+  };
+
+  const dismissReadyReveal = () => {
+    if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
+    Animated.timing(revealOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
+      setShowReadyReveal(false);
+      setTimeout(() => {
+        fitScoreScrollRef.current?.scrollTo({ y: 650, animated: true });
+      }, 80);
+    });
+  };
+
+  // Load persisted FitScore cache + training history from AsyncStorage on mount
   useEffect(() => {
     (async () => {
       try {
         const keys = await AsyncStorage.getAllKeys();
         const cacheKeys = keys.filter(k => k.startsWith('fitScoreCache_'));
-        if (cacheKeys.length === 0) return;
-        const pairs = await AsyncStorage.multiGet(cacheKeys);
-        pairs.forEach(([key, value]) => {
-          if (value) {
-            try {
-              const dateStr = key.replace('fitScoreCache_', '');
-              fitScoreCacheRef.current.set(dateStr, JSON.parse(value) as FitScoreResponse);
-            } catch {}
-          }
-        });
-        console.log(`[FITSCORE] Loaded ${cacheKeys.length} cached FitScore(s) from AsyncStorage`);
+        if (cacheKeys.length > 0) {
+          const pairs = await AsyncStorage.multiGet(cacheKeys);
+          pairs.forEach(([key, value]) => {
+            if (value) {
+              try {
+                const dateStr = key.replace('fitScoreCache_', '');
+                fitScoreCacheRef.current.set(dateStr, JSON.parse(value) as FitScoreResponse);
+              } catch {}
+            }
+          });
+          console.log(`[FITSCORE] Loaded ${cacheKeys.length} cached FitScore(s) from AsyncStorage`);
+        }
       } catch (err) {
         console.warn('[FITSCORE] Failed to load AsyncStorage cache:', err);
       }
+      // Load training autocomplete history
+      try {
+        const raw = await AsyncStorage.getItem('trainingFormHistory');
+        if (raw) setTrainingTypeHistory(JSON.parse(raw));
+      } catch { /* graceful */ }
     })();
   }, []);
 
@@ -594,6 +654,8 @@ export default function FitScoreScreen() {
 
   // When a new FitScore result arrives, reset and start polling until triangle is visible
   useEffect(() => {
+    setShowAllGreenBanner(false);
+    if (allGreenTimerRef.current) { clearTimeout(allGreenTimerRef.current); allGreenTimerRef.current = null; }
     if (!fitScoreResult) return;
     setTriangleAnimating(false);
     triangleHasAnimated.current = false;
@@ -607,14 +669,25 @@ export default function FitScoreScreen() {
     };
   }, [fitScoreResult]);
 
-  // Compute weak link whenever FitScore result, meals, or training sessions change
+  // Once triangle animation starts, schedule all-green banner reveal
+  // Total animation: 1100+1100+1100+1800+600 ≈ 5700ms; add 400ms buffer = 6100ms
+  useEffect(() => {
+    if (!triangleAnimating || !fitScoreResult?.allGreen) return;
+    if (allGreenTimerRef.current) clearTimeout(allGreenTimerRef.current);
+    allGreenTimerRef.current = setTimeout(() => setShowAllGreenBanner(true), 6100);
+    return () => {
+      if (allGreenTimerRef.current) { clearTimeout(allGreenTimerRef.current); allGreenTimerRef.current = null; }
+    };
+  }, [triangleAnimating]);
+
+  // Compute weak link whenever FitScore result, meals, training sessions, or water intake change
   useEffect(() => {
     if (fitScoreResult) {
-      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions));
+      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions, waterIntakeBand));
     } else {
       setWeakLink(null);
     }
-  }, [fitScoreResult, meals, trainingSessions]);
+  }, [fitScoreResult, meals, trainingSessions, waterIntakeBand]);
 
   // Load meals and training data when date changes
   useEffect(() => {
@@ -628,9 +701,16 @@ export default function FitScoreScreen() {
     setStoredScore(null);
     setMeals([]);
     setTrainingSessions([]);
+    setWaterIntakeBand(null);
     setLoading(true);
 
     const dateStr = formatDate(selectedDate);
+
+    // Restore persisted water intake for this date
+    try {
+      const stored = await AsyncStorage.getItem(`waterIntake_${dateStr}`);
+      if (stored) setWaterIntakeBand(stored as WaterIntakeBand);
+    } catch { /* graceful */ }
     const today = new Date();
     const yest = new Date(); yest.setDate(yest.getDate() - 1);
     const isDateToday = selectedDate.toDateString() === today.toDateString();
@@ -720,7 +800,7 @@ export default function FitScoreScreen() {
       const dateStr = formatDate(selectedDate);
       console.log(`[FITSCORE] Calculating FitScore for ${dateStr}`);
 
-      const result = await calculateFitScore(dateStr);
+      const result = await calculateFitScore(dateStr, waterIntakeBand);
 
       console.log(`[FITSCORE] Result received: ${result.fitScore}/10`);
       setFitScoreResult(result);
@@ -737,6 +817,9 @@ export default function FitScoreScreen() {
         duration: 600,
         useNativeDriver: true,
       }).start();
+
+      // Premium reveal moment
+      triggerReadyReveal();
 
       // Fetch coach summary in the background
       fetchCoachSummary(result);
@@ -776,6 +859,7 @@ export default function FitScoreScreen() {
         nutritionBreakdownScore: fitScoreData.breakdown.nutrition.score,
         dateLabel: getDateLabel(),
         timingSignals: fitScoreData.timingSignals,
+        waterIntakeBand: fitScoreData.waterIntakeBand ?? waterIntakeBand ?? null,
       });
       setCoachSummary(summary);
       console.log('[COACH SUMMARY] Summary received');
@@ -794,6 +878,19 @@ export default function FitScoreScreen() {
       return false;
     }
     return true;
+  };
+
+  const handleWaterPick = async (band: WaterIntakeBand) => {
+    const newBand = waterIntakeBand === band ? null : band; // tap again to deselect
+    setWaterIntakeBand(newBand);
+    const dateStr = formatDate(selectedDate);
+    try {
+      if (newBand) {
+        await AsyncStorage.setItem(`waterIntake_${dateStr}`, newBand);
+      } else {
+        await AsyncStorage.removeItem(`waterIntake_${dateStr}`);
+      }
+    } catch { /* graceful */ }
   };
 
   const handleAddMealPress = async () => {
@@ -836,6 +933,7 @@ export default function FitScoreScreen() {
 
     if (!result.canceled && result.assets[0]) {
       setPendingMealImage(result.assets[0].uri);
+      setPendingMealAssetId(null); // Camera photos are unique each time — no cache lookup
       setSelectedMealType('');
       setMealNotes('');
       setShowMealModal(true);
@@ -851,9 +949,29 @@ export default function FitScoreScreen() {
     });
 
     if (!result.canceled && result.assets[0]) {
-      setPendingMealImage(result.assets[0].uri);
-      setSelectedMealType('');
-      setMealNotes('');
+      const asset = result.assets[0];
+      setPendingMealImage(asset.uri);
+      const assetId = asset.assetId ?? null;
+      setPendingMealAssetId(assetId);
+
+      // Pre-fill form from cache if this gallery photo was logged before
+      let prefilled = false;
+      if (assetId) {
+        try {
+          const raw = await AsyncStorage.getItem('mealImageCache');
+          const cache = raw ? JSON.parse(raw) : {};
+          const hit = cache[assetId];
+          if (hit) {
+            setSelectedMealType(hit.mealType || '');
+            setMealNotes(hit.mealNotes || '');
+            prefilled = true;
+          }
+        } catch { /* graceful */ }
+      }
+      if (!prefilled) {
+        setSelectedMealType('');
+        setMealNotes('');
+      }
       setShowMealModal(true);
     }
   };
@@ -918,47 +1036,71 @@ export default function FitScoreScreen() {
       return;
     }
 
-    // Close modal immediately
+    // Snapshot form state into local variables BEFORE any state changes.
+    // This prevents a concurrent upload's finally-block from clearing a second
+    // meal's image that the user has already picked while the first is uploading.
+    const imageUri = pendingMealImage;
+    const mealType = selectedMealType;
+    const notes = mealNotes;
+    const capturedTime = mealTime;
+    const assetId = pendingMealAssetId;
+
+    // Clear form state immediately so the next modal open starts fresh
+    setPendingMealImage(null);
+    setPendingMealAssetId(null);
+    setSelectedMealType('');
+    setMealNotes('');
+    setEditingMealId(null);
     setShowMealModal(false);
     setAnalyzingMeal(true);
 
-    // Create temporary placeholder meal
+    // Unique negative temp ID so concurrent pending meals don't collide
+    const tempId = -Date.now();
+
+    // Create temporary placeholder meal using the snapshotted values
     const tempMeal: MealData = {
-      id: -1, // Temporary ID
-      mealType: selectedMealType,
-      mealNotes: mealNotes || undefined,
-      imageUri: pendingMealImage,
+      id: tempId,
+      mealType: mealType,
+      mealNotes: notes || undefined,
+      imageUri: imageUri,
       date: formatDate(selectedDate),
       uploadedAt: new Date().toISOString(),
     };
 
-    // Add placeholder to meals array
-    setMeals([...meals, tempMeal]);
+    // Add placeholder to meals array using functional update (safe with concurrent adds)
+    setMeals(currentMeals => [...currentMeals, tempMeal]);
 
     try {
       const newMeal = await uploadMeal({
-        imageUri: pendingMealImage,
-        mealType: selectedMealType,
-        mealNotes: mealNotes || undefined,
+        imageUri: imageUri,
+        mealType: mealType,
+        mealNotes: notes || undefined,
         date: formatDate(selectedDate),
-        mealTime: mealTime.toTimeString().slice(0, 5), // HH:MM format
+        mealTime: capturedTime.toTimeString().slice(0, 5), // HH:MM format
       });
 
-      // Replace temporary meal with actual meal
+      // Replace placeholder with actual meal (matches only this upload's tempId)
       setMeals(currentMeals =>
-        currentMeals.map(m => m.id === -1 ? newMeal : m)
+        currentMeals.map(m => m.id === tempId ? newMeal : m)
       );
 
-      setPendingMealImage(null);
-      setSelectedMealType('');
-      setMealNotes('');
-      setEditingMealId(null);
+      // Save to image cache so this gallery photo pre-fills next time
+      if (assetId) {
+        try {
+          const raw = await AsyncStorage.getItem('mealImageCache');
+          const cache = raw ? JSON.parse(raw) : {};
+          cache[assetId] = { mealType, mealNotes: notes || '' };
+          const cacheKeys = Object.keys(cache);
+          if (cacheKeys.length > 50) delete cache[cacheKeys[0]]; // prune oldest
+          await AsyncStorage.setItem('mealImageCache', JSON.stringify(cache));
+        } catch { /* graceful */ }
+      }
 
       console.log('Meal uploaded successfully:', newMeal);
     } catch (error) {
       console.error('Failed to upload meal:', error);
-      // Remove the temporary meal on error
-      setMeals(currentMeals => currentMeals.filter(m => m.id !== -1));
+      // Remove only this upload's placeholder on error
+      setMeals(currentMeals => currentMeals.filter(m => m.id !== tempId));
       Alert.alert('Upload Failed', 'Failed to upload meal. Please try again.');
     } finally {
       setAnalyzingMeal(false);
@@ -1084,6 +1226,27 @@ export default function FitScoreScreen() {
         );
       }
 
+      // Save to training autocomplete history (only for new sessions, not edits)
+      if (!wasEditing) {
+        try {
+          const raw = await AsyncStorage.getItem('trainingFormHistory');
+          const history = raw ? JSON.parse(raw) : [];
+          // Move to front, replacing any existing entry with same type
+          const deduped = history.filter((h: any) => h.type.toLowerCase() !== savedType.toLowerCase());
+          deduped.unshift({
+            type: savedType,
+            goal: savedGoal || undefined,
+            intensity: savedIntensity || undefined,
+            comment: savedComment || undefined,
+            durationHours: Math.floor(savedDuration / 60),
+            durationMinutes: savedDuration % 60,
+          });
+          const trimmed = deduped.slice(0, 20);
+          await AsyncStorage.setItem('trainingFormHistory', JSON.stringify(trimmed));
+          setTrainingTypeHistory(trimmed);
+        } catch { /* graceful */ }
+      }
+
       console.log('Training saved successfully:', savedTraining);
     } catch (error) {
       console.error('Failed to save training:', error);
@@ -1125,6 +1288,7 @@ export default function FitScoreScreen() {
         breakdown: training.breakdown,
       });
       setSelectedTraining(training);
+      setShowTrainingBreakdown(false);
       setShowTrainingAnalysisModal(true);
     }
   };
@@ -1301,32 +1465,32 @@ export default function FitScoreScreen() {
               <TouchableOpacity
                 key={meal.id}
                 style={[styles.mealCard, isEditingMeals && styles.mealCardEditing]}
-                onPress={() => meal.id !== -1 && handleMealPress(meal)}
-                disabled={meal.id === -1}
+                onPress={() => meal.id > 0 && handleMealPress(meal)}
+                disabled={meal.id < 0}
               >
                 <Image source={{ uri: meal.imageUri }} style={styles.mealImage} />
-                {meal.id === -1 && (
+                {meal.id < 0 && (
                   <View style={styles.analyzingOverlay}>
                     <ActivityIndicator size="small" color={colors.accent} />
                     <Text style={styles.analyzingText}>Analyzing...</Text>
                   </View>
                 )}
-                {meal.id !== -1 && isEditingMeals && (
+                {meal.id > 0 && isEditingMeals && (
                   <View style={styles.editOverlay}>
                     <Ionicons name="create" size={32} color={colors.textPrimary} />
                   </View>
                 )}
-                {meal.id !== -1 && !isEditingMeals && meal.nutritionScore && (
+                {meal.id > 0 && !isEditingMeals && meal.nutritionScore && (
                   <View style={[styles.scoreBadge, { backgroundColor: getScoreColor(meal.nutritionScore) }]}>
                     <Text style={styles.scoreText}>{Math.round(meal.nutritionScore)}</Text>
                   </View>
                 )}
                 <View style={styles.mealOverlay}>
                   <Text style={styles.mealType}>{meal.mealType}</Text>
-                  {meal.id !== -1 && !isEditingMeals && meal.analysis && (
+                  {meal.id > 0 && !isEditingMeals && meal.analysis && (
                     <Text style={styles.tapHint}>✨ Tap to view</Text>
                   )}
-                  {meal.id !== -1 && isEditingMeals && (
+                  {meal.id > 0 && isEditingMeals && (
                     <Text style={styles.tapHint}>Tap to edit</Text>
                   )}
                 </View>
@@ -1344,6 +1508,33 @@ export default function FitScoreScreen() {
           </View>
         )}
       </View>)}
+
+      {/* Hydration picker — optional, below Meals, today/yesterday only */}
+      {!isPastDate && (
+        <View style={styles.waterSection}>
+          <View style={styles.waterHeader}>
+            <Ionicons name="water-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Water intake today?</Text>
+            {waterIntakeBand && (
+              <Text style={styles.waterSelected}>{waterIntakeBand}</Text>
+            )}
+          </View>
+          <View style={styles.waterChips}>
+            {(['<1L', '1–2L', '2–3L', '3L+'] as WaterIntakeBand[]).map((band) => (
+              <TouchableOpacity
+                key={band}
+                style={[styles.waterChip, waterIntakeBand === band && styles.waterChipActive]}
+                onPress={() => handleWaterPick(band)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.waterChipText, waterIntakeBand === band && styles.waterChipTextActive]}>
+                  {band}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
 
       {/* Training Section - Only shows after at least 1 meal */}
       {hasMeals && (
@@ -1463,10 +1654,46 @@ export default function FitScoreScreen() {
               <TextInput
                 style={styles.textInput}
                 value={trainingType}
-                onChangeText={setTrainingType}
+                onChangeText={(text) => {
+                  setTrainingType(text);
+                  if (text.trim().length > 0) {
+                    const filtered = trainingTypeHistory
+                      .filter(h => h.type.toLowerCase().startsWith(text.toLowerCase()))
+                      .slice(0, 3);
+                    setTrainingSuggestions(filtered);
+                  } else {
+                    setTrainingSuggestions([]);
+                  }
+                }}
                 placeholder="e.g., Morning Run, Strength Training"
                 placeholderTextColor={colors.textMuted}
               />
+              {trainingSuggestions.length > 0 && (
+                <View style={styles.suggestionDropdown}>
+                  {trainingSuggestions.map((s, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      style={[styles.suggestionItem, i < trainingSuggestions.length - 1 && styles.suggestionItemBorder]}
+                      onPress={() => {
+                        setTrainingType(s.type);
+                        setTrainingGoal(s.goal || '');
+                        setTrainingIntensity(s.intensity || '');
+                        setTrainingComment(s.comment || '');
+                        setTrainingDurationHours(s.durationHours);
+                        setTrainingDurationMinutes(s.durationMinutes);
+                        setTrainingSuggestions([]);
+                      }}
+                    >
+                      <Text style={styles.suggestionText}>{s.type}</Text>
+                      {(s.intensity || s.goal) ? (
+                        <Text style={styles.suggestionMeta}>
+                          {[s.intensity, s.goal].filter(Boolean).join(' · ')}
+                        </Text>
+                      ) : null}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
 
               <Text style={[styles.formLabel, styles.formLabelSpaced]}>Duration <Text style={styles.mandatoryAsterisk}>*</Text></Text>
               {Platform.OS === 'ios' ? (
@@ -1631,6 +1858,7 @@ export default function FitScoreScreen() {
                   setTrainingGoal('');
                   setTrainingIntensity('');
                   setTrainingComment('');
+                  setTrainingSuggestions([]);
                 }}
                 variant="ghost"
                 style={styles.cancelButton}
@@ -1812,10 +2040,10 @@ export default function FitScoreScreen() {
             </View>
           )}
 
-          {/* All Green Celebration */}
-          {fitScoreResult.allGreen && (
+          {/* All Green — shown only after animation completes */}
+          {showAllGreenBanner && fitScoreResult.allGreen && (
             <View style={styles.allGreenBanner}>
-              <Text style={styles.allGreenText}>Perfect Day! All metrics in the green zone!</Text>
+              <Text style={styles.allGreenText}>Strong day — all metrics in the green.</Text>
             </View>
           )}
 
@@ -1846,14 +2074,14 @@ export default function FitScoreScreen() {
             )}
           </TouchableOpacity>
 
-          {/* Today's Weakest Link */}
+          {/* Today's Biggest Lever */}
           {weakLink ? (
             <View style={[styles.weakLinkCard, { borderLeftColor: weakLink.zoneColor }]}>
               <View style={styles.weakLinkHeader}>
                 <View style={[styles.weakLinkIconContainer, { backgroundColor: weakLink.zoneColor + '20' }]}>
                   <Ionicons name="trending-up" size={15} color={weakLink.zoneColor} />
                 </View>
-                <Text style={styles.weakLinkTitle}>Today's Weakest Link</Text>
+                <Text style={styles.weakLinkTitle}>Today's Biggest Lever</Text>
               </View>
               <Text style={[styles.weakLinkPillar, { color: weakLink.zoneColor }]}>
                 {weakLink.pillar} · {weakLink.displayScore}/10
@@ -1948,7 +2176,7 @@ export default function FitScoreScreen() {
               <View style={{ width: 28 }} />
             </View>
 
-            <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <ScrollView ref={mealScrollRef} style={styles.modalScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {/* Image Preview */}
               {pendingMealImage && (
                 <Image source={{ uri: pendingMealImage }} style={styles.mealPreviewImage} />
@@ -2046,6 +2274,9 @@ export default function FitScoreScreen() {
                 placeholderTextColor={colors.textMuted}
                 multiline
                 numberOfLines={4}
+                onFocus={() => {
+                  setTimeout(() => mealScrollRef.current?.scrollToEnd({ animated: true }), 300);
+                }}
               />
             </ScrollView>
 
@@ -2103,30 +2334,28 @@ export default function FitScoreScreen() {
                     const gapMatch      = selectedMeal.analysis.match(/⚠️ Gap:\s*(.+?)(?=\n🔧|$)/s);
                     const upgradeMatch  = selectedMeal.analysis.match(/🔧 Upgrade:\s*(.+?)$/s);
 
-                    if (strengthMatch && gapMatch && upgradeMatch) {
+                    if (strengthMatch && upgradeMatch) {
+                      // Hide Gap when meal score is high (≥ 8) — no meaningful negative signal at that level
+                      const showGap = gapMatch && (!selectedMeal.nutritionScore || selectedMeal.nutritionScore < 8);
+                      const rows: { icon: string; label: string; text: string }[] = [
+                        { icon: '✅', label: 'Strength', text: strengthMatch[1].trim() },
+                        ...(showGap ? [{ icon: '⚠️', label: 'Gap', text: gapMatch![1].trim() }] : []),
+                        { icon: '🔧', label: 'Upgrade', text: upgradeMatch[1].trim() },
+                      ];
                       return (
                         <View style={styles.mealAnalysisTextSection}>
-                          <View style={styles.mealAnalysisRow}>
-                            <Text style={styles.mealAnalysisRowIcon}>✅</Text>
-                            <View style={styles.mealAnalysisRowBody}>
-                              <Text style={styles.mealAnalysisRowLabel}>Strength</Text>
-                              <Text style={styles.mealAnalysisRowText}>{strengthMatch[1].trim()}</Text>
+                          {rows.map((row, i) => (
+                            <View
+                              key={i}
+                              style={[styles.mealAnalysisRow, i === rows.length - 1 && { borderBottomWidth: 0 }]}
+                            >
+                              <Text style={styles.mealAnalysisRowIcon}>{row.icon}</Text>
+                              <View style={styles.mealAnalysisRowBody}>
+                                <Text style={styles.mealAnalysisRowLabel}>{row.label}</Text>
+                                <Text style={styles.mealAnalysisRowText}>{row.text}</Text>
+                              </View>
                             </View>
-                          </View>
-                          <View style={styles.mealAnalysisRow}>
-                            <Text style={styles.mealAnalysisRowIcon}>⚠️</Text>
-                            <View style={styles.mealAnalysisRowBody}>
-                              <Text style={styles.mealAnalysisRowLabel}>Gap</Text>
-                              <Text style={styles.mealAnalysisRowText}>{gapMatch[1].trim()}</Text>
-                            </View>
-                          </View>
-                          <View style={[styles.mealAnalysisRow, { borderBottomWidth: 0 }]}>
-                            <Text style={styles.mealAnalysisRowIcon}>🔧</Text>
-                            <View style={styles.mealAnalysisRowBody}>
-                              <Text style={styles.mealAnalysisRowLabel}>Upgrade</Text>
-                              <Text style={styles.mealAnalysisRowText}>{upgradeMatch[1].trim()}</Text>
-                            </View>
-                          </View>
+                          ))}
                         </View>
                       );
                     }
@@ -2165,7 +2394,12 @@ export default function FitScoreScreen() {
             >
               {selectedTraining && (
                 <View style={styles.trainingAnalysisContent}>
-                  {/* Score Badge */}
+                  {/* Title — mirrors meal analysis header */}
+                  <View style={styles.mealAnalysisHeader}>
+                    <Text style={styles.mealAnalysisTitle}>{selectedTraining.type}</Text>
+                  </View>
+
+                  {/* Score Badge + Zone */}
                   {selectedTraining.score && (
                     <View style={styles.trainingAnalysisScoreSection}>
                       <View
@@ -2174,7 +2408,9 @@ export default function FitScoreScreen() {
                           { backgroundColor: getScoreColor(selectedTraining.score) },
                         ]}
                       >
-                        <Text style={styles.trainingAnalysisScoreValue}>{Math.round(selectedTraining.score)}</Text>
+                        <Text style={styles.trainingAnalysisScoreValue}>
+                          {Math.round(selectedTraining.score)}
+                        </Text>
                         <Text style={styles.trainingAnalysisScoreMax}>/10</Text>
                       </View>
                       {selectedTraining.recoveryZone && (
@@ -2194,7 +2430,7 @@ export default function FitScoreScreen() {
                     </View>
                   )}
 
-                  {/* Training Details */}
+                  {/* Compact metadata row */}
                   <View style={styles.trainingAnalysisDetailsSection}>
                     <View style={styles.trainingAnalysisDetailItem}>
                       <Text style={styles.trainingAnalysisDetail}>⏱️ Duration: {selectedTraining.duration} min</Text>
@@ -2208,48 +2444,119 @@ export default function FitScoreScreen() {
                     )}
                   </View>
 
-                  {/* AI Analysis */}
-                  {selectedTraining.analysis && (
-                    <View style={styles.trainingAnalysisTextSection}>
-                      <Text style={styles.trainingAnalysisText}>{selectedTraining.analysis}</Text>
-                    </View>
-                  )}
+                  {/* AI Analysis — structured (mirrors meal analysis parser) */}
+                  {selectedTraining.analysis && (() => {
+                    const text = selectedTraining.analysis;
+                    const strengthMatch = text.match(/✅ Strength:\s*(.+?)(?=\n⚠️|\n🔧|$)/s);
+                    const gapMatch      = text.match(/⚠️ Gap:\s*(.+?)(?=\n🔧|$)/s);
+                    const upgradeMatch  = text.match(/🔧 Upgrade:\s*(.+?)$/s);
 
-                  {/* Metrics Table */}
+                    if (strengthMatch && upgradeMatch) {
+                      // Structured format — build rows dynamically (Gap is optional)
+                      const rows: { icon: string; label: string; text: string }[] = [
+                        { icon: '✅', label: 'Strength', text: strengthMatch[1].trim() },
+                        ...(gapMatch ? [{ icon: '⚠️', label: 'Gap', text: gapMatch[1].trim() }] : []),
+                        { icon: '🔧', label: 'Upgrade', text: upgradeMatch[1].trim() },
+                      ];
+                      return (
+                        <View style={styles.mealAnalysisTextSection}>
+                          {rows.map((row, i) => (
+                            <View
+                              key={i}
+                              style={[styles.mealAnalysisRow, i === rows.length - 1 && { borderBottomWidth: 0 }]}
+                            >
+                              <Text style={styles.mealAnalysisRowIcon}>{row.icon}</Text>
+                              <View style={styles.mealAnalysisRowBody}>
+                                <Text style={styles.mealAnalysisRowLabel}>{row.label}</Text>
+                                <Text style={styles.mealAnalysisRowText}>{row.text}</Text>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    }
+                    // Fallback: plain text for legacy training entries
+                    return (
+                      <View style={styles.trainingAnalysisTextSection}>
+                        <Text style={styles.trainingAnalysisText}>{text}</Text>
+                      </View>
+                    );
+                  })()}
+
+                  {/* Score Breakdown — collapsed by default */}
                   {selectedTraining.breakdown && (
-                    <View style={styles.trainingMetricsTable}>
-                      <Text style={styles.trainingMetricsTitle}>Score Breakdown</Text>
-                      <View style={styles.trainingMetricRow}>
-                        <Text style={styles.trainingMetricLabel}>Strain Appropriateness</Text>
-                        <Text style={styles.trainingMetricValue}>
-                          {selectedTraining.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0
+                    <>
+                      <TouchableOpacity
+                        style={styles.breakdownToggle}
+                        onPress={() => setShowTrainingBreakdown(v => !v)}
+                      >
+                        <Text style={styles.breakdownToggleText}>
+                          {showTrainingBreakdown ? 'Hide scoring ↑' : 'View detailed scoring ›'}
                         </Text>
-                      </View>
-                      <View style={styles.trainingMetricRow}>
-                        <Text style={styles.trainingMetricLabel}>Session Quality</Text>
-                        <Text style={styles.trainingMetricValue}>
-                          {selectedTraining.breakdown.sessionQualityScore.toFixed(1)}/3.0
-                        </Text>
-                      </View>
-                      <View style={styles.trainingMetricRow}>
-                        <Text style={styles.trainingMetricLabel}>Goal Alignment</Text>
-                        <Text style={styles.trainingMetricValue}>
-                          {selectedTraining.breakdown.goalAlignmentScore.toFixed(1)}/2.0
-                        </Text>
-                      </View>
-                      <View style={styles.trainingMetricRow}>
-                        <Text style={styles.trainingMetricLabel}>Injury Safety</Text>
-                        <Text style={styles.trainingMetricValue}>
-                          {selectedTraining.breakdown.injurySafetyModifier.toFixed(1)}/1.0
-                        </Text>
-                      </View>
-                    </View>
+                      </TouchableOpacity>
+                      {showTrainingBreakdown && (
+                        <View style={styles.trainingMetricsTable}>
+                          <View style={styles.trainingMetricRow}>
+                            <Text style={styles.trainingMetricLabel}>Strain Appropriateness</Text>
+                            <Text style={styles.trainingMetricValue}>
+                              {selectedTraining.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0
+                            </Text>
+                          </View>
+                          <View style={styles.trainingMetricRow}>
+                            <Text style={styles.trainingMetricLabel}>Session Quality</Text>
+                            <Text style={styles.trainingMetricValue}>
+                              {selectedTraining.breakdown.sessionQualityScore.toFixed(1)}/3.0
+                            </Text>
+                          </View>
+                          <View style={styles.trainingMetricRow}>
+                            <Text style={styles.trainingMetricLabel}>Goal Alignment</Text>
+                            <Text style={styles.trainingMetricValue}>
+                              {selectedTraining.breakdown.goalAlignmentScore.toFixed(1)}/2.0
+                            </Text>
+                          </View>
+                          <View style={[styles.trainingMetricRow, { borderBottomWidth: 0 }]}>
+                            <Text style={styles.trainingMetricLabel}>Injury Safety</Text>
+                            <Text style={styles.trainingMetricValue}>
+                              {selectedTraining.breakdown.injurySafetyModifier.toFixed(1)}/1.0
+                            </Text>
+                          </View>
+                        </View>
+                      )}
+                    </>
                   )}
                 </View>
               )}
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* FitScore Ready Reveal */}
+      <Modal
+        transparent
+        visible={showReadyReveal}
+        animationType="none"
+        statusBarTranslucent
+        onRequestClose={dismissReadyReveal}
+      >
+        <TouchableOpacity
+          style={styles.revealBackdrop}
+          activeOpacity={1}
+          onPress={dismissReadyReveal}
+        >
+          <Animated.View
+            style={[
+              styles.revealCard,
+              { opacity: revealOpacity, transform: [{ scale: revealScale }] },
+            ]}
+          >
+            <View style={styles.revealAccentBar} />
+            <Text style={styles.revealTitle}>Your FitScore is Ready.</Text>
+            <Text style={styles.revealSubtext}>
+              Tap and scroll down to see how well you lived according to your goals.
+            </Text>
+          </Animated.View>
+        </TouchableOpacity>
       </Modal>
     </ScrollView>
   );
@@ -2535,6 +2842,33 @@ const styles = StyleSheet.create({
     ...typography.title,
     marginLeft: spacing.sm,
   },
+  suggestionDropdown: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+    marginTop: 2,
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  suggestionItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceMute,
+  },
+  suggestionText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontSize: 14,
+  },
+  suggestionMeta: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
   trainingDetails: {
     flexDirection: 'row',
     gap: spacing.lg,
@@ -2649,6 +2983,7 @@ const styles = StyleSheet.create({
   modalHeaderTitle: {
     ...typography.h3,
     fontWeight: '600',
+    color: colors.textPrimary,
   },
   modalScroll: {
     padding: spacing.lg,
@@ -3288,6 +3623,16 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     lineHeight: 24,
   },
+  breakdownToggle: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    marginTop: spacing.xs,
+  },
+  breakdownToggleText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
   trainingMetricsTable: {
     backgroundColor: colors.surfaceMute + '20',
     borderRadius: radii.md,
@@ -3377,18 +3722,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   allGreenBanner: {
-    backgroundColor: colors.success + '20',
-    borderRadius: radii.md,
-    padding: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.accent + '40',
+    paddingTop: spacing.md,
     marginBottom: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.success,
   },
   allGreenText: {
-    ...typography.body,
-    color: colors.success,
-    fontWeight: '600',
+    ...typography.small,
+    color: colors.accent,
+    fontWeight: '500',
     textAlign: 'center',
+    letterSpacing: 0.3,
   },
   recoveryAnalysisCard: {
     backgroundColor: colors.surfaceMute + '15',
@@ -3909,5 +4253,96 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 22,
+  },
+
+  // Hydration picker
+  waterSection: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    marginTop: spacing.sm,
+  },
+  waterHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: spacing.xs,
+  },
+  waterLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  waterSelected: {
+    ...typography.small,
+    color: colors.accent,
+    fontWeight: '600',
+    fontSize: 12,
+    marginLeft: 'auto',
+  },
+  waterChips: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  waterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+    backgroundColor: colors.bgSecondary,
+  },
+  waterChipActive: {
+    borderColor: colors.accent,
+    backgroundColor: `${colors.accent}18`,
+  },
+  waterChipText: {
+    ...typography.small,
+    fontSize: 12,
+    color: colors.textMuted,
+    fontWeight: '500',
+  },
+  waterChipTextActive: {
+    color: colors.accent,
+    fontWeight: '600',
+  },
+
+  // FitScore Ready Reveal
+  revealBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xl,
+  },
+  revealCard: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.xl,
+    paddingHorizontal: spacing.xl,
+    paddingTop: 0,
+    paddingBottom: spacing.xl,
+    width: '100%',
+    maxWidth: 340,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  revealAccentBar: {
+    height: 3,
+    backgroundColor: colors.accent,
+    marginBottom: spacing.lg,
+  },
+  revealTitle: {
+    ...typography.h1,
+    fontSize: 22,
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+  },
+  revealSubtext: {
+    ...typography.body,
+    color: colors.textMuted,
+    lineHeight: 23,
   },
 });

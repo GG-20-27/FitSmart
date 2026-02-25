@@ -4298,7 +4298,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/fitscore/calculate', requireJWTAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req);
-      const { date } = req.body;
+      const { date, waterIntakeBand } = req.body;
       const tz = process.env.USER_TZ || 'Europe/Zurich';
       const targetDate = date || todayKey(tz);
 
@@ -4638,6 +4638,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   getNutritionZone(nutritionScore) === 'green',
         timingSignals,
         nutritionDayContext,
+        waterIntakeBand: (waterIntakeBand as string) || null,
         timestamp: new Date().toISOString(),
       };
 
@@ -4687,6 +4688,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nutritionBreakdownScore,
         dateLabel, // e.g. "today", "yesterday", "Feb 21"
         timingSignals,
+        waterIntakeBand,
       } = req.body;
 
       console.log(`[COACH SUMMARY] Generating summary for user: ${userId}, fitScore: ${fitScore}`);
@@ -4746,6 +4748,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userContextSummary: coachContextSummary,
         dateLabel: dateLabel || 'today',
         timingSignals: timingSignals || undefined,
+        waterIntakeBand: waterIntakeBand || undefined,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);
@@ -5190,6 +5193,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch { /* graceful */ }
 
+      // Fetch last week's roast to extract theme_used (avoid repeating same theme)
+      let lastRoastTheme: string | undefined;
+      try {
+        const prevWeekEnd = DateTime.fromISO(weekEnd).minus({ weeks: 1 }).toISODate()!;
+        const prevRoast = await storage.getFitroastByUserAndWeek(userId, prevWeekEnd);
+        if (prevRoast) {
+          const prevPayload = JSON.parse(prevRoast.payloadJson);
+          lastRoastTheme = prevPayload.theme_used as string | undefined;
+        }
+      } catch { /* graceful — theme diversity is best-effort */ }
+
       // Generate
       const roastIntensity = req.body?.intensity as 'Light' | 'Spicy' | 'Savage' | undefined;
       const payload = await openAIService.generateFitRoast({
@@ -5210,6 +5224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         injuryNotes,
         userContextSummary: roastContextSummary,
         intensity: roastIntensity,
+        lastTheme: lastRoastTheme,
       });
 
       // Store

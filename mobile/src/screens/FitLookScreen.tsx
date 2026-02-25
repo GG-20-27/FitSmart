@@ -1,20 +1,15 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Animated, Dimensions, FlatList,
-  NativeSyntheticEvent, NativeScrollEvent,
+  ActivityIndicator, Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, typography, radii, shadows } from '../theme';
 import {
-  getCheckinToday, saveCheckin, getFitLookToday,
-  type Feeling, type FitLookResponse, type FitLookSlide,
+  getCheckinToday, saveCheckin, getFitLookToday, regenerateFitLook,
+  type Feeling, type FitLookResponse,
 } from '../api/fitlook';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SLIDE_WIDTH = SCREEN_WIDTH - spacing.lg * 2;
-const AUTO_ADVANCE_MS = 15000;
-const PAUSE_AFTER_INTERACTION_MS = 5000;
 
 const FEELINGS: { key: Feeling; label: string; icon: string }[] = [
   { key: 'energized', label: 'Energized', icon: 'flash' },
@@ -32,12 +27,6 @@ export default function FitLookScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Carousel state
-  const [activeSlide, setActiveSlide] = useState(0);
-  const flatListRef = useRef<FlatList>(null);
-  const autoAdvanceTimer = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pauseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isPaused = useRef(false);
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -45,21 +34,7 @@ export default function FitLookScreen() {
 
   useEffect(() => {
     checkInitialState();
-    return () => {
-      if (autoAdvanceTimer.current) clearInterval(autoAdvanceTimer.current);
-      if (pauseTimer.current) clearTimeout(pauseTimer.current);
-    };
   }, []);
-
-  // Start auto-advance when fitlook is loaded
-  useEffect(() => {
-    if (fitlook && fitlook.slides?.length > 1) {
-      startAutoAdvance();
-    }
-    return () => {
-      if (autoAdvanceTimer.current) clearInterval(autoAdvanceTimer.current);
-    };
-  }, [fitlook]);
 
   async function checkInitialState() {
     try {
@@ -128,38 +103,6 @@ export default function FitLookScreen() {
     }
   }
 
-  // ──── Auto-advance carousel ────
-
-  function startAutoAdvance() {
-    if (autoAdvanceTimer.current) clearInterval(autoAdvanceTimer.current);
-    autoAdvanceTimer.current = setInterval(() => {
-      if (isPaused.current) return;
-      setActiveSlide(prev => {
-        const next = (prev + 1) % (fitlook?.slides?.length || 3);
-        try {
-          flatListRef.current?.scrollToIndex({ index: next, animated: true });
-        } catch {}
-        return next;
-      });
-    }, AUTO_ADVANCE_MS);
-  }
-
-  function pauseAutoAdvance() {
-    isPaused.current = true;
-    if (pauseTimer.current) clearTimeout(pauseTimer.current);
-    pauseTimer.current = setTimeout(() => {
-      isPaused.current = false;
-    }, PAUSE_AFTER_INTERACTION_MS);
-  }
-
-  const onScrollEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const index = Math.round(e.nativeEvent.contentOffset.x / SLIDE_WIDTH);
-    setActiveSlide(index);
-  }, []);
-
-  const onScrollBegin = useCallback(() => {
-    pauseAutoAdvance();
-  }, []);
 
   const formatDate = (dateStr: string) => {
     try {
@@ -246,92 +189,125 @@ export default function FitLookScreen() {
     );
   }
 
-  if (!fitlook || !fitlook.slides) return null;
+  if (!fitlook) return null;
 
-  // ──── Render: 3-Slide Briefing ────
-
-  const renderSlide = ({ item }: { item: FitLookSlide; index: number }) => (
-    <View style={[styles.slideContainer, { width: SLIDE_WIDTH }]}>
-      <View style={styles.slideCard}>
-        <Text style={styles.slideTitle}>{item.title}</Text>
-
-        {item.chips && item.chips.length > 0 && (
-          <View style={styles.chipRow}>
-            {item.chips.map((chip, i) => (
-              <View key={i} style={styles.chip}>
-                <Text style={styles.chipText}>{chip}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        <Text style={styles.slideBody}>{item.body}</Text>
-
-        <View style={styles.focusLineWrap}>
-          <View style={styles.focusLineStripe} />
-          <Text style={styles.focusLineText}>{item.focus_line}</Text>
+  // Legacy v1 format: no snapshot_chips → prompt regeneration
+  if (!fitlook.snapshot_chips) {
+    return (
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        <Text style={styles.header}>FitLook</Text>
+        <Text style={styles.subtitle}>Today's Outlook</Text>
+        <View style={styles.legacyCard}>
+          <Ionicons name="refresh-circle-outline" size={40} color={colors.accent} />
+          <Text style={styles.legacyTitle}>New layout available</Text>
+          <Text style={styles.legacyText}>Tap below to refresh your morning outlook.</Text>
+          <TouchableOpacity
+            style={styles.legacyButton}
+            onPress={async () => {
+              setLoading(true);
+              setError(null);
+              try {
+                const data = await regenerateFitLook();
+                setFitlook(data);
+              } catch {
+                setError('Failed to refresh');
+              } finally {
+                setLoading(false);
+              }
+            }}
+          >
+            <Text style={styles.legacyButtonText}>Refresh Outlook</Text>
+          </TouchableOpacity>
         </View>
-      </View>
-    </View>
-  );
+      </ScrollView>
+    );
+  }
+
+  // ──── Render: v2 A-B-C-D fixed layout ────
+
+  // Assign an icon to each readiness chip by position:
+  // 0 = recovery (heart), 1 = sleep (moon), 2 = feeling (matches check-in icon)
+  const chipIcon = (index: number): string => {
+    if (index === 0) return 'heart';
+    if (index === 1) return 'moon';
+    return FEELINGS.find(f => f.key === feeling)?.icon ?? 'ellipse';
+  };
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Header */}
+      {/* Header — feeling is shown inside Readiness chips only */}
       <Text style={styles.header}>FitLook</Text>
       <Text style={styles.subtitle}>Today's Outlook</Text>
       <Text style={styles.dateText}>{formatDate(fitlook.date_local)}</Text>
 
-      {/* Feeling badge */}
-      {feeling && (
-        <View style={styles.feelingBadge}>
-          <Ionicons
-            name={FEELINGS.find(f => f.key === feeling)?.icon as any || 'ellipse'}
-            size={14}
-            color={colors.accent}
-          />
-          <Text style={styles.feelingBadgeText}>
-            Feeling {feeling}
-          </Text>
-        </View>
-      )}
+      <Animated.View style={[styles.cards, { opacity: fadeAnim }]}>
 
-      <Animated.View style={{ opacity: fadeAnim }}>
-        {/* Carousel */}
-        <FlatList
-          ref={flatListRef}
-          data={fitlook.slides}
-          renderItem={renderSlide}
-          keyExtractor={(_, i) => `slide-${i}`}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          snapToInterval={SLIDE_WIDTH}
-          decelerationRate="fast"
-          onMomentumScrollEnd={onScrollEnd}
-          onScrollBeginDrag={onScrollBegin}
-          contentContainerStyle={styles.carouselContent}
-          getItemLayout={(_, index) => ({
-            length: SLIDE_WIDTH,
-            offset: SLIDE_WIDTH * index,
-            index,
-          })}
-        />
-
-        {/* Dot indicators */}
-        <View style={styles.dotRow}>
-          {fitlook.slides.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.dot,
-                activeSlide === i && styles.dotActive,
-              ]}
-            />
-          ))}
+        {/* A) Readiness — 3-column metrics row */}
+        <View style={styles.card}>
+          <Text style={styles.cardLabel}>READINESS</Text>
+          <View style={styles.metricsRow}>
+            {fitlook.snapshot_chips.slice(0, 3).map((chip, i) => (
+              <View key={i} style={styles.metricItem}>
+                <Ionicons name={chipIcon(i) as any} size={18} color={colors.accent} />
+                <Text style={styles.metricValue}>{chip}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
-        {/* Cached indicator */}
+        {/* B) Today's Focus */}
+        {fitlook.focus && (
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>TODAY'S FOCUS</Text>
+            <Text style={styles.focusText}>{fitlook.focus}</Text>
+          </View>
+        )}
+
+        {/* C) Actions */}
+        {(fitlook.do || fitlook.avoid) && (
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>ACTIONS</Text>
+            {fitlook.do && fitlook.do.length > 0 && (
+              <View style={styles.actionSection}>
+                <Text style={styles.actionGroupLabel}>DO</Text>
+                {fitlook.do.map((item, i) => (
+                  <View key={i} style={styles.actionRow}>
+                    <View style={styles.actionDot} />
+                    <Text style={styles.actionText}>{item}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+            {fitlook.avoid && (
+              <View style={[styles.actionSection, { marginTop: spacing.sm }]}>
+                <Text style={[styles.actionGroupLabel, styles.avoidLabel]}>AVOID</Text>
+                <View style={styles.actionRow}>
+                  <View style={[styles.actionDot, styles.avoidDot]} />
+                  <Text style={styles.actionText}>{fitlook.avoid}</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* D) Forecast Lock-In */}
+        {fitlook.forecast_line && (
+          <View style={styles.forecastCard}>
+            <View style={styles.forecastStripe} />
+            <View style={styles.forecastContent}>
+              <Text style={styles.forecastHeading}>To hit today's FitScore forecast:</Text>
+              <Text style={styles.forecastText}>
+                {/* Strip any leading preamble the AI may include, then capitalize */}
+                {(() => {
+                  const s = fitlook.forecast_line.replace(/^to hit today['']s\s+(fitscore\s+)?forecast:\s*/i, '').trim();
+                  return s.charAt(0).toUpperCase() + s.slice(1);
+                })()}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        {/* Cached hint */}
         {fitlook.cached && (
           <Text style={styles.cachedHint}>Generated earlier today</Text>
         )}
@@ -371,20 +347,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     marginBottom: spacing.sm,
     letterSpacing: 0.3,
-  },
-
-  // Feeling badge
-  feelingBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: spacing.lg,
-  },
-  feelingBadgeText: {
-    ...typography.small,
-    color: colors.accent,
-    fontWeight: '500',
-    textTransform: 'capitalize',
   },
 
   // Check-in
@@ -473,97 +435,153 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Carousel
-  carouselContent: {},
-  slideContainer: {
-    paddingRight: 0,
+  // v2 card layout
+  cards: {
+    gap: spacing.md,
+    paddingBottom: spacing.xxl,
   },
-  slideCard: {
+  card: {
     backgroundColor: colors.bgSecondary,
     borderRadius: radii.lg,
-    padding: spacing.xl,
-    minHeight: 240,
+    padding: spacing.lg,
     ...shadows.card,
   },
-  slideTitle: {
-    ...typography.title,
-    fontSize: 13,
+  cardLabel: {
+    ...typography.small,
+    fontSize: 11,
+    letterSpacing: 1.1,
     color: colors.textMuted,
-    letterSpacing: 1.2,
     textTransform: 'uppercase',
     marginBottom: spacing.sm,
   },
 
-  // Chips
-  chipRow: {
+  // A) Readiness — 3-column metrics row
+  metricsRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: spacing.md,
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingTop: spacing.sm,
   },
-  chip: {
-    backgroundColor: colors.bgPrimary,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: radii.pill,
-    borderWidth: 1,
-    borderColor: colors.surfaceMute,
+  metricItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: spacing.xs,
   },
-  chipText: {
+  metricValue: {
     ...typography.small,
     color: colors.textPrimary,
-    fontWeight: '500',
-    fontSize: 11,
+    fontWeight: '600',
+    fontSize: 12,
+    textAlign: 'center',
   },
 
-  // Body
-  slideBody: {
+  // B) Focus — same weight as action items, not a hero headline
+  focusText: {
     ...typography.body,
     color: colors.textPrimary,
-    fontSize: 15,
-    lineHeight: 24,
-    marginBottom: spacing.lg,
+    fontWeight: '600',
+    fontSize: 14,
+    lineHeight: 20,
   },
 
-  // Focus line
-  focusLineWrap: {
+  // C) Actions
+  actionSection: {},
+  actionGroupLabel: {
+    ...typography.small,
+    fontSize: 11,
+    letterSpacing: 0.8,
+    color: colors.success,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
+  },
+  avoidLabel: {
+    color: colors.warning,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: 4,
+  },
+  actionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.success,
+  },
+  avoidDot: {
+    backgroundColor: colors.warning,
+  },
+  actionText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontSize: 14,
+    flex: 1,
+  },
+
+  // D) Forecast
+  forecastCard: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    marginTop: spacing.sm,
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.lg,
+    overflow: 'hidden',
+    ...shadows.card,
   },
-  focusLineStripe: {
+  forecastStripe: {
     width: 3,
     backgroundColor: colors.accent,
-    borderRadius: 2,
-    marginRight: spacing.sm,
   },
-  focusLineText: {
-    ...typography.bodyMuted,
+  forecastContent: {
+    flex: 1,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  forecastHeading: {
+    ...typography.small,
+    fontSize: 11,
+    color: colors.textMuted,
+    letterSpacing: 0.3,
+    marginBottom: 4,
+  },
+  forecastText: {
+    ...typography.body,
     color: colors.accent,
     fontWeight: '600',
     fontSize: 14,
-    flex: 1,
-    paddingVertical: spacing.xs,
+    lineHeight: 20,
   },
 
-  // Dots
-  dotRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
+  // Legacy v1 prompt
+  legacyCard: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.lg,
+    padding: spacing.xl,
+    alignItems: 'center',
+    gap: spacing.md,
     marginTop: spacing.lg,
-    marginBottom: spacing.md,
+    ...shadows.card,
   },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.surfaceMute,
+  legacyTitle: {
+    ...typography.title,
+    textAlign: 'center',
   },
-  dotActive: {
+  legacyText: {
+    ...typography.bodyMuted,
+    textAlign: 'center',
+  },
+  legacyButton: {
     backgroundColor: colors.accent,
-    width: 20,
-    borderRadius: 4,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    marginTop: spacing.sm,
+  },
+  legacyButtonText: {
+    ...typography.body,
+    color: colors.bgPrimary,
+    fontWeight: '600',
   },
 
   // Cached hint
@@ -571,7 +589,7 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.surfaceMute,
     textAlign: 'center',
-    marginBottom: spacing.xxl,
+    marginTop: spacing.sm,
     fontSize: 11,
   },
 });

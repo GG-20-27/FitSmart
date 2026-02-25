@@ -160,8 +160,11 @@ export interface FitScoreResponse {
     lateMealFlag: boolean;
     onlyMealIsPureJunk: boolean;
   };
+  waterIntakeBand?: '<1L' | '1–2L' | '2–3L' | '3L+' | null;
   timestamp: string;
 }
+
+export type WaterIntakeBand = '<1L' | '1–2L' | '2–3L' | '3L+';
 
 /**
  * Upload a meal with image, type, and optional notes
@@ -336,14 +339,14 @@ export function formatDate(date: Date): string {
  * Calculate FitScore for a specific date
  * Combines Recovery, Training, and Nutrition scores
  */
-export async function calculateFitScore(date?: string): Promise<FitScoreResponse> {
+export async function calculateFitScore(date?: string, waterIntakeBand?: WaterIntakeBand | null): Promise<FitScoreResponse> {
   console.log(`[API] Calculating FitScore for date: ${date || 'today'}`);
 
   const response = await apiRequest<FitScoreResponse>(
     '/api/fitscore/calculate',
     {
       method: 'POST',
-      body: JSON.stringify({ date }),
+      body: JSON.stringify({ date, waterIntakeBand: waterIntakeBand ?? null }),
     }
   );
 
@@ -421,6 +424,7 @@ export async function getCoachSummary(params: {
     long_gap_window?: string;
     late_meal_time?: string;
   };
+  waterIntakeBand?: WaterIntakeBand | null;
 }): Promise<CoachSummaryResponse> {
   console.log(`[API] Getting coach summary`);
 

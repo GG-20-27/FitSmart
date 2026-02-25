@@ -1,6 +1,12 @@
 import jwt from 'jsonwebtoken';
 import { Request, Response, NextFunction } from 'express';
 
+if (!process.env.JWT_SECRET && process.env.NODE_ENV === 'production') {
+  throw new Error('JWT_SECRET environment variable must be set in production.');
+}
+if (!process.env.JWT_SECRET) {
+  console.warn('[JWT] ⚠️  JWT_SECRET not set — using insecure development fallback. Set JWT_SECRET before deploying.');
+}
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-jwt-secret-for-development-only';
 
 // JWT payload interface

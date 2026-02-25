@@ -40,7 +40,13 @@ export interface FitLookSlide {
 export interface FitLookResponse {
   date_local: string;
   feeling: string;
-  slides: FitLookSlide[];
+  slides?: FitLookSlide[];    // v1 legacy
+  // v2 A-B-C-D structured format
+  snapshot_chips?: string[];
+  focus?: string;
+  do?: string[];
+  avoid?: string;
+  forecast_line?: string;
   cached: boolean;
   created_at: string;
   needs_checkin?: boolean;

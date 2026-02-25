@@ -155,6 +155,7 @@ export interface FitRoastPayload {
   week_end: string;
   headline: string;
   segments: FitRoastSegment[];
+  theme_used?: string; // theme ID used for this roast, to avoid repeating next week
 }
 
 export const userContext = pgTable("user_context", {
@@ -193,7 +194,13 @@ export interface FitLookSlide {
 export interface FitLookPayload {
   date_local: string;
   feeling: string;
-  slides: FitLookSlide[];
+  slides?: FitLookSlide[]; // v1 legacy — kept for backward compat
+  // v2 structured A-B-C-D format
+  snapshot_chips?: string[];  // A) Readiness: ["Recovery 96%", "Sleep 9.1h", "Feeling: Steady"]
+  focus?: string;             // B) Today's Focus: one bold line
+  do?: string[];              // C) Do: 1-2 concrete action bullets
+  avoid?: string;             // C) Avoid: 1 bullet
+  forecast_line?: string;     // D) Forecast lock-in line
 }
 
 export const insertUserSchema = createInsertSchema(users).pick({
