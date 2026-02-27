@@ -23,14 +23,11 @@ HYDRATION RULE (HARD CONSTRAINT): NEVER mention hydration, water, water intake, 
 Return valid JSON with "preview" and "slides".
 
 PREVIEW — RULES:
-- Max 120 words
-- MUST begin with: "FitScore X.X — " (use the actual score)
-- Reference at least two of: recovery, training, nutrition
-- Must mention at least one specific metric (sleep hours, recovery %, strain, meal count)
-- Emotionally intelligent and fair
-- No questions
-- Light direction at end
-- Do NOT include any CTA line at the end
+- Exactly 3 sentences. No more.
+- Sentence 1: Recovery (mention recovery % and/or sleep/HRV). MUST begin with: "FitScore X.X — " (use the actual score)
+- Sentence 2: Nutrition (mention meal count or quality signal)
+- Sentence 3: Training (mention strain, session type, or alignment with recovery)
+- No questions. No closing direction. No CTA. Be specific and direct — one sharp fact per sentence.
 
 SLIDES — 5 slides. Each slide MUST have: title, chips, content, coach_call.
 Slide 1 MUST also have context_strip.
@@ -1240,19 +1237,19 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
 
       const fallbacks: Record<string, DailySummaryResult> = {
         green: {
-          preview: `FitScore ${score} — systems aligned. Recovery, training, and nutrition are tracking well. The edge here is consistency — maintain this calibration and the compound effect will show.`,
+          preview: `FitScore ${score} — recovery is strong. Nutrition is tracking well across meals. Training load is well-matched to your current state.`,
           slides: defaultSlides,
           fitCoachTake: `FitScore ${score} — systems aligned.`,
           tomorrowsOutlook: 'Readiness: high. Push capacity if recovery holds.',
         },
         yellow: {
-          preview: `FitScore ${score} — functional but uneven. Some pillars are carrying weight while others lag. The gap between this score and a stronger one sits in one or two overlooked inputs.`,
+          preview: `FitScore ${score} — recovery is functional but not fully restored. Nutrition has gaps that are holding the score back. Training load needs to match where your body actually is.`,
           slides: defaultSlides,
           fitCoachTake: `FitScore ${score} — functional but uneven.`,
           tomorrowsOutlook: 'Readiness: moderate. Prioritize the weakest pillar.',
         },
         red: {
-          preview: `FitScore ${score} — signals are flagging. Recovery is compromised and the data suggests accumulated load without adequate restoration. Continuing at this pace widens the deficit.`,
+          preview: `FitScore ${score} — recovery is compromised with accumulated load showing. Nutrition isn't providing enough support to close the gap. Training at this state risks widening the deficit.`,
           slides: defaultSlides,
           fitCoachTake: `FitScore ${score} — signals are flagging.`,
           tomorrowsOutlook: 'Readiness: low. Reduce intensity, extend sleep window.',

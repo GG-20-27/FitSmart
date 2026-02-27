@@ -135,13 +135,13 @@ function CoachModal({
             styles.coachModalSheet,
             { transform: [{ translateY }] },
           ]}
-          {...panResponder.panHandlers}
         >
-          {/* Drag handle — tap to dismiss */}
+          {/* Drag handle — tap to dismiss, drag to swipe away */}
           <TouchableOpacity
             style={styles.coachModalTopBar}
             activeOpacity={0.7}
             onPress={dismissModal}
+            {...panResponder.panHandlers}
           >
             <View style={styles.coachDragHandle} />
             <Ionicons name="chevron-down" size={20} color="#555" style={{ marginTop: 4 }} />
@@ -171,7 +171,9 @@ function CoachModal({
                 return (
                   <View style={{ width: slideWidth, flex: 1 }}>
                     <ScrollView
+                      style={{ flex: 1 }}
                       showsVerticalScrollIndicator={false}
+                      nestedScrollEnabled={true}
                       contentContainerStyle={styles.coachSlideScroll}
                     >
                       {/* Slide number */}
@@ -4202,13 +4204,17 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 80,
     flexDirection: 'row',
+    justifyContent: 'space-between',
     zIndex: 10,
+    pointerEvents: 'box-none',
   },
   coachSlideTapLeft: {
-    flex: 1,
+    width: 44,
+    alignSelf: 'stretch',
   },
   coachSlideTapRight: {
-    flex: 2,
+    width: 44,
+    alignSelf: 'stretch',
   },
   coachSlideNumber: {
     color: '#666',
