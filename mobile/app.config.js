@@ -6,9 +6,7 @@ module.exports = {
     orientation: "portrait",
     icon: "./assets/logo.png",
     userInterfaceStyle: "dark",
-    runtimeVersion: {
-      policy: "appVersion"
-    },
+    runtimeVersion: "1.0.0",
     updates: {
       url: "https://u.expo.dev/d07a5ca5-63a8-4f29-ae5f-3929eeb51998"
     },
