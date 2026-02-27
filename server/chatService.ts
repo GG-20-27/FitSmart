@@ -60,17 +60,19 @@ Always be helpful, encouraging, and provide actionable advice.`;
 export class ChatService {
   private readonly apiKey: string;
   private readonly model: string;
+  private readonly fallbackModel: string;
   private readonly timeout: number;
 
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY || '';
-    this.model = process.env.OPENAI_MODEL || 'gpt-5.2';
-    this.timeout = 30000;
+    this.model = process.env.OPENAI_MODEL || 'gpt-5.2-2025-12-11';
+    this.fallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5-mini-2025-08-07';
+    this.timeout = 120000; // 120s — OpenAI can be slow under load / complex prompts
 
     if (!this.apiKey) {
       console.warn('[CHAT SERVICE] OpenAI API key not configured - chat service will be unavailable');
     } else {
-      console.log(`[CHAT SERVICE] OpenAI configured with model: ${this.model}`);
+      console.log(`[CHAT SERVICE] OpenAI configured with model: ${this.model} | fallback: ${this.fallbackModel}`);
     }
   }
 
@@ -196,6 +198,101 @@ export class ChatService {
     truncated.push(currentUserMessage);
 
     return truncated;
+  }
+
+  /**
+   * Makes one OpenAI API call. Returns parsed JSON on success, throws ChatServiceError on failure.
+   * Logs the OpenAI request-id and status on every call for debugging.
+   */
+  private async callOpenAI(requestBody: Record<string, any>, model: string, attemptLabel: string): Promise<any> {
+    const t = Date.now();
+    let response: Response;
+    try {
+      response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...requestBody, model }),
+        signal: AbortSignal.timeout(this.timeout),
+      });
+    } catch (fetchError) {
+      const isTimeout = fetchError instanceof Error && fetchError.name === 'TimeoutError';
+      throw new ChatServiceError({
+        type: isTimeout ? ChatErrorType.NETWORK_ERROR : ChatErrorType.UNKNOWN_ERROR,
+        message: isTimeout ? 'Network timeout contacting OpenAI' : String(fetchError),
+        retryable: true,
+      });
+    }
+
+    const requestId = response.headers.get('x-request-id') ?? 'n/a';
+    console.log(`[CHAT] OpenAI ${attemptLabel}: status=${response.status} request-id=${requestId} latency=${Date.now() - t}ms model=${model}`);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `HTTP ${response.status}`;
+      try {
+        const parsed = JSON.parse(errorText);
+        errorMessage = parsed?.error?.message || errorMessage;
+        console.error(`[CHAT] OpenAI error (request-id: ${requestId}):`, JSON.stringify(parsed));
+      } catch {
+        console.error(`[CHAT] OpenAI error (request-id: ${requestId}): ${response.status} ${errorText}`);
+      }
+      throw new ChatServiceError({
+        type: ChatErrorType.OPENAI_ERROR,
+        message: errorMessage,
+        statusCode: response.status,
+        retryable: response.status >= 500,
+      });
+    }
+
+    return response.json();
+  }
+
+  /**
+   * Calls OpenAI with retry + exponential backoff on 5xx/timeout, then falls back to
+   * the smaller model if all primary attempts are exhausted.
+   */
+  private async callOpenAIWithRetry(requestBody: Record<string, any>): Promise<{ data: any; modelUsed: string }> {
+    const RETRY_DELAYS_MS = [2000, 5000, 10000]; // backoff between retries
+    const PRIMARY_ATTEMPTS = RETRY_DELAYS_MS.length + 1; // 4 total attempts on primary
+
+    let lastError: ChatServiceError | null = null;
+
+    // --- Primary model attempts ---
+    for (let i = 0; i < PRIMARY_ATTEMPTS; i++) {
+      if (i > 0) {
+        const delay = RETRY_DELAYS_MS[i - 1];
+        console.log(`[CHAT] ⏳ Backoff ${delay / 1000}s before retry ${i}/${PRIMARY_ATTEMPTS - 1} (model: ${this.model})...`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+      try {
+        const data = await this.callOpenAI(requestBody, this.model, `attempt ${i + 1}/${PRIMARY_ATTEMPTS}`);
+        return { data, modelUsed: this.model };
+      } catch (err) {
+        if (err instanceof ChatServiceError && err.retryable) {
+          lastError = err;
+          // continue to next attempt
+        } else {
+          throw err; // non-retryable (auth, bad request, etc.) — fail immediately
+        }
+      }
+    }
+
+    // --- Fallback model: one attempt ---
+    console.warn(`[CHAT] ⚠️ Primary model (${this.model}) failed ${PRIMARY_ATTEMPTS} attempts — trying fallback ${this.fallbackModel}`);
+    try {
+      const data = await this.callOpenAI(requestBody, this.fallbackModel, 'fallback attempt 1/1');
+      console.log(`[CHAT] ✅ Fallback model ${this.fallbackModel} succeeded`);
+      return { data, modelUsed: this.fallbackModel };
+    } catch (fallbackErr) {
+      throw lastError ?? new ChatServiceError({
+        type: ChatErrorType.NETWORK_ERROR,
+        message: 'All attempts failed including fallback model',
+        retryable: false,
+      });
+    }
   }
 
   public async sendChat({ userId, message, image, images, goalsContext }: SendChatOptions): Promise<ChatResponse> {
@@ -932,39 +1029,10 @@ export class ChatService {
 
       const tGpt = Date.now();
       console.log(`[CHAT] ⏱ Sending to ${this.model} (max_tokens=${llmConfig.maxTokens})...`);
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(this.timeout)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        let errorMessage = `HTTP ${response.status}`;
-
-        try {
-          const parsed = JSON.parse(errorText);
-          errorMessage = parsed?.error?.message || errorMessage;
-          console.error(`[CHAT SERVICE] OpenAI API Error:`, JSON.stringify(parsed, null, 2));
-        } catch {
-          console.error(`[CHAT SERVICE] OpenAI API Error (unparseable):`, errorText);
-        }
-
-        throw new ChatServiceError({
-          type: ChatErrorType.OPENAI_ERROR,
-          message: errorMessage,
-          statusCode: response.status,
-          retryable: response.status >= 500
-        });
-      }
-
-      const data = await response.json();
+      const { data, modelUsed } = await this.callOpenAIWithRetry(requestBody);
       const tokens = data.usage ? `prompt=${data.usage.prompt_tokens} completion=${data.usage.completion_tokens}` : '';
-      console.log(`[CHAT] ⏱ GPT inference: ${Date.now() - tGpt}ms | total: ${Date.now() - t0}ms | ${tokens}`);
+      const fallbackNote = modelUsed !== this.model ? ` [fallback: ${modelUsed}]` : '';
+      console.log(`[CHAT] ⏱ GPT inference: ${Date.now() - tGpt}ms | total: ${Date.now() - t0}ms | ${tokens}${fallbackNote}`);
 
       const reply = data.choices?.[0]?.message?.content;
 
@@ -1015,15 +1083,6 @@ export class ChatService {
       if (error instanceof ChatServiceError) {
         throw error;
       }
-
-      if (error instanceof Error && error.name === 'TimeoutError') {
-        throw new ChatServiceError({
-          type: ChatErrorType.NETWORK_ERROR,
-          message: 'Network timeout contacting OpenAI',
-          retryable: true
-        });
-      }
-
       throw new ChatServiceError({
         type: ChatErrorType.UNKNOWN_ERROR,
         message: error instanceof Error ? error.message : 'Unknown error occurred',
