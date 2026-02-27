@@ -39,7 +39,7 @@ module.exports = {
 
       // Backend API URL
       EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL ||
-        "https://fitsmart.ngrok.app",
+        "https://fitsmart-production.up.railway.app",
 
       // Environment
       EXPO_PUBLIC_ENV: process.env.EXPO_PUBLIC_ENV || "development",

@@ -1,0 +1,12 @@
+node_modules
+node_modules.backup
+mobile
+client
+uploads
+.expo
+.local
+dist
+*.db
+*.log
+attached_assets
+public

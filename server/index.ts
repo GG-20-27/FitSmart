@@ -79,11 +79,13 @@ app.use((req, res, next) => {
   
   // Set origin based on environment - be more permissive for Replit
   const origin = req.headers.origin;
-  if (process.env.NODE_ENV === 'development' || 
-      origin?.includes('localhost') || 
-      origin?.includes('replit.app') || 
+  if (process.env.NODE_ENV === 'development' ||
+      origin?.includes('localhost') ||
+      origin?.includes('replit.app') ||
       origin?.includes('replit.dev') ||
-      origin?.includes('health-data-hub')) {
+      origin?.includes('health-data-hub') ||
+      origin?.includes('railway.app') ||
+      origin?.includes('up.railway.app')) {
     res.header('Access-Control-Allow-Origin', origin);
   } else if (!origin) {
     // For same-origin requests (no Origin header)
