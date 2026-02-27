@@ -15,10 +15,16 @@
     },
     "production": {
       "autoIncrement": true,
-      "node": "22.11.0"
+      "node": "22.11.0",
+      "channel": "production"
     }
   },
   "submit": {
     "production": {}
+  },
+  "update": {
+    "production": {
+      "channel": "production"
+    }
   }
 }
