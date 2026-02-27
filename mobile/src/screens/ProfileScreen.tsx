@@ -12,17 +12,10 @@ import {
   StatusBar,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiRequest, clearAuthToken, getAuthToken } from '../api/client';
-import { colors, spacing, radii, typography, state } from '../theme';
-import { Card, Button } from '../ui/components';
-
-type ProfileData = {
-  whoop_connected: boolean;
-  whoop_last_sync?: string;
-  calendar_ics_url?: string;
-  meal_reminders_enabled: boolean;
-};
+import { apiRequest, clearAuthToken } from '../api/client';
+import { colors, spacing, radii, typography, shadows, state } from '../theme';
 
 type WhoopStatus = {
   authenticated: boolean;
@@ -39,24 +32,24 @@ type Calendar = {
 };
 
 export default function ProfileScreen() {
-  const [profile, setProfile] = useState<ProfileData>({
-    whoop_connected: false,
-    meal_reminders_enabled: false,
-  });
+  const [whoopConnected, setWhoopConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [calendars, setCalendars] = useState<Calendar[]>([]);
   const [icsUrl, setIcsUrl] = useState('');
   const [icsUrlError, setIcsUrlError] = useState('');
-  const [fitRoastEnabled, setFitRoastEnabled] = useState(false);
+  const [fitRoastEnabled, setFitRoastEnabled] = useState(true);
   const [roastIntensity, setRoastIntensity] = useState<'Light' | 'Spicy' | 'Savage'>('Spicy');
 
-  // Load FitRoast settings from storage on mount
+  // Load FitRoast settings — default ON / Spicy if never set
   useFocusEffect(useCallback(() => {
     AsyncStorage.multiGet(['fitRoastEnabled', 'roastIntensity']).then(pairs => {
       const enabled = pairs[0][1];
       const intensity = pairs[1][1];
-      if (enabled !== null) setFitRoastEnabled(enabled === 'true');
-      if (intensity === 'Light' || intensity === 'Spicy' || intensity === 'Savage') setRoastIntensity(intensity);
+      // null means never set → default true
+      setFitRoastEnabled(enabled === null ? true : enabled === 'true');
+      if (intensity === 'Light' || intensity === 'Spicy' || intensity === 'Savage') {
+        setRoastIntensity(intensity);
+      }
     });
   }, []));
 
@@ -73,49 +66,26 @@ export default function ProfileScreen() {
   const loadProfile = useCallback(async () => {
     try {
       setLoading(true);
-      
-      // Load WHOOP status using the correct endpoint
       const whoopData = await apiRequest<WhoopStatus>('/api/whoop/status');
-      setProfile(prev => ({
-        ...prev,
-        whoop_connected: whoopData.authenticated,
-        whoop_last_sync: whoopData.expires_at
-      }));
-      
-      // Load calendars
+      setWhoopConnected(whoopData.authenticated);
       try {
         const calendarData = await apiRequest<Calendar[]>('/api/calendars');
         setCalendars(calendarData || []);
-      } catch (calendarError) {
-        console.log('Failed to load calendars:', calendarError);
+      } catch {
         setCalendars([]);
       }
-      
     } catch (error) {
       console.error('Failed to load profile:', error);
-      // Continue with default state if API fails
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      loadProfile();
-    }, [loadProfile])
-  );
-
-  const validateIcsUrl = (url: string): boolean => {
-    if (!url.trim()) return true; // Empty is valid (optional field)
-    
-    // Simple URL validation regex
-    const urlRegex = /^https?:\/\/.+/;
-    return urlRegex.test(url.trim());
-  };
+  useFocusEffect(useCallback(() => { loadProfile(); }, [loadProfile]));
 
   const handleIcsUrlChange = (text: string) => {
     setIcsUrl(text);
-    if (text.trim() && !validateIcsUrl(text)) {
+    if (text.trim() && !/^https?:\/\/.+/.test(text.trim())) {
       setIcsUrlError('Please enter a valid URL (starting with http:// or https://)');
     } else {
       setIcsUrlError('');
@@ -123,32 +93,20 @@ export default function ProfileScreen() {
   };
 
   const handleSaveIcsUrl = async () => {
-    if (!validateIcsUrl(icsUrl)) {
+    if (!/^https?:\/\/.+/.test(icsUrl.trim())) {
       Alert.alert('Invalid URL', 'Please enter a valid ICS URL');
       return;
     }
-
-    if (!icsUrl.trim()) {
-      Alert.alert('Error', 'Please enter a calendar URL');
-      return;
-    }
-
     try {
       setLoading(true);
       await apiRequest('/api/calendars', {
         method: 'POST',
-        body: JSON.stringify({
-          calendarUrl: icsUrl.trim(),
-          calendarName: 'Training Calendar'
-        }),
+        body: JSON.stringify({ calendarUrl: icsUrl.trim(), calendarName: 'Training Calendar' }),
       });
-
-      // Reload calendars
       await loadProfile();
       setIcsUrl('');
       Alert.alert('Success', 'Calendar added successfully');
-    } catch (error) {
-      console.error('Failed to save calendar URL:', error);
+    } catch {
       Alert.alert('Error', 'Failed to save calendar URL. Please try again.');
     } finally {
       setLoading(false);
@@ -156,263 +114,160 @@ export default function ProfileScreen() {
   };
 
   const handleDeleteCalendar = async (calendarId: number) => {
-    Alert.alert(
-      'Delete Calendar',
-      'Are you sure you want to remove this calendar?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setLoading(true);
-              await apiRequest(`/api/calendars/${calendarId}`, {
-                method: 'DELETE',
-              });
-              await loadProfile();
-              Alert.alert('Success', 'Calendar removed successfully');
-            } catch (error) {
-              console.error('Failed to delete calendar:', error);
-              Alert.alert('Error', 'Failed to remove calendar. Please try again.');
-            } finally {
-              setLoading(false);
-            }
-          },
+    Alert.alert('Remove Calendar', 'Are you sure you want to remove this calendar?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            setLoading(true);
+            await apiRequest(`/api/calendars/${calendarId}`, { method: 'DELETE' });
+            await loadProfile();
+          } catch {
+            Alert.alert('Error', 'Failed to remove calendar. Please try again.');
+          } finally {
+            setLoading(false);
+          }
         },
-      ]
-    );
-  };
-
-  const handleMealRemindersToggle = async (value: boolean) => {
-    try {
-      setLoading(true);
-      // Note: Meal reminders not yet implemented in backend
-      // For now, just update local state
-      setProfile(prev => ({ ...prev, meal_reminders_enabled: value }));
-    } catch (error) {
-      console.error('Failed to update meal reminders:', error);
-      Alert.alert('Error', 'Failed to update meal reminder settings. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+      },
+    ]);
   };
 
   const handleLogout = async () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout? This will clear your session.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Logout',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await clearAuthToken();
-              // Trigger global auth check — navigates back to OnboardingNavigator
-              if (typeof (global as any).refreshOnboardingStatus === 'function') {
-                (global as any).refreshOnboardingStatus();
-              }
-            } catch (error) {
-              console.error('Logout error:', error);
-              Alert.alert('Error', 'Failed to logout. Please try again.');
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await clearAuthToken();
+            if (typeof (global as any).refreshOnboardingStatus === 'function') {
+              (global as any).refreshOnboardingStatus();
             }
-          },
+          } catch {
+            Alert.alert('Error', 'Failed to logout. Please try again.');
+          }
         },
-      ]
-    );
-  };
-
-  const formatLastSync = (lastSync?: string): string => {
-    if (!lastSync) return 'Never';
-    
-    try {
-      const date = new Date(lastSync);
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffMins = Math.floor(diffMs / (1000 * 60));
-      
-      if (diffMins < 1) return 'Just now';
-      if (diffMins < 60) return `${diffMins}m ago`;
-      
-      const diffHours = Math.floor(diffMins / 60);
-      if (diffHours < 24) return `${diffHours}h ago`;
-      
-      const diffDays = Math.floor(diffHours / 24);
-      return `${diffDays}d ago`;
-    } catch {
-      return 'Unknown';
-    }
+      },
+    ]);
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
-      <ScrollView style={styles.container}>
-        <Text style={styles.header}>Profile Settings</Text>
+      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+        <Text style={styles.header}>Profile</Text>
 
-      {/* WHOOP Connection Status */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>WHOOP Connection</Text>
-        <View style={styles.statusCard}>
-          <View style={styles.statusRow}>
-            <Text style={styles.statusLabel}>Status</Text>
-            <View style={styles.statusValue}>
-              <View
-                style={[
-                  styles.statusDot,
-                  { backgroundColor: profile.whoop_connected ? state.ready : state.rest },
-                ]}
-              />
-              <Text style={styles.statusText}>
-                {profile.whoop_connected ? 'Connected' : 'Not Connected'}
-              </Text>
-            </View>
-          </View>
+        {/* WHOOP Connection */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>WHOOP Connection</Text>
+          <View style={styles.card}>
             <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>Token Expires</Text>
-              <Text style={styles.statusText}>
-                {formatLastSync(profile.whoop_last_sync)}
-              </Text>
-            </View>
-        </View>
-      </View>
-
-      {/* Training Calendar */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Training Calendars</Text>
-
-        {/* Existing Calendars List */}
-        {calendars.length > 0 && (
-          <View style={styles.calendarsList}>
-            {calendars.map((calendar) => (
-              <View key={calendar.id} style={styles.calendarItem}>
-                <View style={styles.calendarInfo}>
-                  <Text style={styles.calendarName}>{calendar.name}</Text>
-                  <Text style={styles.calendarUrl} numberOfLines={1}>
-                    {calendar.calendar_url}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => handleDeleteCalendar(calendar.id)}
-                >
-                  <Text style={styles.deleteButtonText}>✕</Text>
-                </TouchableOpacity>
+              <Text style={styles.rowLabel}>Status</Text>
+              <View style={styles.statusValue}>
+                <View style={[styles.statusDot, { backgroundColor: whoopConnected ? state.ready : state.rest }]} />
+                <Text style={[styles.rowValue, { color: whoopConnected ? state.ready : colors.textMuted }]}>
+                  {whoopConnected ? 'Connected' : 'Not Connected'}
+                </Text>
               </View>
-            ))}
-          </View>
-        )}
-
-        {/* Add New Calendar */}
-        <View style={styles.inputCard}>
-          <Text style={styles.inputLabel}>Add New Calendar (ICS Link)</Text>
-          <TextInput
-            style={[styles.textInput, icsUrlError ? styles.textInputError : null]}
-            value={icsUrl}
-            onChangeText={handleIcsUrlChange}
-            placeholder="https://calendar.google.com/calendar/ical/..."
-            placeholderTextColor={colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="url"
-          />
-          {icsUrlError ? <Text style={styles.errorText}>{icsUrlError}</Text> : null}
-          <TouchableOpacity
-            style={[styles.saveButton, loading ? styles.saveButtonDisabled : null]}
-            onPress={handleSaveIcsUrl}
-            disabled={loading}
-          >
-            <Text style={styles.saveButtonText}>
-              {loading ? 'Adding...' : 'Add Calendar'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Meal Reminders */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Meal Reminders</Text>
-        <View style={styles.toggleCard}>
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleInfo}>
-              <Text style={styles.toggleLabel}>Daily Meal Reminders</Text>
-              <Text style={styles.toggleDescription}>
-                Get daily reminders to log your meals
-              </Text>
             </View>
-            <Switch
-              value={profile.meal_reminders_enabled}
-              onValueChange={handleMealRemindersToggle}
-              trackColor={{ false: colors.surfaceMute, true: colors.accent }}
-              thumbColor={profile.meal_reminders_enabled ? colors.textPrimary : colors.textMuted}
-              disabled={loading}
-            />
           </View>
         </View>
-      </View>
 
-      {/* FitRoast */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>FitRoast</Text>
-        <View style={styles.toggleCard}>
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleInfo}>
-              <Text style={styles.toggleLabel}>Weekly FitRoast</Text>
-              <Text style={styles.toggleDescription}>
-                Get a weekly AI roast of your fitness performance
-              </Text>
-            </View>
-            <Switch
-              value={fitRoastEnabled}
-              onValueChange={handleFitRoastToggle}
-              trackColor={{ false: colors.surfaceMute, true: colors.accent }}
-              thumbColor={fitRoastEnabled ? colors.textPrimary : colors.textMuted}
-            />
-          </View>
-
-          {fitRoastEnabled && (
-            <View style={styles.intensitySection}>
-              <Text style={styles.intensityLabel}>Roast Intensity</Text>
-              <View style={styles.intensitySelector}>
-                {(['Light', 'Spicy', 'Savage'] as const).map((level) => (
+        {/* Training Calendars */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Training Calendars</Text>
+          {calendars.length > 0 && (
+            <View style={styles.calendarsList}>
+              {calendars.map((calendar) => (
+                <View key={calendar.id} style={styles.calendarItem}>
+                  <View style={styles.calendarInfo}>
+                    <Text style={styles.calendarName}>{calendar.name}</Text>
+                    <Text style={styles.calendarUrl} numberOfLines={1}>{calendar.calendar_url}</Text>
+                  </View>
                   <TouchableOpacity
-                    key={level}
-                    style={[
-                      styles.intensityOption,
-                      roastIntensity === level && styles.intensityOptionActive,
-                    ]}
-                    onPress={() => handleIntensityChange(level)}
+                    style={styles.removeButton}
+                    onPress={() => handleDeleteCalendar(calendar.id)}
                   >
-                    <Text
-                      style={[
-                        styles.intensityOptionText,
-                        roastIntensity === level && styles.intensityOptionTextActive,
-                      ]}
-                    >
-                      {level}
-                    </Text>
+                    <Ionicons name="close-circle-outline" size={22} color={colors.danger} />
                   </TouchableOpacity>
-                ))}
-              </View>
+                </View>
+              ))}
             </View>
           )}
-
+          <View style={styles.card}>
+            <Text style={styles.inputLabel}>Add ICS Calendar Link</Text>
+            <TextInput
+              style={[styles.textInput, icsUrlError ? styles.textInputError : null]}
+              value={icsUrl}
+              onChangeText={handleIcsUrlChange}
+              placeholder="https://calendar.google.com/calendar/ical/..."
+              placeholderTextColor={colors.textMuted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+            />
+            {icsUrlError ? <Text style={styles.errorText}>{icsUrlError}</Text> : null}
+            <TouchableOpacity
+              style={[styles.accentButton, loading && styles.accentButtonDisabled]}
+              onPress={handleSaveIcsUrl}
+              disabled={loading}
+            >
+              <Text style={styles.accentButtonText}>{loading ? 'Adding...' : 'Add Calendar'}</Text>
+            </TouchableOpacity>
+          </View>
         </View>
-      </View>
 
-      {/* Logout */}
-      <View style={styles.section}>
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Text style={styles.logoutButtonText}>Logout</Text>
-        </TouchableOpacity>
-      </View>
+        {/* FitRoast */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>FitRoast</Text>
+          <View style={styles.card}>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleInfo}>
+                <Text style={styles.toggleLabel}>Weekly FitRoast</Text>
+                <Text style={styles.toggleDescription}>Get a weekly AI roast of your fitness performance</Text>
+              </View>
+              <Switch
+                value={fitRoastEnabled}
+                onValueChange={handleFitRoastToggle}
+                trackColor={{ false: colors.surfaceMute, true: colors.accent }}
+                thumbColor={colors.textPrimary}
+              />
+            </View>
 
-      <View style={styles.footer}>
-        <Text style={styles.footerText}>Pull to refresh</Text>
-      </View>
-    </ScrollView>
+            {fitRoastEnabled && (
+              <View style={styles.intensitySection}>
+                <Text style={styles.intensityLabel}>Roast Intensity</Text>
+                <View style={styles.intensitySelector}>
+                  {(['Light', 'Spicy', 'Savage'] as const).map((level) => (
+                    <TouchableOpacity
+                      key={level}
+                      style={[styles.intensityOption, roastIntensity === level && styles.intensityOptionActive]}
+                      onPress={() => handleIntensityChange(level)}
+                    >
+                      <Text style={[styles.intensityOptionText, roastIntensity === level && styles.intensityOptionTextActive]}>
+                        {level}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Logout */}
+        <View style={styles.section}>
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <Ionicons name="log-out-outline" size={20} color={colors.danger} />
+            <Text style={styles.logoutButtonText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={{ height: spacing.xxl }} />
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -425,60 +280,64 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.bgPrimary,
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
   },
   header: {
     ...typography.h1,
     marginBottom: spacing.xl,
-    textAlign: 'center',
   },
   section: {
     marginBottom: spacing.xl,
   },
   sectionTitle: {
-    ...typography.title,
-    marginBottom: spacing.md,
+    ...typography.small,
+    fontSize: 11,
+    letterSpacing: 1.1,
+    color: colors.textMuted,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
   },
-  statusCard: {
+  card: {
     backgroundColor: colors.bgSecondary,
-    borderRadius: radii.md,
+    borderRadius: radii.lg,
     padding: spacing.lg,
+    ...shadows.card,
   },
   statusRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: spacing.md,
   },
-  statusLabel: {
+  rowLabel: {
     ...typography.body,
     color: colors.textMuted,
+  },
+  rowValue: {
+    ...typography.body,
+    fontWeight: '600',
   },
   statusValue: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.xs,
   },
   statusDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: spacing.sm,
-  },
-  statusText: {
-    ...typography.body,
-    fontWeight: '500',
   },
   calendarsList: {
-    marginBottom: spacing.lg,
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
   },
   calendarItem: {
     backgroundColor: colors.bgSecondary,
     borderRadius: radii.md,
-    padding: spacing.lg,
-    marginBottom: spacing.md,
+    padding: spacing.md,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    ...shadows.card,
   },
   calendarInfo: {
     flex: 1,
@@ -487,69 +346,52 @@ const styles = StyleSheet.create({
   calendarName: {
     ...typography.body,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   calendarUrl: {
-    ...typography.bodyMuted,
+    ...typography.small,
+    color: colors.textMuted,
   },
-  deleteButton: {
-    backgroundColor: colors.danger,
-    borderRadius: radii.sm,
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  deleteButtonText: {
-    color: colors.textPrimary,
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  inputCard: {
-    backgroundColor: colors.bgSecondary,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+  removeButton: {
+    padding: spacing.xs,
   },
   inputLabel: {
-    ...typography.body,
+    ...typography.small,
+    color: colors.textMuted,
     marginBottom: spacing.sm,
-    fontWeight: '500',
+    letterSpacing: 0.3,
   },
   textInput: {
     backgroundColor: colors.bgPrimary,
-    borderRadius: radii.sm,
+    borderRadius: radii.md,
     padding: spacing.md,
     ...typography.body,
     borderWidth: 1,
     borderColor: colors.surfaceMute,
     marginBottom: spacing.md,
+    color: colors.textPrimary,
   },
   textInputError: {
     borderColor: colors.danger,
   },
   errorText: {
-    ...typography.bodyMuted,
+    ...typography.small,
     color: colors.danger,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
-  saveButton: {
+  accentButton: {
     backgroundColor: colors.accent,
-    borderRadius: radii.sm,
-    padding: spacing.md,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm + 2,
     alignItems: 'center',
   },
-  saveButtonDisabled: {
+  accentButtonDisabled: {
     backgroundColor: colors.surfaceMute,
   },
-  saveButtonText: {
+  accentButtonText: {
     ...typography.body,
     color: colors.bgPrimary,
-    fontWeight: '600',
-  },
-  toggleCard: {
-    backgroundColor: colors.bgSecondary,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    fontWeight: '700',
   },
   toggleRow: {
     flexDirection: 'row',
@@ -562,11 +404,12 @@ const styles = StyleSheet.create({
   },
   toggleLabel: {
     ...typography.body,
-    fontWeight: '500',
-    marginBottom: 4,
+    fontWeight: '600',
+    marginBottom: 2,
   },
   toggleDescription: {
-    ...typography.bodyMuted,
+    ...typography.small,
+    color: colors.textMuted,
   },
   intensitySection: {
     marginTop: spacing.md,
@@ -575,7 +418,8 @@ const styles = StyleSheet.create({
     borderTopColor: colors.surfaceMute + '40',
   },
   intensityLabel: {
-    ...typography.bodyMuted,
+    ...typography.small,
+    color: colors.textMuted,
     marginBottom: spacing.sm,
   },
   intensitySelector: {
@@ -602,28 +446,21 @@ const styles = StyleSheet.create({
   intensityOptionTextActive: {
     color: colors.accent,
   },
-  roastOffNote: {
-    ...typography.small,
-    color: colors.textMuted,
-    marginTop: spacing.md,
-    fontStyle: 'italic',
-  },
   logoutButton: {
-    backgroundColor: colors.danger,
-    borderRadius: radii.md,
-    padding: spacing.lg,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.lg,
+    paddingVertical: spacing.md,
+    borderWidth: 1.5,
+    borderColor: colors.danger + '60',
+    ...shadows.card,
   },
   logoutButtonText: {
-    ...typography.title,
-    color: colors.textPrimary,
-  },
-  footer: {
-    alignItems: 'center',
-    marginTop: spacing.xl,
-    marginBottom: spacing.xxl,
-  },
-  footerText: {
-    ...typography.small,
+    ...typography.body,
+    color: colors.danger,
+    fontWeight: '600',
   },
 });

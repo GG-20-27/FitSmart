@@ -3241,7 +3241,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // If API succeeds but returns null values, try cache fallback
-        if (!yesterdayData || (yesterdayData.recovery_score === null && yesterdayData.strain === null && yesterdayData.sleep_score === null && yesterdayData.hrv === null)) {
+        if (!yesterdayData || (yesterdayData.recovery_score == null && yesterdayData.strain == null && yesterdayData.sleep_score == null && yesterdayData.hrv == null)) {
           console.log('WHOOP API returned null values for yesterday, trying cache fallback');
           throw new Error('No data from WHOOP API');
         }
@@ -4689,6 +4689,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dateLabel, // e.g. "today", "yesterday", "Feb 21"
         timingSignals,
         waterIntakeBand,
+        dailyHabits, // { total, completed, completedList, missingList }
       } = req.body;
 
       console.log(`[COACH SUMMARY] Generating summary for user: ${userId}, fitScore: ${fitScore}`);
@@ -4749,6 +4750,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dateLabel: dateLabel || 'today',
         timingSignals: timingSignals || undefined,
         waterIntakeBand: waterIntakeBand || undefined,
+        dailyHabits: dailyHabits || undefined,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);

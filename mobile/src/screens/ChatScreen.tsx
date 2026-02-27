@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -246,10 +247,14 @@ function AnimatedMessage({ message, isNewMessage = false }: { message: Message; 
   return (
     <Animated.View style={{ opacity: fadeAnim }}>
       <View style={[styles.messageRow, message.isUser && styles.userMessageRow]}>
-        <View style={[
-          styles.messageBubble,
-          message.isUser ? styles.userBubbleStyle : styles.assistantBubbleStyle,
-        ]}>
+        <Pressable
+          style={[
+            styles.messageBubble,
+            message.isUser ? styles.userBubbleStyle : styles.assistantBubbleStyle,
+          ]}
+          onLongPress={!message.isUser ? handleCopy : undefined}
+          delayLongPress={400}
+        >
           {message.images && message.images.length > 0 && (
             <ScrollView horizontal style={styles.messageImagesContainer}>
               {message.images.map((uri, idx) => (
@@ -289,7 +294,7 @@ function AnimatedMessage({ message, isNewMessage = false }: { message: Message; 
               )}
             </View>
           )}
-        </View>
+        </Pressable>
       </View>
     </Animated.View>
   );

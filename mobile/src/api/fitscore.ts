@@ -425,6 +425,12 @@ export async function getCoachSummary(params: {
     late_meal_time?: string;
   };
   waterIntakeBand?: WaterIntakeBand | null;
+  dailyHabits?: {
+    total: number;
+    completed: number;
+    completedList: string[];
+    missingList: string[];
+  };
 }): Promise<CoachSummaryResponse> {
   console.log(`[API] Getting coach summary`);
 

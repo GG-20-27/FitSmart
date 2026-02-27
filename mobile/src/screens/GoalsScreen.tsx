@@ -37,6 +37,12 @@ type Microhabit = {
   text: string;
   done: boolean;
   impact: number;
+  isSubgoal?: boolean; // if true, stored as a sub-goal (milestone), not a daily habit
+};
+
+type Subgoal = {
+  text: string;
+  done: boolean;
 };
 
 type Goal = {
@@ -46,7 +52,8 @@ type Goal = {
   category: GoalCategory;
   progress: number;
   streak: number;
-  microhabits: Microhabit[];
+  microhabits: Microhabit[]; // daily habits — streak & progress tracked
+  subgoals: Subgoal[];       // milestone to-dos — checked off, not streak-based
   createdAt: string;
 };
 
@@ -116,16 +123,22 @@ export default function GoalsScreen() {
     try {
       const serverGoals = await apiRequest<any[]>('/api/goals');
       if (serverGoals && serverGoals.length > 0) {
-        const mapped: Goal[] = serverGoals.map((g: any) => ({
-          id: String(g.id),
-          title: g.title,
-          emoji: g.emoji || '🎯',
-          category: g.category as GoalCategory,
-          progress: g.progress || 0,
-          streak: g.streak || 0,
-          microhabits: g.microhabits ? (typeof g.microhabits === 'string' ? JSON.parse(g.microhabits) : g.microhabits) : [],
-          createdAt: g.createdAt || new Date().toISOString(),
-        }));
+        const mapped: Goal[] = serverGoals.map((g: any) => {
+          const allItems: Microhabit[] = g.microhabits
+            ? (typeof g.microhabits === 'string' ? JSON.parse(g.microhabits) : g.microhabits)
+            : [];
+          return {
+            id: String(g.id),
+            title: g.title,
+            emoji: g.emoji || '🎯',
+            category: g.category as GoalCategory,
+            progress: g.progress || 0,
+            streak: g.streak || 0,
+            microhabits: allItems.filter(h => !h.isSubgoal),
+            subgoals: allItems.filter(h => h.isSubgoal).map(h => ({ text: h.text, done: h.done })),
+            createdAt: g.createdAt || new Date().toISOString(),
+          };
+        });
         setGoals(mapped);
         calculateTotalStreak(mapped);
         // Cache locally
@@ -161,6 +174,12 @@ export default function GoalsScreen() {
     }
   };
 
+  // Merge habits + subgoals into one array for server storage
+  const buildServerMicrohabits = (goal: Goal): Microhabit[] => [
+    ...goal.microhabits,
+    ...goal.subgoals.map(sg => ({ text: sg.text, done: sg.done, impact: 0, isSubgoal: true as const })),
+  ];
+
   // Create goal on backend
   const createGoalOnServer = async (goal: Goal) => {
     try {
@@ -172,7 +191,7 @@ export default function GoalsScreen() {
           category: goal.category,
           progress: goal.progress,
           streak: goal.streak,
-          microhabits: goal.microhabits,
+          microhabits: buildServerMicrohabits(goal),
         }),
       });
       console.log(`[GOALS] Created goal on server: ${result.id}`);
@@ -194,7 +213,7 @@ export default function GoalsScreen() {
           category: goal.category,
           progress: goal.progress,
           streak: goal.streak,
-          microhabits: goal.microhabits,
+          microhabits: buildServerMicrohabits(goal),
         }),
       });
       console.log(`[GOALS] Updated goal on server: ${goal.id}`);
@@ -226,31 +245,62 @@ export default function GoalsScreen() {
     }, [loadGoals, loadContext])
   );
 
-  // Toggle microhabit completion
+  // One-time migration: reset all streaks that were set by the old Goals-based logic
+  useEffect(() => {
+    (async () => {
+      const RESET_FLAG = '@goals_streak_reset_v3';
+      const done = await AsyncStorage.getItem(RESET_FLAG);
+      if (done) return;
+      try {
+        const raw = await AsyncStorage.getItem(STORAGE_KEY);
+        if (!raw) { await AsyncStorage.setItem(RESET_FLAG, '1'); return; }
+        const parsed: Goal[] = JSON.parse(raw);
+        const reset = parsed.map(g => ({ ...g, streak: 0 }));
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(reset));
+        setGoals(prev => prev.map(g => ({ ...g, streak: 0 })));
+        // Sync each goal's streak reset to the server
+        reset.forEach(g => {
+          apiRequest(`/api/goals/${g.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ streak: 0 }),
+          }).catch(() => {});
+        });
+        await AsyncStorage.setItem(RESET_FLAG, '1');
+      } catch { /* graceful */ }
+    })();
+  }, []);
+
+  // Toggle daily habit completion — streak is now driven by FitScore check-ins, not here
   const toggleMicrohabit = (goalId: string, habitIndex: number) => {
     const updatedGoals = goals.map(goal => {
       if (goal.id === goalId) {
         const updatedHabits = [...goal.microhabits];
-        updatedHabits[habitIndex] = {
-          ...updatedHabits[habitIndex],
-          done: !updatedHabits[habitIndex].done,
-        };
-
-        // Recalculate progress
-        const completedCount = updatedHabits.filter(h => h.done).length;
-        const progress = Math.round((completedCount / updatedHabits.length) * 100);
-
-        // Update streak if all habits completed
-        const allDone = updatedHabits.every(h => h.done);
-        const newStreak = allDone ? goal.streak + 1 : goal.streak;
-
-        const updated = { ...goal, microhabits: updatedHabits, progress, streak: newStreak };
+        updatedHabits[habitIndex] = { ...updatedHabits[habitIndex], done: !updatedHabits[habitIndex].done };
+        const updated = { ...goal, microhabits: updatedHabits };
         updateGoalOnServer(updated);
         return updated;
       }
       return goal;
     });
+    saveGoalsLocal(updatedGoals);
+  };
 
+  // Toggle sub-goal completion (drives progress bar — each sub-goal is a milestone)
+  const toggleSubgoal = (goalId: string, subgoalIndex: number) => {
+    const updatedGoals = goals.map(goal => {
+      if (goal.id === goalId) {
+        const updatedSubgoals = [...goal.subgoals];
+        updatedSubgoals[subgoalIndex] = { ...updatedSubgoals[subgoalIndex], done: !updatedSubgoals[subgoalIndex].done };
+        const completedCount = updatedSubgoals.filter(s => s.done).length;
+        const progress = updatedSubgoals.length > 0
+          ? Math.round((completedCount / updatedSubgoals.length) * 100)
+          : goal.progress;
+        const updated = { ...goal, subgoals: updatedSubgoals, progress };
+        updateGoalOnServer(updated);
+        return updated;
+      }
+      return goal;
+    });
     saveGoalsLocal(updatedGoals);
   };
 
@@ -277,7 +327,16 @@ export default function GoalsScreen() {
   // Navigate to FitCoach with context
   const reviewWithCoach = () => {
     navigation.navigate('FitCoach', {
-      prefilledMessage: 'Please review my goals and suggest any improvements according to my injury and long-term goal context. Take into count also my health data metrics.',
+      prefilledMessage: `Review my current goals based on:
+- My injury phase and limitations
+- My long-term objective
+- My recent health data (recovery, sleep, HRV, strain trends)
+- My fitness context (Identity, Phase & Constraints)
+
+Identify:
+1. Any unrealistic or misaligned goals, sub-goals or daily habits
+2. What should be adjusted right now
+3. One priority goal for this phase`,
       autoSubmit: true,
     });
   };
@@ -379,7 +438,9 @@ export default function GoalsScreen() {
                 setExpandedGoalId(expandedGoalId === goal.id ? null : goal.id)
               }
               onToggleMicrohabit={toggleMicrohabit}
+              onToggleSubgoal={toggleSubgoal}
               onDelete={deleteGoal}
+              scrollViewRef={scrollViewRef}
             />
           ))
         )}
@@ -446,15 +507,20 @@ function GoalCard({
   expanded,
   onToggle,
   onToggleMicrohabit,
+  onToggleSubgoal,
   onDelete,
+  scrollViewRef,
 }: {
   goal: Goal;
   expanded: boolean;
   onToggle: () => void;
   onToggleMicrohabit: (goalId: string, habitIndex: number) => void;
+  onToggleSubgoal: (goalId: string, subgoalIndex: number) => void;
   onDelete: (goalId: string) => void;
+  scrollViewRef?: React.RefObject<ScrollView>;
 }) {
   const [animation] = useState(new Animated.Value(0));
+  const cardYRef = useRef(0);
 
   useEffect(() => {
     Animated.timing(animation, {
@@ -464,14 +530,25 @@ function GoalCard({
     }).start();
   }, [expanded]);
 
+  const handleToggle = () => {
+    const isOpening = !expanded;
+    onToggle();
+    if (isOpening && scrollViewRef?.current) {
+      setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ y: Math.max(0, cardYRef.current - 8), animated: true });
+      }, 160);
+    }
+  };
+
   const maxHeight = animation.interpolate({
     inputRange: [0, 1],
     outputRange: [0, 500],
   });
 
   return (
+    <View onLayout={e => { cardYRef.current = e.nativeEvent.layout.y; }}>
     <Card style={styles.goalCard}>
-      <TouchableOpacity onPress={onToggle} activeOpacity={0.7}>
+      <TouchableOpacity onPress={handleToggle} activeOpacity={0.7}>
         <View style={styles.goalHeader}>
           <View style={styles.goalTitleRow}>
             <Text style={styles.goalEmoji}>{goal.emoji}</Text>
@@ -525,43 +602,44 @@ function GoalCard({
       {/* Expanded Details */}
       {expanded && (
         <Animated.View style={[styles.goalDetails, { maxHeight }]}>
-          <View style={styles.microhabitsSection}>
-            <Text style={styles.microhabitsTitle}>Daily Habits</Text>
-            {goal.microhabits.map((habit, index) => (
-              <TouchableOpacity
-                key={index}
-                style={styles.microhabitRow}
-                onPress={() => onToggleMicrohabit(goal.id, index)}
-                activeOpacity={0.7}
-              >
-                <View
-                  style={[
-                    styles.checkbox,
-                    habit.done && styles.checkboxChecked,
-                  ]}
-                >
-                  {habit.done && (
-                    <Ionicons name="checkmark" size={16} color="#FFFFFF" />
-                  )}
+          {/* Daily Habits — planning view only, not tickable here */}
+          {goal.microhabits.length > 0 && (
+            <View style={styles.microhabitsSection}>
+              <Text style={styles.microhabitsTitle}>Daily Habits</Text>
+              <Text style={styles.habitsInfoText}>Daily habits are checked in your FitScore each day.</Text>
+              {goal.microhabits.map((habit, index) => (
+                <View key={index} style={styles.microhabitRow}>
+                  <View style={styles.checkbox} />
+                  <Text style={styles.microhabitText}>{habit.text}</Text>
                 </View>
-                <Text
-                  style={[
-                    styles.microhabitText,
-                    habit.done && styles.microhabitTextDone,
-                  ]}
+              ))}
+            </View>
+          )}
+
+          {/* Sub-goals */}
+          {goal.subgoals && goal.subgoals.length > 0 && (
+            <View style={[styles.microhabitsSection, goal.microhabits.length > 0 && styles.subgoalSectionBorder]}>
+              <Text style={styles.subgoalsTitle}>Sub-goals</Text>
+              {goal.subgoals.map((sg, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.microhabitRow}
+                  onPress={() => onToggleSubgoal(goal.id, index)}
+                  activeOpacity={0.7}
                 >
-                  {habit.text}
-                </Text>
-                <Text style={styles.impactText}>+{habit.impact}%</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+                  <View style={[styles.checkbox, styles.checkboxSubgoal, sg.done && styles.checkboxSubgoalDone]}>
+                    {sg.done && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+                  </View>
+                  <Text style={[styles.microhabitText, sg.done && styles.microhabitTextDone]}>
+                    {sg.text}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           <View style={styles.goalActions}>
-            <TouchableOpacity
-              style={styles.deleteButton}
-              onPress={() => onDelete(goal.id)}
-            >
+            <TouchableOpacity style={styles.deleteButton} onPress={() => onDelete(goal.id)}>
               <Ionicons name="trash-outline" size={18} color="#FF5F56" />
               <Text style={styles.deleteButtonText}>Delete</Text>
             </TouchableOpacity>
@@ -569,6 +647,7 @@ function GoalCard({
         </Animated.View>
       )}
     </Card>
+    </View>
   );
 }
 
@@ -586,6 +665,7 @@ function AddGoalModal({
   const [emoji, setEmoji] = useState('🎯');
   const [category, setCategory] = useState<GoalCategory>('Training');
   const [habits, setHabits] = useState<string[]>(['', '', '']);
+  const [subgoalInputs, setSubgoalInputs] = useState<string[]>(['', '', '']);
 
   const handleAdd = () => {
     if (!title.trim()) {
@@ -594,8 +674,10 @@ function AddGoalModal({
     }
 
     const validHabits = habits.filter(h => h.trim().length > 0);
-    if (validHabits.length === 0) {
-      Alert.alert('Error', 'Please add at least one habit');
+    const validSubgoals = subgoalInputs.filter(s => s.trim().length > 0);
+
+    if (validHabits.length === 0 && validSubgoals.length === 0) {
+      Alert.alert('Error', 'Please add at least one daily habit or sub-goal');
       return;
     }
 
@@ -609,8 +691,9 @@ function AddGoalModal({
       microhabits: validHabits.map(h => ({
         text: h.trim(),
         done: false,
-        impact: Math.round(100 / validHabits.length),
+        impact: validHabits.length > 0 ? Math.round(100 / validHabits.length) : 0,
       })),
+      subgoals: validSubgoals.map(s => ({ text: s.trim(), done: false })),
       createdAt: new Date().toISOString(),
     };
 
@@ -619,6 +702,7 @@ function AddGoalModal({
     setEmoji('🎯');
     setCategory('Training');
     setHabits(['', '', '']);
+    setSubgoalInputs(['', '', '']);
   };
 
   return (
@@ -698,9 +782,10 @@ function AddGoalModal({
               </View>
             </View>
 
-            {/* Habits Input */}
+            {/* Daily Habits Input */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Daily Habits (1-3)</Text>
+              <Text style={styles.inputHint}>Recurring actions tracked daily — build your streak</Text>
               {habits.map((habit, index) => (
                 <TextInput
                   key={index}
@@ -712,6 +797,26 @@ function AddGoalModal({
                     const newHabits = [...habits];
                     newHabits[index] = text;
                     setHabits(newHabits);
+                  }}
+                />
+              ))}
+            </View>
+
+            {/* Sub-goals Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Sub-goals (1-3)</Text>
+              <Text style={styles.inputHint}>Milestones toward your goal — check off when done</Text>
+              {subgoalInputs.map((sg, index) => (
+                <TextInput
+                  key={index}
+                  style={styles.textInput}
+                  placeholder={`Sub-goal ${index + 1}`}
+                  placeholderTextColor={colors.textMuted}
+                  value={sg}
+                  onChangeText={(text) => {
+                    const updated = [...subgoalInputs];
+                    updated[index] = text;
+                    setSubgoalInputs(updated);
                   }}
                 />
               ))}
@@ -748,6 +853,9 @@ function EditGoalModal({
   const [habits, setHabits] = useState<string[]>(
     goal.microhabits.map(h => h.text).concat(['', '', '']).slice(0, 3)
   );
+  const [subgoalInputs, setSubgoalInputs] = useState<string[]>(
+    (goal.subgoals || []).map(s => s.text).concat(['', '', '']).slice(0, 3)
+  );
 
   // Reset form when goal changes
   useEffect(() => {
@@ -755,6 +863,7 @@ function EditGoalModal({
     setEmoji(goal.emoji);
     setCategory(goal.category);
     setHabits(goal.microhabits.map(h => h.text).concat(['', '', '']).slice(0, 3));
+    setSubgoalInputs((goal.subgoals || []).map(s => s.text).concat(['', '', '']).slice(0, 3));
   }, [goal]);
 
   const handleSave = () => {
@@ -764,26 +873,37 @@ function EditGoalModal({
     }
 
     const validHabits = habits.filter(h => h.trim().length > 0);
-    if (validHabits.length === 0) {
-      Alert.alert('Error', 'Please add at least one habit');
+    const validSubgoals = subgoalInputs.filter(s => s.trim().length > 0);
+    if (validHabits.length === 0 && validSubgoals.length === 0) {
+      Alert.alert('Error', 'Please add at least one daily habit or sub-goal');
       return;
     }
+
+    const updatedHabits = validHabits.map((h, i) => ({
+      text: h.trim(),
+      done: goal.microhabits[i]?.done || false,
+      impact: validHabits.length > 0 ? Math.round(100 / validHabits.length) : 0,
+    }));
+    const updatedSubgoals = validSubgoals.map((s, i) => ({
+      text: s.trim(),
+      done: (goal.subgoals || [])[i]?.done || false,
+    }));
+
+    // Progress is driven by sub-goals (milestones), not daily habits
+    const completedSubgoals = updatedSubgoals.filter(s => s.done).length;
+    const progress = updatedSubgoals.length > 0
+      ? Math.round((completedSubgoals / updatedSubgoals.length) * 100)
+      : goal.progress;
 
     const updatedGoal: Goal = {
       ...goal,
       title: title.trim(),
       emoji,
       category,
-      microhabits: validHabits.map((h, i) => ({
-        text: h.trim(),
-        done: goal.microhabits[i]?.done || false,
-        impact: Math.round(100 / validHabits.length),
-      })),
+      microhabits: updatedHabits,
+      subgoals: updatedSubgoals,
+      progress,
     };
-
-    // Recalculate progress
-    const completedCount = updatedGoal.microhabits.filter(h => h.done).length;
-    updatedGoal.progress = Math.round((completedCount / updatedGoal.microhabits.length) * 100);
 
     onSave(updatedGoal);
   };
@@ -865,9 +985,10 @@ function EditGoalModal({
               </View>
             </View>
 
-            {/* Habits Input */}
+            {/* Daily Habits Input */}
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Daily Habits (1-3)</Text>
+              <Text style={styles.inputHint}>Recurring actions tracked daily — build your streak</Text>
               {habits.map((habit, index) => (
                 <TextInput
                   key={index}
@@ -879,6 +1000,26 @@ function EditGoalModal({
                     const newHabits = [...habits];
                     newHabits[index] = text;
                     setHabits(newHabits);
+                  }}
+                />
+              ))}
+            </View>
+
+            {/* Sub-goals Input */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Sub-goals (1-3)</Text>
+              <Text style={styles.inputHint}>Milestones toward your goal — check off when done</Text>
+              {subgoalInputs.map((sg, index) => (
+                <TextInput
+                  key={index}
+                  style={styles.textInput}
+                  placeholder={`Sub-goal ${index + 1}`}
+                  placeholderTextColor={colors.textMuted}
+                  value={sg}
+                  onChangeText={(text) => {
+                    const updated = [...subgoalInputs];
+                    updated[index] = text;
+                    setSubgoalInputs(updated);
                   }}
                 />
               ))}
@@ -1573,10 +1714,48 @@ const styles = StyleSheet.create({
   },
   microhabitsTitle: {
     ...typography.body,
-    fontSize: 14,
+    fontSize: 11,
     fontWeight: '700',
+    letterSpacing: 0.8,
+    color: colors.accent,
+    textTransform: 'uppercase',
+    marginBottom: spacing.xs,
+  },
+  habitsInfoText: {
+    ...typography.small,
+    fontSize: 11,
     color: colors.textMuted,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
+    fontStyle: 'italic',
+  },
+  subgoalsTitle: {
+    ...typography.body,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    color: colors.accent,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+  },
+  subgoalSectionBorder: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceMute + '40',
+  },
+  checkboxSubgoal: {
+    borderRadius: 12, // circle for sub-goals vs square for habits
+    borderColor: colors.accent + '80',
+  },
+  checkboxSubgoalDone: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  inputHint: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+    marginTop: -spacing.xs,
   },
   microhabitRow: {
     flexDirection: 'row',

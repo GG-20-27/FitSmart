@@ -1044,6 +1044,12 @@ Return valid JSON only — no score.`;
       late_meal_time?: string; // HH:MM
     };
     waterIntakeBand?: string; // '<1L' | '1–2L' | '2–3L' | '3L+' — only advise hydration when low
+    dailyHabits?: {
+      total: number;
+      completed: number;
+      completedList: string[];
+      missingList: string[];
+    };
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -1124,6 +1130,17 @@ Return valid JSON only — no score.`;
           contextParts.push(`💧 Hydration: User reported 1–2L water. Borderline given ${highStrain ? 'high strain' : `feeling ${params.todayFeeling}`} — a brief mention may help.`);
         }
         // 2–3L or 3L+: do NOT mention hydration at all
+      }
+
+      // Daily habits accountability (one sentence max, no shaming)
+      if (params.dailyHabits && params.dailyHabits.total > 0) {
+        const { total, completed, completedList, missingList } = params.dailyHabits;
+        if (completed === total) {
+          contextParts.push(`✅ Daily habits: ${completed}/${total} completed (${completedList.join(', ')}). Mention this briefly with a positive note — one sentence max.`);
+        } else {
+          const missing = missingList.slice(0, 2).join(', ');
+          contextParts.push(`📋 Daily habits: ${completed}/${total} completed. Missing: ${missing}. If relevant, include ONE sentence of light accountability — no shaming, no lecturing.`);
+        }
       }
 
       // Meal timing nudges (only when triggered)

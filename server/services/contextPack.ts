@@ -226,13 +226,20 @@ export async function buildContextPack(userId: string): Promise<ContextPack> {
 
       if (goals.length > 0) {
         goalsContext = goals.map(g => {
-          const microhabitsText = Array.isArray(g.microhabits)
-            ? (g.microhabits as Array<{ text: string; done: boolean; impact: number }>)
-                .map(h => `${h.done ? '✓' : '○'} ${h.text}`)
-                .join(', ')
-            : 'No habits defined';
+          const allItems = Array.isArray(g.microhabits)
+            ? (g.microhabits as Array<{ text: string; done: boolean; isSubgoal?: boolean }>)
+            : [];
+          const habits = allItems.filter(h => !h.isSubgoal);
+          const subgoals = allItems.filter(h => h.isSubgoal);
 
-          return `- ${g.emoji} ${g.title} (${g.category}): ${g.progress}% complete, ${g.streak}-day streak\n  Habits: ${microhabitsText}`;
+          const lines = [`- ${g.emoji} ${g.title} (${g.category}): ${g.progress}% complete, ${g.streak}-day streak`];
+          if (habits.length > 0) {
+            lines.push(`  Daily habits (recurring, streak-tracked): ${habits.map(h => `${h.done ? '✓' : '○'} ${h.text}`).join(', ')}`);
+          }
+          if (subgoals.length > 0) {
+            lines.push(`  Sub-goals (milestones, not streak-based): ${subgoals.map(s => `${s.done ? '✓' : '○'} ${s.text}`).join(', ')}`);
+          }
+          return lines.join('\n');
         }).join('\n');
 
         console.log(`[CTX] Loaded ${goals.length} goals for context`);

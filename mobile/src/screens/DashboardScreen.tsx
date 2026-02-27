@@ -384,8 +384,8 @@ export default function DashboardScreen() {
     loadData(true);
   }, [loadData]);
 
-  const calculateDelta = (today: number | undefined, yesterday: number | undefined): number | undefined => {
-    if (today === undefined || yesterday === undefined || yesterday === 0) return undefined;
+  const calculateDelta = (today: number | undefined | null, yesterday: number | undefined | null): number | undefined => {
+    if (today == null || yesterday == null || yesterday === 0) return undefined;
     const result = Math.round(((today - yesterday) / yesterday) * 100);
     return isFinite(result) && !isNaN(result) ? result : undefined;
   };

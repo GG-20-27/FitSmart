@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
+import { apiRequest } from '../api/client';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView, Keyboard } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -543,6 +544,11 @@ export default function FitScoreScreen() {
   // Hydration picker — stored per date in AsyncStorage
   const [waterIntakeBand, setWaterIntakeBand] = useState<WaterIntakeBand | null>(null);
 
+  // Daily habits check-in — loaded from goals, persisted per-date locally
+  type DailyHabit = { text: string; goalTitle: string; done: boolean };
+  const [dailyHabits, setDailyHabits] = useState<DailyHabit[]>([]);
+  const habitsLoadedRef = useRef(false);
+
   // FitScore calculation state
   const [fitScoreResult, setFitScoreResult] = useState<FitScoreResponse | null>(null);
   const [calculatingFitScore, setCalculatingFitScore] = useState(false);
@@ -627,6 +633,44 @@ export default function FitScoreScreen() {
       } catch { /* graceful */ }
     })();
   }, []);
+
+  // Load habit definitions from goals storage on mount, then restore today's checkins
+  useEffect(() => {
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem('@fitsmart_goals');
+        if (!raw) return;
+        const goals = JSON.parse(raw);
+        const allHabits: DailyHabit[] = [];
+        for (const g of goals) {
+          for (const h of (g.microhabits || [])) {
+            if (!h.isSubgoal) {
+              allHabits.push({ text: h.text, goalTitle: g.title, done: false });
+            }
+          }
+        }
+        // Restore checkins for today
+        const todayStr = formatDate(new Date());
+        const checkinRaw = await AsyncStorage.getItem(`habitCheckins_${todayStr}`);
+        const checkins = checkinRaw ? JSON.parse(checkinRaw) as boolean[] : [];
+        setDailyHabits(allHabits.map((h, i) => ({ ...h, done: checkins[i] ?? false })));
+        habitsLoadedRef.current = true;
+      } catch { /* graceful */ }
+    })();
+  }, []);
+
+  // When date changes, restore habit checkins for that date
+  useEffect(() => {
+    if (!habitsLoadedRef.current) return;
+    (async () => {
+      try {
+        const dateStr = formatDate(selectedDate);
+        const raw = await AsyncStorage.getItem(`habitCheckins_${dateStr}`);
+        const checkins = raw ? JSON.parse(raw) as boolean[] : [];
+        setDailyHabits(prev => prev.map((h, i) => ({ ...h, done: checkins[i] ?? false })));
+      } catch { /* graceful */ }
+    })();
+  }, [selectedDate]);
 
   const isToday = selectedDate.toDateString() === new Date().toDateString();
   const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
@@ -869,7 +913,13 @@ export default function FitScoreScreen() {
       triggerReadyReveal();
 
       // Fetch coach summary in the background and cache it
-      fetchCoachSummary(result, formatDate(selectedDate));
+      const habitsCtx = dailyHabits.length > 0 ? {
+        total: dailyHabits.length,
+        completed: dailyHabits.filter(h => h.done).length,
+        completedList: dailyHabits.filter(h => h.done).map(h => h.text),
+        missingList: dailyHabits.filter(h => !h.done).map(h => h.text),
+      } : undefined;
+      fetchCoachSummary(result, formatDate(selectedDate), habitsCtx);
 
     } catch (error) {
       console.error('[FITSCORE] Calculation failed:', error);
@@ -882,7 +932,11 @@ export default function FitScoreScreen() {
     }
   };
 
-  const fetchCoachSummary = async (fitScoreData: FitScoreResponse, dateStr?: string) => {
+  const fetchCoachSummary = async (
+    fitScoreData: FitScoreResponse,
+    dateStr?: string,
+    habitsContext?: { total: number; completed: number; completedList: string[]; missingList: string[] },
+  ) => {
     setLoadingCoachSummary(true);
     try {
       const summary = await getCoachSummary({
@@ -907,6 +961,7 @@ export default function FitScoreScreen() {
         dateLabel: getDateLabel(),
         timingSignals: fitScoreData.timingSignals,
         waterIntakeBand: fitScoreData.waterIntakeBand ?? waterIntakeBand ?? null,
+        dailyHabits: habitsContext,
       });
       setCoachSummary(summary);
       if (dateStr) {
@@ -928,6 +983,44 @@ export default function FitScoreScreen() {
       return false;
     }
     return true;
+  };
+
+  const handleHabitToggle = async (index: number) => {
+    const updated = dailyHabits.map((h, i) => i === index ? { ...h, done: !h.done } : h);
+    setDailyHabits(updated);
+    const dateStr = formatDate(selectedDate);
+    try {
+      await AsyncStorage.setItem(`habitCheckins_${dateStr}`, JSON.stringify(updated.map(h => h.done)));
+
+      // Streak logic: for each goal, if ALL its habits are now done → increment streak (once per day)
+      const goalTitles = [...new Set(updated.map(h => h.goalTitle))];
+      for (const goalTitle of goalTitles) {
+        const goalHabits = updated.filter(h => h.goalTitle === goalTitle);
+        if (!goalHabits.every(h => h.done)) continue;
+
+        const streakKey = `habitStreakDate_${goalTitle}`;
+        const lastStreakDate = await AsyncStorage.getItem(streakKey);
+        if (lastStreakDate === dateStr) continue; // already counted today
+
+        const goalsRaw = await AsyncStorage.getItem('@fitsmart_goals');
+        if (!goalsRaw) continue;
+        const goals = JSON.parse(goalsRaw);
+        const updatedGoals = goals.map((g: any) =>
+          g.title === goalTitle ? { ...g, streak: (g.streak || 0) + 1 } : g
+        );
+        await AsyncStorage.setItem('@fitsmart_goals', JSON.stringify(updatedGoals));
+        await AsyncStorage.setItem(streakKey, dateStr);
+
+        // Sync to server
+        const goal = updatedGoals.find((g: any) => g.title === goalTitle);
+        if (goal?.id) {
+          apiRequest(`/api/goals/${goal.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ streak: goal.streak }),
+          }).catch(() => {});
+        }
+      }
+    } catch { /* graceful */ }
   };
 
   const handleWaterPick = async (band: WaterIntakeBand) => {
@@ -1601,6 +1694,43 @@ export default function FitScoreScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+      )}
+
+      {/* Daily Habits Check-in — today/yesterday only */}
+      {!isPastDate && (
+        <View style={styles.habitsSection}>
+          <View style={styles.habitsSectionHeader}>
+            <Ionicons name="checkmark-circle-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.habitsLabel}>Daily Habits</Text>
+            {dailyHabits.length > 0 && (
+              <Text style={styles.habitsProgress}>
+                {dailyHabits.filter(h => h.done).length}/{dailyHabits.length} done
+              </Text>
+            )}
+          </View>
+
+          {dailyHabits.length === 0 ? (
+            <Text style={styles.habitsEmptyText}>No daily habits set yet. Add them in Goals.</Text>
+          ) : (
+            <View style={styles.habitsChecklist}>
+              {dailyHabits.map((habit, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.habitRow}
+                  onPress={() => handleHabitToggle(index)}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.habitCheckbox, habit.done && styles.habitCheckboxDone]}>
+                    {habit.done && <Ionicons name="checkmark" size={13} color="#FFFFFF" />}
+                  </View>
+                  <Text style={[styles.habitText, habit.done && styles.habitTextDone]}>
+                    {habit.text}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
         </View>
       )}
 
@@ -4375,6 +4505,70 @@ const styles = StyleSheet.create({
   waterChipTextActive: {
     color: colors.accent,
     fontWeight: '600',
+  },
+
+  // Daily Habits Check-in block
+  habitsSection: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    marginTop: spacing.sm,
+  },
+  habitsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  habitsLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  habitsProgress: {
+    ...typography.small,
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '600',
+    marginLeft: 'auto',
+  },
+  habitsEmptyText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  habitsChecklist: {
+    gap: 2,
+  },
+  habitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: 6,
+  },
+  habitCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: colors.textMuted + '80',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  habitCheckboxDone: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  habitText: {
+    ...typography.small,
+    fontSize: 13,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  habitTextDone: {
+    textDecorationLine: 'line-through',
+    color: colors.textMuted,
   },
 
   // FitScore Ready Reveal

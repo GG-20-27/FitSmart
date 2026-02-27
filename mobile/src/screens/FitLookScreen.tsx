@@ -74,7 +74,9 @@ export default function FitLookScreen() {
   const handleExplainPlan = () => {
     if (!fitlook) return;
     const prompt = buildExplainPlanPrompt(fitlook, feeling);
-    navigation.navigate('FitCoach', { prefilledMessage: prompt, autoSubmit: false });
+    // Try direct navigate first; if FitLook is in a nested navigator, bubble up to root tabs
+    const nav = navigation.getParent() ?? navigation;
+    nav.navigate('FitCoach', { prefilledMessage: prompt, autoSubmit: false });
   };
 
 
