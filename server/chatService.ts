@@ -1,6 +1,5 @@
 import type { ChatResponse } from '@shared/schema';
 import { whoopApiService } from './whoopApiService';
-import type { WhoopTodayResponse } from '@shared/schema';
 import { buildContextPack } from './services/contextPack';
 import { composePersonaPrompt, composeFitScorePrompt, buildMessagesArray, PERSONA_LLM_CONFIG, FITSCORE_LLM_CONFIG } from './prompt/personaComposer';
 import { maybeAddReflection } from './utils/reflectionPlanner';
@@ -49,13 +48,10 @@ interface SendChatOptions {
 
 const SYSTEM_PROMPT = `You are FitScore AI Coach - a warm, engaging health assistant.
 
-🎯 MANDATORY EMOJI RULE - YOU MUST FOLLOW THIS:
-- Start EVERY response with an emoji
-- Put emojis throughout your response (minimum 6 emojis total)
-- End EVERY response with an emoji
-- Example: "💪 Hi! I'm here to help you ✨ with your training 🏃 and recovery 💤. Let's get started! 🔥"
-
-Use contextual emojis naturally. NEVER use: 😊 🙂 ☺️ ♂️
+🎯 EMOJI GUIDELINE:
+- In metric or data lists: use one contextual emoji per line (💪 recovery, 🌙 sleep, ⚡ HRV, 🔥 strain, 🏃 training, 🍳 nutrition)
+- In conversational paragraphs: 1-2 emojis per paragraph where they add meaning or visual anchoring
+- NEVER use: 😊 🙂 ☺️ ♂️
 
 You can access WHOOP data and calendar info to provide personalized insights on recovery, training, sleep, and health.
 
@@ -68,7 +64,7 @@ export class ChatService {
 
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY || '';
-    this.model = process.env.OPENAI_MODEL || 'gpt-4o';
+    this.model = process.env.OPENAI_MODEL || 'gpt-5.2';
     this.timeout = 30000;
 
     if (!this.apiKey) {
@@ -83,31 +79,9 @@ export class ChatService {
   }
 
   /**
-   * Add emojis to response if it doesn't have any
-   * Now more subtle - only 1 emoji at start, only when contextually appropriate
+   * Passthrough — emoji placement is fully guided by the persona prompt.
    */
   private addEmojisToResponse(text: string): string {
-    // First check for emoji spam (multiple emojis in a row) and remove it
-    const emojiSpamRegex = /([\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}])\s*([\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}])/gu;
-    if (emojiSpamRegex.test(text)) {
-      console.log('[CHAT SERVICE] Removing emoji spam from response');
-      text = text.replace(emojiSpamRegex, '$1').trim();
-    }
-
-    // Check if response already has emojis
-    const emojiRegex = /[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u;
-    if (emojiRegex.test(text)) {
-      // Already has emojis, return cleaned version
-      return text;
-    }
-
-    // ONLY add emoji for very specific celebratory contexts
-    const lowerText = text.toLowerCase();
-    if (lowerText.includes('congratulations') || lowerText.includes('excellent work') || lowerText.includes('amazing job')) {
-      return `🎉 ${text}`;
-    }
-
-    // For everything else, keep it professional - no emoji
     return text;
   }
 
@@ -243,13 +217,14 @@ export class ChatService {
 
     try {
       // === PERSONA PIPELINE STEP 1: Build Context Pack ===
-      console.log('[CTX] 🔄 Starting FitSmart persona pipeline...');
+      const t0 = Date.now();
+      console.log('[CHAT] 🔄 Starting persona pipeline...');
       const contextPack = await buildContextPack(userId);
-      console.log('[CTX] ✅ Context pack built');
+      console.log(`[CHAT] ⏱ Context pack: ${Date.now() - t0}ms`);
 
       // Fetch chat history for context continuity
       console.log('[CHAT SERVICE] Fetching recent chat history...');
-      const recentMessages = await this.getRecentChatHistory(userId, 30);
+      const recentMessages = await this.getRecentChatHistory(userId, 15);
       const latestSummary = await this.getLatestSummary(userId);
 
       if (latestSummary) {
@@ -284,11 +259,10 @@ export class ChatService {
                            lowerMessage.includes('yesterday') || lowerMessage.includes('week') ||
                            lowerMessage.includes('trend') || lowerMessage.includes('average');
 
-      const needsCalendarData = lowerMessage.includes('calendar') || lowerMessage.includes('training') ||
-                               lowerMessage.includes('schedule') || lowerMessage.includes('workout') ||
-                               lowerMessage.includes('session') || lowerMessage.includes('practice') ||
-                               lowerMessage.includes('game') || lowerMessage.includes('event') ||
-                               lowerMessage.includes('plan') || lowerMessage.includes('today');
+      const needsCalendarData = lowerMessage.includes('calendar') || lowerMessage.includes('schedule') ||
+                               lowerMessage.includes('workout') || lowerMessage.includes('session') ||
+                               lowerMessage.includes('practice') || lowerMessage.includes('game') ||
+                               lowerMessage.includes('event') || lowerMessage.includes('plan');
 
       // Check if user uploaded meal images
       const hasMealImages = (images && images.length > 0) || (image && image.length > 0);
@@ -360,66 +334,33 @@ export class ChatService {
         contextData += '\n';
       }
 
-      // Fetch WHOOP data if needed
+      // Use WHOOP data already fetched by contextPack — no duplicate API calls
       if (needsWhoopData) {
-        try {
-          // Fetch today's data
-          const whoopData: WhoopTodayResponse = await whoopApiService.getTodaysData(userId);
+        if (contextPack.recoveryScore !== null || contextPack.sleepScore !== null) {
           contextData += `\n\nWHOOP Data for today:
-- Recovery Score: ${whoopData.recovery_score ?? 'N/A'}%
-- Strain: ${whoopData.strain ?? whoopData.strain_score ?? 'N/A'}
-- Sleep Score: ${whoopData.sleep_score ?? 'N/A'}%
-- Sleep Hours: ${whoopData.sleep_hours ?? whoopData.sleepHours ?? 'N/A'}h
-- HRV: ${whoopData.hrv ?? 'N/A'}ms
-- Resting Heart Rate: ${whoopData.resting_heart_rate ?? 'N/A'}bpm
-- Respiratory Rate: ${whoopData.respiratory_rate ?? 'N/A'} breaths/min
-- Skin Temperature: ${whoopData.skin_temperature ?? 'N/A'}°C
-- SpO2: ${whoopData.spo2_percentage ?? 'N/A'}%
-- Average Heart Rate: ${whoopData.average_heart_rate ?? 'N/A'}bpm\n`;
+- Recovery Score: ${contextPack.recoveryScore ?? 'N/A'}%
+- Strain: ${contextPack.strainScore ?? 'N/A'}
+- Sleep Score: ${contextPack.sleepScore ?? 'N/A'}%
+- Sleep Hours: ${contextPack.sleepHours ?? 'N/A'}h
+- HRV: ${contextPack.hrv ?? 'N/A'}ms
+- Resting Heart Rate: ${contextPack.restingHeartRate ?? 'N/A'}bpm\n`;
 
-          // ALWAYS fetch yesterday's data (not conditional on message keywords)
-          console.log('[CHAT SERVICE] Fetching yesterday data for user:', userId);
-          try {
-            const yesterdayData = await whoopApiService.getYesterdaysData(userId);
-            console.log('[CHAT SERVICE] Yesterday data received:', yesterdayData);
-            if (yesterdayData) {
-              contextData += `\nYesterday's WHOOP Data:
-- Recovery Score: ${yesterdayData.recovery_score ?? 'N/A'}%
-- Strain: ${yesterdayData.strain ?? yesterdayData.strain_score ?? 'N/A'}
-- Sleep Score: ${yesterdayData.sleep_score ?? 'N/A'}%
-- HRV: ${yesterdayData.hrv ?? 'N/A'}ms\n`;
-            } else {
-              console.log('[CHAT SERVICE] Yesterday data is null/undefined');
-            }
-          } catch (err) {
-            console.error('[CHAT SERVICE] Failed to fetch yesterday data:', err);
+          if (contextPack.yesterdayRecovery !== null) {
+            contextData += `\nYesterday's WHOOP Data:
+- Recovery Score: ${contextPack.yesterdayRecovery ?? 'N/A'}%
+- Strain: ${contextPack.yesterdayStrain ?? 'N/A'}
+- Sleep Score: ${contextPack.yesterdaySleep ?? 'N/A'}%
+- HRV: ${contextPack.yesterdayHrv ?? 'N/A'}ms\n`;
           }
 
-          // ALWAYS fetch weekly data (not conditional on message keywords)
-          console.log('[CHAT SERVICE] Fetching weekly data for user:', userId);
-          try {
-            const weeklyData = await whoopApiService.getWeeklyAverages(userId);
-            console.log('[CHAT SERVICE] Weekly data received:', weeklyData);
-            if (weeklyData) {
-              // Handle both camelCase and snake_case field names
-              const avgRecovery = (weeklyData as any).avgRecovery ?? (weeklyData as any).avg_recovery;
-              const avgStrain = (weeklyData as any).avgStrain ?? (weeklyData as any).avg_strain;
-              const avgSleep = (weeklyData as any).avgSleep ?? (weeklyData as any).avg_sleep;
-              const avgHRV = (weeklyData as any).avgHRV ?? (weeklyData as any).avg_hrv;
-
-              contextData += `\n7-Day Average WHOOP Data:
-- Avg Recovery: ${avgRecovery ?? 'N/A'}%
-- Avg Strain: ${avgStrain ?? 'N/A'}
-- Avg Sleep Score: ${avgSleep ?? 'N/A'}%
-- Avg HRV: ${avgHRV ?? 'N/A'}ms\n`;
-            } else {
-              console.log('[CHAT SERVICE] Weekly data is null/undefined');
-            }
-          } catch (err) {
-            console.error('[CHAT SERVICE] Failed to fetch weekly data:', err);
+          if (contextPack.weeklyAvgRecovery !== null) {
+            contextData += `\n7-Day Average WHOOP Data:
+- Avg Recovery: ${contextPack.weeklyAvgRecovery ?? 'N/A'}%
+- Avg Strain: ${contextPack.weeklyAvgStrain ?? 'N/A'}
+- Avg Sleep Score: ${contextPack.weeklyAvgSleep ?? 'N/A'}%
+- Avg HRV: ${contextPack.weeklyAvgHrv ?? 'N/A'}ms\n`;
           }
-        } catch (error) {
-          console.error('[CHAT SERVICE] Failed to fetch WHOOP data:', error);
+        } else {
           contextData += '\n\nWHOOP data is currently unavailable.\n';
         }
       }
@@ -989,6 +930,8 @@ export class ChatService {
         console.log(`[CHAT SERVICE] System prompt preview: ${systemMessage.content.substring(0, 200)}...`);
       }
 
+      const tGpt = Date.now();
+      console.log(`[CHAT] ⏱ Sending to ${this.model} (max_tokens=${llmConfig.maxTokens})...`);
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -1020,7 +963,8 @@ export class ChatService {
       }
 
       const data = await response.json();
-      console.log(`[CHAT SERVICE] OpenAI raw response:`, JSON.stringify(data, null, 2));
+      const tokens = data.usage ? `prompt=${data.usage.prompt_tokens} completion=${data.usage.completion_tokens}` : '';
+      console.log(`[CHAT] ⏱ GPT inference: ${Date.now() - tGpt}ms | total: ${Date.now() - t0}ms | ${tokens}`);
 
       const reply = data.choices?.[0]?.message?.content;
 

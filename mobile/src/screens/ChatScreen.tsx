@@ -268,7 +268,7 @@ function AnimatedMessage({ message, isNewMessage = false }: { message: Message; 
               </View>
               {trailingQuestion && (
                 <View style={styles.questionCallout}>
-                  <Text style={styles.questionCalloutText}>{trailingQuestion}</Text>
+                  <Markdown style={questionMarkdownStyles} mergeStyle={true}>{trailingQuestion}</Markdown>
                 </View>
               )}
               {displayedText.length > 0 && (
@@ -1363,16 +1363,10 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm + 2,
-    borderWidth: 1,
-    borderColor: colors.accent + '50',
+    borderWidth: 1.5,
+    borderColor: colors.accent + '80',
     borderRadius: radii.md,
-    backgroundColor: colors.accent + '0A',
-  },
-  questionCalloutText: {
-    fontSize: 14,
-    color: colors.textPrimary,
-    lineHeight: 21,
-    fontWeight: '500',
+    backgroundColor: colors.accent + '0D',
   },
   userMessageText: {
     ...typography.body,
@@ -1897,5 +1891,22 @@ const markdownStyles = {
     backgroundColor: colors.surfaceMute,
     height: 1,
     marginVertical: spacing.md,
+  },
+};
+
+// Markdown styles for the question callout box — same as markdownStyles but slightly smaller
+const questionMarkdownStyles = {
+  ...markdownStyles,
+  body: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  paragraph: {
+    marginVertical: 0,
+  },
+  strong: {
+    fontWeight: '700' as const,
+    color: colors.textPrimary,
   },
 };

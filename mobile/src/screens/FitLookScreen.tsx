@@ -4,11 +4,53 @@ import {
   ActivityIndicator, Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { colors, spacing, typography, radii, shadows } from '../theme';
 import {
   getCheckinToday, saveCheckin, getFitLookToday, regenerateFitLook,
   type Feeling, type FitLookResponse,
 } from '../api/fitlook';
+
+/**
+ * Builds the prefilled FitCoach prompt from the FitLook payload.
+ * Only uses data already on screen — no new API calls.
+ */
+function buildExplainPlanPrompt(fitlook: FitLookResponse, feeling: Feeling | null): string {
+  const chips = fitlook.snapshot_chips ?? [];
+  const feelingLabel = feeling
+    ? feeling.charAt(0).toUpperCase() + feeling.slice(1)
+    : chips[2] ?? 'Unknown';
+
+  const readinessParts = [
+    chips[0] ? `Recovery ${chips[0]}` : null,
+    chips[1] ? `Sleep ${chips[1]}` : null,
+    `Feeling: ${feelingLabel}`,
+  ].filter(Boolean).join(', ');
+
+  const lines: string[] = [];
+  lines.push('Explain today\'s plan using my FitLook context.');
+  if (readinessParts) lines.push(`Today's readiness: ${readinessParts}.`);
+  if (fitlook.focus) lines.push(`Today's focus: ${fitlook.focus}.`);
+  if (fitlook.do && fitlook.do.length > 0) {
+    lines.push(`Actions — DO: ${fitlook.do.join('; ')}.`);
+  }
+  if (fitlook.avoid) {
+    lines.push(`Actions — AVOID: ${fitlook.avoid}.`);
+  }
+  if (fitlook.forecast_line) {
+    const clean = fitlook.forecast_line
+      .replace(/^to hit today['']s\s+(fitscore\s+)?forecast:\s*/i, '')
+      .trim();
+    lines.push(`Forecast target: ${clean}.`);
+  }
+  lines.push('');
+  lines.push('1) Briefly explain WHY this is the right plan today (tie directly to readiness + context flags).');
+  lines.push('2) Clarify how strict I should be on AVOID items and what safe alternatives look like (within rehab/goal limits if applicable).');
+  lines.push('3) Give 1–2 practical tips to make the DO actions easier to execute today.');
+  lines.push('Keep it concise and aligned with the FitLook plan (no generic advice unless explicitly flagged in today\'s context).');
+
+  return lines.join('\n');
+}
 
 
 const FEELINGS: { key: Feeling; label: string; icon: string }[] = [
@@ -26,6 +68,14 @@ export default function FitLookScreen() {
   const [fitlook, setFitlook] = useState<FitLookResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const navigation = useNavigation<any>();
+
+  const handleExplainPlan = () => {
+    if (!fitlook) return;
+    const prompt = buildExplainPlanPrompt(fitlook, feeling);
+    navigation.navigate('FitCoach', { prefilledMessage: prompt, autoSubmit: false });
+  };
 
 
   // Animations
@@ -307,6 +357,16 @@ export default function FitLookScreen() {
           </View>
         )}
 
+        {/* CTA — Explain Today's Plan */}
+        <TouchableOpacity
+          style={styles.explainButton}
+          activeOpacity={0.8}
+          onPress={handleExplainPlan}
+        >
+          <Ionicons name="chatbubbles-outline" size={16} color={colors.bgPrimary} />
+          <Text style={styles.explainButtonText}>Explain Today's Plan</Text>
+        </TouchableOpacity>
+
         {/* Cached hint */}
         {fitlook.cached && (
           <Text style={styles.cachedHint}>Generated earlier today</Text>
@@ -582,6 +642,26 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.bgPrimary,
     fontWeight: '600',
+  },
+
+  // CTA button
+  explainButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    ...shadows.card,
+  },
+  explainButtonText: {
+    ...typography.body,
+    color: colors.bgPrimary,
+    fontWeight: '700',
+    fontSize: 15,
+    letterSpacing: 0.2,
   },
 
   // Cached hint

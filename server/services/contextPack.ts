@@ -19,6 +19,16 @@ import { whoopApiService } from '../whoopApiService';
 import { storage } from '../storage';
 import type { WhoopTodayResponse } from '@shared/schema';
 
+// In-memory WHOOP cache — 15 min TTL, keyed by userId
+const WHOOP_CACHE_TTL = 15 * 60 * 1000;
+interface WhoopCacheEntry {
+  today: WhoopTodayResponse | null;
+  yesterday: any;
+  weekly: any;
+  expiresAt: number;
+}
+const whoopCache = new Map<string, WhoopCacheEntry>();
+
 export interface ContextPack {
   // Core metrics (today)
   date: string;
@@ -85,30 +95,53 @@ export async function buildContextPack(userId: string): Promise<ContextPack> {
       throw new Error(`User ${userId} not found`);
     }
 
-    // 2. Fetch latest WHOOP data (today, yesterday, weekly)
+    // 2. Fetch latest WHOOP data (today, yesterday, weekly) — with 15-min in-memory cache
     let whoopMetrics: WhoopTodayResponse | null = null;
     let yesterdayMetrics: any = null;
     let weeklyMetrics: any = null;
 
-    try {
-      whoopMetrics = await whoopApiService.getTodaysData(userId);
-      console.log(`[CTX] Fetched today's WHOOP data: recovery=${whoopMetrics.recovery_score}, sleep=${whoopMetrics.sleep_score}, strain=${whoopMetrics.strain_score}`);
-    } catch (error) {
-      console.warn('[CTX] Failed to fetch today WHOOP data:', error);
-    }
+    const cached = whoopCache.get(userId);
+    if (cached && cached.expiresAt > Date.now()) {
+      whoopMetrics = cached.today;
+      yesterdayMetrics = cached.yesterday;
+      weeklyMetrics = cached.weekly;
+      console.log(`[CTX] WHOOP cache hit for ${userId} (expires in ${Math.round((cached.expiresAt - Date.now()) / 1000)}s)`);
+    } else {
+      const [whoopResult, yesterdayResult, weeklyResult] = await Promise.allSettled([
+        whoopApiService.getTodaysData(userId),
+        whoopApiService.getYesterdaysData(userId),
+        whoopApiService.getWeeklyAverages(userId),
+      ]);
 
-    try {
-      yesterdayMetrics = await whoopApiService.getYesterdaysData(userId);
-      console.log(`[CTX] Fetched yesterday's WHOOP data: recovery=${yesterdayMetrics?.recovery_score}, strain=${yesterdayMetrics?.strain}`);
-    } catch (error) {
-      console.warn('[CTX] Failed to fetch yesterday WHOOP data:', error);
-    }
+      if (whoopResult.status === 'fulfilled') {
+        whoopMetrics = whoopResult.value;
+        console.log(`[CTX] Fetched today's WHOOP data: recovery=${whoopMetrics.recovery_score}, sleep=${whoopMetrics.sleep_score}, strain=${whoopMetrics.strain_score}`);
+      } else {
+        console.warn('[CTX] Failed to fetch today WHOOP data:', whoopResult.reason);
+      }
 
-    try {
-      weeklyMetrics = await whoopApiService.getWeeklyAverages(userId);
-      console.log(`[CTX] Fetched weekly WHOOP averages: recovery=${weeklyMetrics?.avg_recovery}, strain=${weeklyMetrics?.avg_strain}`);
-    } catch (error) {
-      console.warn('[CTX] Failed to fetch weekly WHOOP data:', error);
+      if (yesterdayResult.status === 'fulfilled') {
+        yesterdayMetrics = yesterdayResult.value;
+        console.log(`[CTX] Fetched yesterday's WHOOP data: recovery=${yesterdayMetrics?.recovery_score}, strain=${yesterdayMetrics?.strain}`);
+      } else {
+        console.warn('[CTX] Failed to fetch yesterday WHOOP data:', yesterdayResult.reason);
+      }
+
+      if (weeklyResult.status === 'fulfilled') {
+        weeklyMetrics = weeklyResult.value;
+        console.log(`[CTX] Fetched weekly WHOOP averages: recovery=${weeklyMetrics?.avg_recovery}, strain=${weeklyMetrics?.avg_strain}`);
+      } else {
+        console.warn('[CTX] Failed to fetch weekly WHOOP data:', weeklyResult.reason);
+      }
+
+      // Store in cache (even if some calls failed — avoids hammering the API)
+      whoopCache.set(userId, {
+        today: whoopMetrics,
+        yesterday: yesterdayMetrics,
+        weekly: weeklyMetrics,
+        expiresAt: Date.now() + WHOOP_CACHE_TTL,
+      });
+      console.log(`[CTX] WHOOP data cached for ${userId} (TTL 15 min)`);
     }
 
     // 3. Fetch recent chat summary
