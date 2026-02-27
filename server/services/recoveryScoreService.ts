@@ -38,14 +38,15 @@ export class RecoveryScoreService {
     const sleepQuality = this.calculateSleepQuality(input.sleepHours, input.sleepScorePercent);
     const hrvScaled = this.calculateHrvScaled(input.hrv, input.hrvBaseline);
 
-    // Determine recovery zone based on WHOOP recovery %
-    const recoveryZone = this.getRecoveryZone(input.recoveryPercent);
-
     // Apply weighted formula (0.40 / 0.40 / 0.20)
     const totalScore =
       (recoveryScaled * 0.40) +
       (sleepQuality * 0.40) +
       (hrvScaled * 0.20);
+
+    // Zone follows composite score so all three pillars are reflected.
+    // A high WHOOP % with poor sleep correctly shows yellow/red.
+    const recoveryZone = this.getRecoveryZone(totalScore);
 
     // Generate analysis
     const analysis = this.generateAnalysis(
@@ -68,14 +69,14 @@ export class RecoveryScoreService {
   }
 
   /**
-   * Get recovery zone based on WHOOP thresholds
+   * Get recovery zone based on the composite score (not raw WHOOP %).
+   * Composite score reflects all three pillars (recovery, sleep, HRV) equally,
+   * so a high WHOOP % with terrible sleep correctly shows yellow instead of green.
    */
-  private getRecoveryZone(recoveryPercent?: number): 'green' | 'yellow' | 'red' {
-    if (!recoveryPercent && recoveryPercent !== 0) return 'yellow';
-
-    if (recoveryPercent >= 67) return 'green';  // 67-100%
-    if (recoveryPercent >= 34) return 'yellow'; // 34-66%
-    return 'red';                                // 0-33%
+  private getRecoveryZone(compositeScore: number): 'green' | 'yellow' | 'red' {
+    if (compositeScore >= 7) return 'green';
+    if (compositeScore >= 5) return 'yellow';
+    return 'red';
   }
 
   /**
@@ -123,6 +124,12 @@ export class RecoveryScoreService {
       sleepScorePoints = Math.round((sleepScorePercent / 100) * 4);
     } else {
       sleepScorePoints = 2; // Default to neutral if missing
+    }
+
+    // Guardrail: poor sleep quality (< 40%) caps the hours bonus at 3.
+    // Prevents 9h of fragmented/poor-quality sleep from scoring the same as 9h of deep sleep.
+    if (sleepScorePercent !== undefined && sleepScorePercent !== null && sleepScorePercent < 40) {
+      hoursPoints = Math.min(hoursPoints, 3);
     }
 
     // Total sleep quality (0-10)

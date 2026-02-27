@@ -160,9 +160,9 @@ FACTORS — assess each with status + confidence + evidence:
    THRESHOLD: ≥15–20g for main meals, ≥8g for snacks
 
 2. fiberPlantVolume
-   - "good": vegetables, legumes, fruit, or intact whole grains clearly visible and substantial
+   - "good": vegetables, legumes, fruit, or intact whole grains clearly visible AND constitute a meaningful portion of the meal (roughly ≥25% of visible plate area). A small garnish — single cherry tomato, parsley sprig, herb dust, thin cucumber slice — does NOT qualify as "good".
    - "warning": meal is primarily refined starchy / beige with no meaningful plant matter
-   - "unknown": some plant matter visible but quantity/quality is unclear
+   - "unknown": some plant matter visible but quantity is unclear OR presence is only garnish-level (small, decorative, incidental)
 
 3. nutrientDiversity
    - "good": ≥3 distinct food groups clearly identifiable
@@ -233,6 +233,8 @@ export interface MealQualityFlags {
   goalModifierApplied: number;
   goalPhase: string;
   isPureJunk: boolean;
+  /** High-confidence ultra-processed combo (burger+fries, pizza+soda, etc.) — used for tone & soft display cap ≤5 */
+  isUltraProcessedCombo: boolean;
 }
 
 export interface MealAnalysisResult {
@@ -545,6 +547,7 @@ interface MealScoreResult {
   score_display: number;
   goalModifierApplied: number;
   isPureJunk: boolean;
+  isUltraProcessedCombo: boolean;
   effectiveStatuses: Record<string, FactorStatus>;
 }
 
@@ -652,12 +655,20 @@ function computeMealScore(
     factors.processingLoad.status    === 'warning' && (factors.processingLoad.confidence    ?? 0) >= 0.65
   );
 
-  // ── Display: round raw; floor at 5 unless pure junk ──────────────────────
-  // The processing penalty is already captured in score_raw (−0.50 delta), so
-  // no secondary cap is applied. Capping display independently was a double-penalty.
+  // ── Ultra-processed combo: high-confidence processing warning + poor diversity + no meaningful plants ─
+  // Catches classic combos (burger+fries, pizza+soda, nachos+beer) without touching core score math.
+  const isUltraProcessedCombo = !isPureJunk && (
+    factors.processingLoad.status    === 'warning' && (factors.processingLoad.confidence    ?? 0) >= 0.70 &&
+    factors.nutrientDiversity.status !== 'good' &&
+    factors.fiberPlantVolume.status  !== 'good'
+  );
+
+  // ── Display: round raw; floor at 5 unless pure junk; soft cap at 5 for ultra-processed combos ──
   const score_display = isPureJunk
     ? Math.round(score_raw)
-    : Math.max(5, Math.round(score_raw));
+    : isUltraProcessedCombo
+      ? Math.min(5, Math.max(1, Math.round(score_raw)))
+      : Math.max(5, Math.round(score_raw));
 
   // ── Debug logging ──────────────────────────────────────────────────────────
   if (MEAL_SCORE_DEBUG) {
@@ -666,7 +677,7 @@ function computeMealScore(
       `[MEAL SCORE] factors: P=${conf(factors.proteinAdequacy)} F=${conf(factors.fiberPlantVolume)} D=${conf(factors.nutrientDiversity)} Pr=${conf(factors.processingLoad)} Po=${conf(factors.portionBalance)}`,
       `[MEAL SCORE] deltas: pos=${factorPositive.toFixed(2)} neg_raw=${factorNegativeRaw.toFixed(2)} neg_capped=${factorNegativeCapped.toFixed(2)}`,
       `[MEAL SCORE] bonuses: logged=+${loggedBonus}(warns=${effectiveWarnings},goods=${effectiveGoodCount}) satiety=+${satietyBonus} | goal_mod=${goalModifierApplied.toFixed(2)} (${goalPhase || 'none'})`,
-      `[MEAL SCORE] result: raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk}`,
+      `[MEAL SCORE] result: raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk} isUltraProcessedCombo=${isUltraProcessedCombo}`,
     ].join('\n'));
   }
 
@@ -675,6 +686,7 @@ function computeMealScore(
     score_display,
     goalModifierApplied,
     isPureJunk,
+    isUltraProcessedCombo,
     effectiveStatuses: eff,
   };
 }
@@ -784,7 +796,7 @@ Return valid JSON only — no score.`;
       };
 
       // Deterministic score computation — AI classifies, server scores
-      const { score_raw, score_display, goalModifierApplied, isPureJunk, effectiveStatuses } = computeMealScore(factors, goalPhase);
+      const { score_raw, score_display, goalModifierApplied, isPureJunk, isUltraProcessedCombo, effectiveStatuses } = computeMealScore(factors, goalPhase);
 
       // ── Build text from AI's description lines ─────────────────────────────
       // AI was instructed to write strength/gap/upgrade consistent with its factor ratings.
@@ -808,8 +820,8 @@ Return valid JSON only — no score.`;
         effectiveStatus: resolveStatus(raw),
         confidence:      raw.confidence,
         evidence:        raw.evidence,
-        short_reason:    raw.short_reason,
-        quick_fix:       raw.quick_fix,
+        short_reason:    raw.short_reason ?? '',
+        quick_fix:       raw.quick_fix ?? '',
       });
 
       const meal_quality_flags: MealQualityFlags = {
@@ -821,6 +833,7 @@ Return valid JSON only — no score.`;
         goalModifierApplied,
         goalPhase: goalPhase || 'Maintenance',
         isPureJunk,
+        isUltraProcessedCombo,
       };
 
       console.log(`[OpenAI Service] Analysis complete: score_raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk} phase=${goalPhase || 'none'}`);

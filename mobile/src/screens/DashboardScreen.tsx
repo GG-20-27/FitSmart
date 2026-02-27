@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Dimensions,
   SafeAreaView,
   StatusBar,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -48,7 +50,7 @@ const FORECAST_COPY: Record<'high' | 'mid' | 'low', Array<{ line1: string; line2
 };
 
 function getDynamicForecastLines(score: number): { line1: string; line2: string } {
-  const zone = score >= 7 ? 'high' : score >= 4 ? 'mid' : 'low';
+  const zone = score >= 7 ? 'high' : score >= 5 ? 'mid' : 'low';
   const variants = FORECAST_COPY[zone];
   const dayOfYear = Math.floor(
     (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
@@ -272,6 +274,7 @@ export default function DashboardScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [daysOfData, setDaysOfData] = useState<number | null>(null);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
   // Trigger backfill once per day — fills last 34 days of missing WHOOP history silently in background
   const triggerBackfill = useCallback(async () => {
@@ -294,20 +297,28 @@ export default function DashboardScreen() {
   }, []);
 
   const CACHE_KEY = 'dashboard_cache_v3';
+  const todayDateStr = () => new Date().toISOString().split('T')[0];
 
   const loadData = useCallback(async (isRefresh = false) => {
     try {
-      // ── 1. Show cached data instantly (stale-while-revalidate) ──────────────
+      // ── 1. Show cached data instantly — but only if it's from today ──────────
       if (!isRefresh) {
         const raw = await AsyncStorage.getItem(CACHE_KEY);
         if (raw) {
           try {
             const cached = JSON.parse(raw);
-            setForecast(cached.forecast ?? null);
-            setTodayMetrics(cached.today ?? null);
-            setYesterdayMetrics(cached.yesterday ?? null);
-            setWeeklyMetrics(cached.weekly ?? null);
-            setLastWeekMetrics(cached.lastWeek ?? null);
+            // Invalidate cache if it's from a different day
+            if (cached.fetchDate === todayDateStr()) {
+              setForecast(cached.forecast ?? null);
+              setTodayMetrics(cached.today ?? null);
+              setYesterdayMetrics(cached.yesterday ?? null);
+              setWeeklyMetrics(cached.weekly ?? null);
+              setLastWeekMetrics(cached.lastWeek ?? null);
+            } else {
+              // Stale cache from previous day — clear it and show spinner
+              await AsyncStorage.removeItem(CACHE_KEY);
+              setLoading(true);
+            }
           } catch { /* ignore corrupt cache */ }
         } else {
           setLoading(true); // only show spinner on very first ever load
@@ -329,8 +340,9 @@ export default function DashboardScreen() {
       setWeeklyMetrics(weeklyData);
       setLastWeekMetrics(lastWeekData);
 
-      // ── 3. Persist fresh data for next launch ───────────────────────────────
+      // ── 3. Persist fresh data for next launch (with today's date) ───────────
       AsyncStorage.setItem(CACHE_KEY, JSON.stringify({
+        fetchDate: todayDateStr(),
         forecast: forecastData,
         today: todayData,
         yesterday: yesterdayData,
@@ -349,6 +361,17 @@ export default function DashboardScreen() {
     loadData();
     triggerBackfill();
   }, [loadData, triggerBackfill]);
+
+  // Refresh WHOOP data whenever app returns to foreground (catches overnight staleness)
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
+        loadData(true); // force fresh — bypass cache
+      }
+      appStateRef.current = nextState;
+    });
+    return () => subscription.remove();
+  }, [loadData]);
 
   useFocusEffect(
     useCallback(() => {

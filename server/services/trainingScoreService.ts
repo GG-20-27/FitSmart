@@ -127,6 +127,16 @@ export class TrainingScoreService {
       totalScore = Math.min(totalScore, 7.0);
     }
 
+    // Universal severe pain cap — regardless of strain/recovery numbers, a session
+    // where the user reports acute pain cannot score above 5.5.
+    if (input.comment) {
+      const commentLower = input.comment.toLowerCase();
+      const hasSeverePain = TrainingScoreService.SEVERE_PAIN_KEYWORDS.some(k => commentLower.includes(k));
+      if (hasSeverePain) {
+        totalScore = Math.min(totalScore, 5.0);
+      }
+    }
+
     // Determine if early-day strain guard was applied
     // (mirrors the guard logic in calculateStrainAppropriateness)
     const band = input.strainScore !== undefined
@@ -377,7 +387,39 @@ export class TrainingScoreService {
       return 1.2; // 60% of 2 points
     }
 
-    const type = trainingType.toLowerCase();
+    // Normalise training type using synonym aliases before matching.
+    // This prevents misses like "weight training" failing to match "weights" (plural).
+    const TYPE_ALIASES: Record<string, string> = {
+      'weight training':    'weights',
+      'weightlifting':      'lifting',
+      'weight lifting':     'lifting',
+      'gym session':        'strength',
+      'gym':                'strength',
+      'barbell':            'lifting',
+      'dumbbell':           'weights',
+      'resistance training':'resistance',
+      'strength training':  'strength',
+      'cross training':     'cardio',
+      'crossfit':           'hiit',
+      'boxing':             'hiit',
+      'kickboxing':         'hiit',
+      'rowing':             'cardio',
+      'swim':               'cardio',
+      'swimming':           'cardio',
+      'walk':               'cardio',
+      'walking':            'cardio',
+      'hike':               'cardio',
+      'hiking':             'cardio',
+      'pilates':            'flexibility',
+      'stretching':         'flexibility',
+      'foam rolling':       'flexibility',
+      'physical therapy':   'mobility',
+    };
+    const rawType = trainingType.toLowerCase();
+    const type = Object.entries(TYPE_ALIASES).reduce(
+      (acc, [alias, canonical]) => acc.replace(alias, canonical),
+      rawType
+    );
     const tGoal = trainingGoal?.toLowerCase() || '';
     const fGoal = fitnessGoal?.toLowerCase() || '';
 
@@ -417,6 +459,17 @@ export class TrainingScoreService {
   }
 
   /**
+   * Severe pain keywords — any of these in a comment indicate a safety-relevant event.
+   * Used by both calculateInjurySafety and calculateTrainingScore.
+   */
+  private static readonly SEVERE_PAIN_KEYWORDS = [
+    'hurt a lot', 'severe pain', 'sharp pain', "couldn't walk", "can't walk",
+    'couldnt walk', 'excruciating', 'extreme pain', 'agony', 'unbearable pain',
+    'stabbing', 'stabbing pain', 'throbbing', 'flare-up', 'flare up',
+    'limping', 'swelling', 'tweaked', 'can\'t move', 'cannot move',
+  ];
+
+  /**
    * Calculate injury safety modifier (10% of total score = 0-1 points)
    * Penalizes high intensity training when recovery is poor
    */
@@ -427,27 +480,36 @@ export class TrainingScoreService {
     rehabActive?: boolean,
     type?: string
   ): number {
-    // ── Hard override: rehab context + high-impact session type + severe pain ──
-    // This combination is clinically unsafe — floor injurySafety to 0.0 immediately.
-    if (rehabActive && type && comment) {
-      const typeLower    = type.toLowerCase();
+    const HIGH_IMPACT = ['sprint', 'plyometric', 'hiit', 'max effort', 'jump', 'explosive', 'box jump'];
+
+    if (comment) {
       const commentLower = comment.toLowerCase();
-      const HIGH_IMPACT  = ['sprint', 'plyometric', 'hiit', 'max effort', 'jump', 'explosive', 'box jump'];
-      const SEVERE_PAIN  = ['hurt a lot', 'severe pain', 'sharp pain', "couldn't walk", "can't walk",
-                            'couldnt walk', 'excruciating', 'extreme pain', 'agony', 'unbearable pain'];
-      const isHighImpact  = HIGH_IMPACT.some(t => typeLower.includes(t));
-      const hasSeverePain = SEVERE_PAIN.some(k => commentLower.includes(k));
-      if (isHighImpact && hasSeverePain) {
-        console.log('[TRAINING] injuryOverrideApplied: rehab + high-impact + severe pain → injurySafety = 0.0');
+      const hasSeverePain = TrainingScoreService.SEVERE_PAIN_KEYWORDS.some(k => commentLower.includes(k));
+
+      // ── Universal severe pain: floor injurySafety regardless of rehab context ──
+      // If a user reports severe/acute pain, the session is a safety concern no matter what.
+      if (hasSeverePain) {
+        // Additionally escalate to full 0.0 when combined with rehab context + high-impact type
+        if (rehabActive && type) {
+          const typeLower   = type.toLowerCase();
+          const isHighImpact = HIGH_IMPACT.some(t => typeLower.includes(t));
+          if (isHighImpact) {
+            console.log('[TRAINING] injuryOverrideApplied: rehab + high-impact + severe pain → injurySafety = 0.0');
+            return 0.0;
+          }
+        }
+        // Severe pain alone (no rehab / no high-impact): still floor to 0.0
+        console.log('[TRAINING] severePainDetected: universal override → injurySafety = 0.0');
         return 0.0;
       }
     }
 
     let score = 1.0; // Start with full points
 
-    // Check for red flags in comment
+    // Check for moderate red flags in comment
     if (comment) {
-      const redFlags = ['pain', 'hurt', 'injury', 'sore', 'ache', 'strain', 'pulled'];
+      const redFlags = ['pain', 'hurt', 'injury', 'sore', 'ache', 'strain', 'pulled',
+                        'strained', 'aching', 'tender', 'bruised', 'swollen'];
       const commentLower = comment.toLowerCase();
 
       if (redFlags.some(flag => commentLower.includes(flag))) {
@@ -477,8 +539,12 @@ export class TrainingScoreService {
 
     // Positive indicators
     const positive = ['great', 'good', 'excellent', 'strong', 'easy', 'felt good', 'energized', 'amazing'];
-    // Negative indicators
-    const negative = ['hard', 'difficult', 'struggled', 'tired', 'exhausted', 'painful', 'bad'];
+    // Negative indicators — includes pain/discomfort language that reduces session quality
+    const negative = [
+      'hard', 'difficult', 'struggled', 'tired', 'exhausted', 'painful', 'bad',
+      'pain', 'sore', 'agony', 'sharp', 'stabbing', 'throbbing', 'aching',
+      'flare', 'limping', 'swelling', 'tweaked', 'strained',
+    ];
 
     let sentiment = 0.5; // Neutral
 

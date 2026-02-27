@@ -68,6 +68,7 @@ const categoryEmojis: Record<GoalCategory, string> = {
 
 export default function GoalsScreen() {
   const navigation = useNavigation();
+  const scrollViewRef = useRef<ScrollView>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -312,9 +313,9 @@ export default function GoalsScreen() {
         </View>
       </View>
 
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView ref={scrollViewRef} style={styles.container} contentContainerStyle={styles.content}>
         {/* My Context — 3-tier panel */}
-        <ContextPanel context={context} onUpdate={updateContextField} onBatchUpdate={updateContextBatch} />
+        <ContextPanel context={context} onUpdate={updateContextField} onBatchUpdate={updateContextBatch} scrollViewRef={scrollViewRef} />
 
         {/* Action Buttons */}
         <View style={styles.actionRow}>
@@ -715,13 +716,13 @@ function AddGoalModal({
                 />
               ))}
             </View>
-          </ScrollView>
 
-          <TouchableOpacity style={styles.createButton} onPress={handleAdd}>
-            <View style={styles.createButtonSolid}>
-              <Text style={styles.createButtonText}>Create Goal</Text>
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity style={[styles.createButton, { marginBottom: spacing.xl }]} onPress={handleAdd}>
+              <View style={styles.createButtonSolid}>
+                <Text style={styles.createButtonText}>Create Goal</Text>
+              </View>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       </View>
       </KeyboardAvoidingView>
@@ -882,13 +883,13 @@ function EditGoalModal({
                 />
               ))}
             </View>
-          </ScrollView>
 
-          <TouchableOpacity style={styles.createButton} onPress={handleSave}>
-            <View style={styles.createButtonSolid}>
-              <Text style={styles.createButtonText}>Save Changes</Text>
-            </View>
-          </TouchableOpacity>
+            <TouchableOpacity style={[styles.createButton, { marginBottom: spacing.xl }]} onPress={handleSave}>
+              <View style={styles.createButtonSolid}>
+                <Text style={styles.createButtonText}>Save Changes</Text>
+              </View>
+            </TouchableOpacity>
+          </ScrollView>
         </View>
       </View>
       </KeyboardAvoidingView>
@@ -904,18 +905,42 @@ function ContextPanel({
   context,
   onUpdate,
   onBatchUpdate,
+  scrollViewRef,
 }: {
   context: UserContext;
   onUpdate: (field: keyof UserContext, value: string | null) => void;
   onBatchUpdate: (updates: Partial<UserContext>) => void;
+  scrollViewRef?: React.RefObject<ScrollView>;
 }) {
   const [expandedTier, setExpandedTier] = useState<1 | 2 | 3 | null>(null);
-  const toggle = (t: 1 | 2 | 3) => setExpandedTier(prev => (prev === t ? null : t));
+
+  // Track Y positions via onLayout — reliable content-relative coordinates
+  // that update automatically whenever tiers collapse/expand and layout re-settles.
+  const wrapperYRef  = useRef(0);
+  const tierYRef     = useRef<Record<1 | 2 | 3, number>>({ 1: 0, 2: 0, 3: 0 });
+
+  const toggle = (t: 1 | 2 | 3) => {
+    const isOpening = expandedTier !== t;
+    setExpandedTier(prev => (prev === t ? null : t));
+
+    if (isOpening && scrollViewRef?.current) {
+      // Wait for previous tier to collapse and layout to fully re-settle before scrolling.
+      // onLayout fires synchronously after layout calculation, so by 160ms the
+      // tierYRef values reflect the post-collapse positions.
+      setTimeout(() => {
+        const y = wrapperYRef.current + tierYRef.current[t];
+        scrollViewRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
+      }, 160);
+    }
+  };
 
   const hasInjury = !!context.injuryType && context.injuryType !== 'None';
 
   return (
-    <View style={ctxStyles.wrapper}>
+    <View
+      style={ctxStyles.wrapper}
+      onLayout={e => { wrapperYRef.current = e.nativeEvent.layout.y; }}
+    >
       <Text style={ctxStyles.sectionLabel}>MY CONTEXT</Text>
 
       {/* Tier 1 — Identity */}
@@ -925,6 +950,7 @@ function ContextPanel({
         summary={context.tier1Goal}
         expanded={expandedTier === 1}
         onToggle={() => toggle(1)}
+        onLayout={e => { tierYRef.current[1] = e.nativeEvent.layout.y; }}
       >
         {/* Primary Goal — card chips with descriptions */}
         <View style={ctxStyles.optGroup}>
@@ -966,6 +992,7 @@ function ContextPanel({
         summary={context.tier2Phase}
         expanded={expandedTier === 2}
         onToggle={() => toggle(2)}
+        onLayout={e => { tierYRef.current[2] = e.nativeEvent.layout.y; }}
       >
         <OptionGroup
           label="TRAINING PHASE"
@@ -1083,6 +1110,7 @@ function ContextPanel({
         summary={context.tier3WeekLoad}
         expanded={expandedTier === 3}
         onToggle={() => toggle(3)}
+        onLayout={e => { tierYRef.current[3] = e.nativeEvent.layout.y; }}
       >
         <OptionGroup
           label="WEEK LOAD"
@@ -1108,17 +1136,18 @@ function ContextPanel({
 }
 
 function ContextTier({
-  label, badge, summary, expanded, onToggle, children,
+  label, badge, summary, expanded, onToggle, onLayout, children,
 }: {
   label: string;
   badge: string;
   summary: string;
   expanded: boolean;
   onToggle: () => void;
+  onLayout?: (e: any) => void;
   children: React.ReactNode;
 }) {
   return (
-    <View style={ctxStyles.tier}>
+    <View style={ctxStyles.tier} onLayout={onLayout}>
       <TouchableOpacity
         style={ctxStyles.tierHeader}
         onPress={onToggle}

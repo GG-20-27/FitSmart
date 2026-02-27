@@ -29,7 +29,7 @@ type ChatScreenParams = {
 };
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radii, typography, shadows } from '../theme';
@@ -65,32 +65,42 @@ interface ChatSession {
 }
 
 // Subtle pulse indicator aligned left like assistant messages
-function TypingIndicator() {
-  const [pulseAnim] = useState(new Animated.Value(0.6));
+function TypingIndicator({ label }: { label?: string }) {
+  const [dot1] = useState(new Animated.Value(0));
+  const [dot2] = useState(new Animated.Value(0));
+  const [dot3] = useState(new Animated.Value(0));
 
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 0.6,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
+    const bounce = (dot: Animated.Value, delay: number) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(dot, { toValue: 1, duration: 240, useNativeDriver: true }),
+          Animated.timing(dot, { toValue: 0, duration: 240, useNativeDriver: true }),
+          Animated.delay(Math.max(0, 720 - delay)),
+        ])
+      );
+
+    const a1 = bounce(dot1, 0);
+    const a2 = bounce(dot2, 200);
+    const a3 = bounce(dot3, 400);
+    a1.start(); a2.start(); a3.start();
+    return () => { a1.stop(); a2.stop(); a3.stop(); };
   }, []);
+
+  const dotStyle = (dot: Animated.Value) => ({
+    transform: [{ translateY: dot.interpolate({ inputRange: [0, 1], outputRange: [0, -5] }) }],
+    opacity: dot.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
+  });
 
   return (
     <View style={styles.typingContainer}>
-      <Animated.View style={[styles.typingBubble, { opacity: pulseAnim }]}>
-        <Text style={styles.loadingText}>Thinking</Text>
-        <Text style={styles.loadingDots}>...</Text>
-      </Animated.View>
+      <View style={styles.typingBubble}>
+        {label && <Text style={styles.loadingLabel}>{label}</Text>}
+        <Animated.View style={[styles.dot, dotStyle(dot1)]} />
+        <Animated.View style={[styles.dot, dotStyle(dot2)]} />
+        <Animated.View style={[styles.dot, dotStyle(dot3)]} />
+      </View>
     </View>
   );
 }
@@ -293,7 +303,7 @@ async function transcribeAudio(audioUri: string, jwt: string): Promise<string> {
   try {
     // Read audio file as base64
     const audioBase64 = await FileSystem.readAsStringAsync(audioUri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: 'base64' as any,
     });
 
     console.log(`[TRANSCRIBE] Read audio file: ${audioBase64.length} chars of base64 data`);
@@ -366,6 +376,7 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [transcribedText, setTranscribedText] = useState('');
@@ -743,7 +754,7 @@ export default function ChatScreen() {
         return;
       }
 
-      setIsSending(true);
+      setIsTranscribing(true);
 
       try {
         const jwt = await getAuthToken();
@@ -767,7 +778,7 @@ export default function ChatScreen() {
         // Simple fallback toast
         Alert.alert('', "Didn't catch that - try again or use text input.");
       } finally {
-        setIsSending(false);
+        setIsTranscribing(false);
       }
     } catch (error) {
       console.error('Failed to stop recording:', error);
@@ -1252,16 +1263,22 @@ export default function ChatScreen() {
               <Ionicons name="image-outline" size={24} color={colors.accent} />
             </TouchableOpacity>
 
-            <TextInput
-              style={styles.textInput}
-              value={inputText}
-              onChangeText={setInputText}
-              placeholder="Message FitCoach..."
-              placeholderTextColor={colors.textMuted}
-              multiline
-              maxLength={2000}
-              editable={!isSending}
-            />
+            {isTranscribing ? (
+              <View style={styles.transcribingBox}>
+                <TypingIndicator />
+              </View>
+            ) : (
+              <TextInput
+                style={styles.textInput}
+                value={inputText}
+                onChangeText={setInputText}
+                placeholder="Message FitCoach..."
+                placeholderTextColor={colors.textMuted}
+                multiline
+                maxLength={2000}
+                editable={!isSending}
+              />
+            )}
 
             <TouchableOpacity
               style={styles.actionButton}
@@ -1396,24 +1413,26 @@ const styles = StyleSheet.create({
   // Typing indicator
   typingContainer: {
     paddingVertical: spacing.sm,
-    alignItems: 'flex-start', // Align left like assistant messages
+    alignItems: 'flex-start',
   },
   typingBubble: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
   },
-  loadingText: {
-    ...typography.body,
+  loadingLabel: {
+    ...typography.small,
     color: colors.textMuted,
-    fontWeight: '600',
+    marginRight: 4,
+    letterSpacing: 0.3,
   },
-  loadingDots: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.textMuted,
-    marginLeft: 2,
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: colors.accent,
   },
   // Image preview
   imagesPreviewContainer: {
@@ -1448,6 +1467,18 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  transcribingBox: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+  },
+  transcribingLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginRight: 2,
+    letterSpacing: 0.3,
   },
   // Input container
   inputContainer: {

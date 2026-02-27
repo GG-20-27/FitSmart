@@ -520,11 +520,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // D) Forecast
+  // D) Forecast — left accent stripe + subtle tinted background
   forecastCard: {
     flexDirection: 'row',
     alignItems: 'stretch',
-    backgroundColor: colors.bgSecondary,
+    backgroundColor: colors.accent + '0D',
     borderRadius: radii.lg,
     overflow: 'hidden',
     ...shadows.card,

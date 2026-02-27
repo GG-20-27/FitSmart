@@ -49,7 +49,7 @@ interface FitScoreTriangleProps {
 
 const getZoneColor = (score: number): string => {
   if (score >= 7) return colors.success;
-  if (score >= 4) return colors.warning;
+  if (score >= 5) return colors.warning;
   return colors.danger;
 };
 

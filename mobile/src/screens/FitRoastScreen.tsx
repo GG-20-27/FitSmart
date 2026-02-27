@@ -12,7 +12,7 @@ import FitRoastShareModal from '../components/FitRoastShareModal';
 
 const { width: W, height: H } = Dimensions.get('window');
 
-type ScreenState = 'loading' | 'off' | 'empty' | 'generating' | 'intro' | 'roast' | 'error';
+type ScreenState = 'loading' | 'off' | 'locked' | 'empty' | 'generating' | 'intro' | 'roast' | 'error';
 
 export default function FitRoastScreen() {
   const [screenState, setScreenState] = useState<ScreenState>('loading');
@@ -21,6 +21,8 @@ export default function FitRoastScreen() {
   const [error, setError] = useState<string | null>(null);
   const [shareVisible, setShareVisible] = useState(false);
   const [roastIntensity, setRoastIntensity] = useState<'Light' | 'Spicy' | 'Savage'>('Spicy');
+  const [activeDays, setActiveDays] = useState(0);
+  const [isSunday, setIsSunday] = useState(false);
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -53,8 +55,15 @@ export default function FitRoastScreen() {
       setScreenState('intro');
       animateIn();
     } catch (e: any) {
-      if (e?.status === 404 || e?.message?.includes('404') || e?.needs_generate) {
-        setScreenState('empty');
+      const is404 = e?.status === 404 || e?.message?.includes('404');
+      if (is404) {
+        setActiveDays(e?.active_days ?? 0);
+        setIsSunday(e?.is_sunday ?? false);
+        if (e?.eligible) {
+          setScreenState('empty'); // Sunday + ≥5 days → show "Roast Me"
+        } else {
+          setScreenState('locked'); // Not eligible yet → show lock screen
+        }
       } else {
         setError(e instanceof Error ? e.message : 'Failed to load FitRoast');
         setScreenState('error');
@@ -142,6 +151,34 @@ export default function FitRoastScreen() {
         <Text style={styles.offSubtitle}>
           Turn it on in Settings to face your weekly truth.
         </Text>
+      </Animated.View>
+    );
+  }
+
+  // ── Locked — not yet eligible (not Sunday or < 5 active days) ──
+  if (screenState === 'locked') {
+    const daysLeft = Math.max(0, 5 - activeDays);
+    return (
+      <Animated.View style={[styles.fullCenter, { opacity: screenFade }]}>
+        <Ionicons name="lock-closed-outline" size={44} color={colors.surfaceMute} />
+        <Text style={styles.lockedTitle}>
+          {isSunday ? 'FitRoast Locked' : 'FitRoast Coming Sunday'}
+        </Text>
+        <Text style={styles.lockedSubtitle}>
+          FitRoast is generated every Sunday{'\n'}based on your weekly performance.
+        </Text>
+        {/* Active-day progress pips */}
+        <View style={styles.activeDaysRow}>
+          {[1, 2, 3, 4, 5].map(n => (
+            <View key={n} style={[styles.activeDayPip, n <= activeDays && styles.activeDayPipFilled]} />
+          ))}
+        </View>
+        <Text style={styles.activeDaysText}>{activeDays}/5 active days this week</Text>
+        {daysLeft > 0 && (
+          <Text style={styles.lockedHint}>
+            {daysLeft} more day{daysLeft !== 1 ? 's' : ''} to unlock
+          </Text>
+        )}
       </Animated.View>
     );
   }
@@ -426,6 +463,45 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
     lineHeight: 22,
+  },
+
+  // Locked state
+  lockedTitle: {
+    ...typography.h2,
+    textAlign: 'center',
+    fontWeight: '700',
+    marginTop: spacing.lg,
+  },
+  lockedSubtitle: {
+    ...typography.bodyMuted,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginTop: spacing.sm,
+  },
+  activeDaysRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: spacing.xl,
+  },
+  activeDayPip: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: colors.surfaceMute,
+  },
+  activeDayPipFilled: {
+    backgroundColor: colors.accent,
+  },
+  activeDaysText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontWeight: '600',
+    marginTop: spacing.md,
+  },
+  lockedHint: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: spacing.sm,
   },
 
   // Empty state

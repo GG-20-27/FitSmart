@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView, Keyboard } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -327,7 +327,7 @@ function computeWeakLink(result: FitScoreResponse, mealList: MealData[], session
     (pillar === 'Training'  && sessionCount === 1) ? Math.round(rawScore) :
     parseFloat(rawScore.toFixed(1));
 
-  const zoneColor = displayScore >= 7 ? colors.success : displayScore >= 4 ? colors.warning : colors.danger;
+  const zoneColor = displayScore >= 7 ? colors.success : displayScore >= 5 ? colors.warning : colors.danger;
 
   // Generate reason (and optional secondReason for extreme cases)
   const timing = result.timingSignals;
@@ -632,8 +632,12 @@ export default function FitScoreScreen() {
   const yesterday = new Date(); yesterday.setDate(yesterday.getDate() - 1);
   const isYesterday = selectedDate.toDateString() === yesterday.toDateString();
   const isPastDate = !isToday && !isYesterday;
-  // When viewing yesterday's FitScore, "yesterdayData" is 2 days ago, so label accordingly
-  const comparisonLabel = isToday ? 'vs yesterday' : 'vs 2 days ago';
+  // Comparison is always selectedDate - 1 day; show the actual date for clarity
+  const comparisonDate = new Date(selectedDate);
+  comparisonDate.setDate(comparisonDate.getDate() - 1);
+  const comparisonLabel = isToday
+    ? 'vs yesterday'
+    : `vs ${comparisonDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}`;
   const hasMeals = meals.length > 0;
   const hasTraining = trainingSessions.length > 0;
   const canCalculate = hasMeals; // Training is optional — minimum is one meal
@@ -699,6 +703,7 @@ export default function FitScoreScreen() {
     setFitScoreResult(null);
     setShowFitScoreResult(false);
     setStoredScore(null);
+    setCoachSummary(null);
     setMeals([]);
     setTrainingSessions([]);
     setWaterIntakeBand(null);
@@ -719,7 +724,30 @@ export default function FitScoreScreen() {
 
     try {
       if (isDatePast) {
-        // Past dates: read-only — fetch stored FitScore only, never show meals
+        // Past dates: read-only — try to restore full FitScoreResponse from AsyncStorage first
+        try {
+          const raw = await AsyncStorage.getItem(`fitScoreCache_${dateStr}`);
+          if (raw) {
+            const cached = JSON.parse(raw) as FitScoreResponse;
+            fitScoreCacheRef.current.set(dateStr, cached);
+            setFitScoreResult(cached);
+            setShowFitScoreResult(true);
+            fitScoreFadeAnim.setValue(1); // cached restore — show immediately without fade
+            // Restore or fetch coach summary for this past date
+            try {
+              const rawCoach = await AsyncStorage.getItem(`coachSummary_${dateStr}`);
+              if (rawCoach) {
+                setCoachSummary(JSON.parse(rawCoach));
+              } else {
+                fetchCoachSummary(cached, dateStr); // fetch once and cache
+              }
+            } catch { fetchCoachSummary(cached, dateStr); }
+            setLoading(false);
+            return; // full view available — skip server call
+          }
+        } catch { /* graceful */ }
+
+        // Fallback: fetch minimal stored score from server
         try {
           const stored = await getStoredFitScore(dateStr);
           setStoredScore(stored); // null → shows NoScore state
@@ -727,11 +755,30 @@ export default function FitScoreScreen() {
           // Silently ignore — storedScore stays null → NoScore state shown
         }
       } else {
-        // Today / yesterday — restore cached FitScore result if available
-        const cached = fitScoreCacheRef.current.get(dateStr);
+        // Today / yesterday — check in-memory cache first, then AsyncStorage (handles mount race)
+        let cached = fitScoreCacheRef.current.get(dateStr);
+        if (!cached) {
+          try {
+            const raw = await AsyncStorage.getItem(`fitScoreCache_${dateStr}`);
+            if (raw) {
+              cached = JSON.parse(raw) as FitScoreResponse;
+              fitScoreCacheRef.current.set(dateStr, cached);
+            }
+          } catch { /* graceful */ }
+        }
         if (cached) {
           setFitScoreResult(cached);
           setShowFitScoreResult(true);
+          fitScoreFadeAnim.setValue(1); // cached restore — show immediately without fade
+          // Restore or fetch coach summary
+          try {
+            const rawCoach = await AsyncStorage.getItem(`coachSummary_${dateStr}`);
+            if (rawCoach) {
+              setCoachSummary(JSON.parse(rawCoach));
+            } else {
+              fetchCoachSummary(cached, dateStr);
+            }
+          } catch { fetchCoachSummary(cached, dateStr); }
         }
 
         const [mealsData, trainingData] = await Promise.all([
@@ -821,8 +868,8 @@ export default function FitScoreScreen() {
       // Premium reveal moment
       triggerReadyReveal();
 
-      // Fetch coach summary in the background
-      fetchCoachSummary(result);
+      // Fetch coach summary in the background and cache it
+      fetchCoachSummary(result, formatDate(selectedDate));
 
     } catch (error) {
       console.error('[FITSCORE] Calculation failed:', error);
@@ -835,7 +882,7 @@ export default function FitScoreScreen() {
     }
   };
 
-  const fetchCoachSummary = async (fitScoreData: FitScoreResponse) => {
+  const fetchCoachSummary = async (fitScoreData: FitScoreResponse, dateStr?: string) => {
     setLoadingCoachSummary(true);
     try {
       const summary = await getCoachSummary({
@@ -862,6 +909,9 @@ export default function FitScoreScreen() {
         waterIntakeBand: fitScoreData.waterIntakeBand ?? waterIntakeBand ?? null,
       });
       setCoachSummary(summary);
+      if (dateStr) {
+        AsyncStorage.setItem(`coachSummary_${dateStr}`, JSON.stringify(summary)).catch(() => {});
+      }
       console.log('[COACH SUMMARY] Summary received');
     } catch (error) {
       console.error('[COACH SUMMARY] Failed to fetch:', error);
@@ -981,8 +1031,8 @@ export default function FitScoreScreen() {
     // Use rounded score for color to match displayed value
     const roundedScore = Math.round(score);
     if (roundedScore >= 7) return colors.success; // Green: 7-10
-    if (roundedScore >= 4) return colors.warning; // Amber: 4-6.9
-    return colors.danger; // Red: 1-3.9
+    if (roundedScore >= 5) return colors.warning; // Amber: 5-6
+    return colors.danger; // Red: 1-4
   };
 
   const handleMealPress = (meal: MealData) => {
@@ -1398,15 +1448,33 @@ export default function FitScoreScreen() {
         </View>
       )}
 
-      {/* Past Date View — dates older than yesterday: read-only */}
-      {isPastDate && !loading && (
+      {/* Past date comparison notice — shown when a stored FitScore is being displayed */}
+      {isPastDate && showFitScoreResult && fitScoreResult && (
+        <View style={styles.retroBanner}>
+          <Ionicons name="time-outline" size={14} color={colors.accent} />
+          <Text style={styles.retroBannerText}>
+            {'Keep in mind — comparisons in this score were made against data from '}
+            <Text style={styles.retroBannerDate}>
+              {(() => {
+                const prev = new Date(selectedDate);
+                prev.setDate(prev.getDate() - 1);
+                return prev.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+              })()}
+            </Text>
+            .
+          </Text>
+        </View>
+      )}
+
+      {/* Past Date View — only shown when full cached FitScore is NOT available */}
+      {isPastDate && !loading && !showFitScoreResult && (
         storedScore ? (
           <View style={styles.pastScoreSection}>
             <View style={[styles.pastScoreCircle, {
-              borderColor: storedScore.score >= 7 ? colors.success : storedScore.score >= 4 ? colors.warning : colors.danger
+              borderColor: storedScore.score >= 7 ? colors.success : storedScore.score >= 5 ? colors.warning : colors.danger
             }]}>
               <Text style={[styles.pastScoreNumber, {
-                color: storedScore.score >= 7 ? colors.success : storedScore.score >= 4 ? colors.warning : colors.danger
+                color: storedScore.score >= 7 ? colors.success : storedScore.score >= 5 ? colors.warning : colors.danger
               }]}>
                 {storedScore.score.toFixed(1)}
               </Text>
@@ -1814,6 +1882,8 @@ export default function FitScoreScreen() {
                         styles.intensityButtonText,
                         trainingIntensity === level && styles.intensityButtonTextActive,
                       ]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
                     >
                       {level}
                     </Text>
@@ -2050,8 +2120,8 @@ export default function FitScoreScreen() {
           {/* FitCoach Preview */}
           <TouchableOpacity
             style={styles.coachPreviewCard}
-            onPress={() => coachSummary?.slides && setShowCoachModal(true)}
-            activeOpacity={coachSummary?.slides ? 0.7 : 1}
+            onPress={() => !isPastDate && coachSummary?.slides && setShowCoachModal(true)}
+            activeOpacity={!isPastDate && coachSummary?.slides ? 0.7 : 1}
           >
             <View style={styles.coachSummaryHeader}>
               <View style={styles.coachIconContainer}>
@@ -2067,7 +2137,9 @@ export default function FitScoreScreen() {
             ) : coachSummary ? (
               <>
                 <Text style={styles.coachPreviewText}>{coachSummary.preview}</Text>
-                <Text style={styles.coachPreviewCTA}>Tap to see detailed overview</Text>
+                {!isPastDate && (
+                  <Text style={styles.coachPreviewCTA}>Tap to see detailed overview</Text>
+                )}
               </>
             ) : (
               <Text style={styles.coachSummaryPlaceholder}>Coach analysis loading...</Text>
@@ -2273,20 +2345,19 @@ export default function FitScoreScreen() {
                 placeholder="E.g., ingredients, cooking method, portion size..."
                 placeholderTextColor={colors.textMuted}
                 multiline
-                numberOfLines={4}
                 onFocus={() => {
                   setTimeout(() => mealScrollRef.current?.scrollToEnd({ animated: true }), 300);
                 }}
               />
-            </ScrollView>
 
-            {/* Log/Update Meal Button */}
-            <View style={styles.modalFooter}>
-              <Button onPress={handleLogMeal} style={styles.logMealButton}>
-                <Ionicons name="checkmark-circle" size={20} color={colors.bgPrimary} style={{ marginRight: 8 }} />
-                {editingMealId ? 'Update Meal' : 'Log Meal'}
-              </Button>
-            </View>
+              {/* Log/Update Meal Button — inside scroll so it never floats above keyboard */}
+              <View style={styles.modalFooter}>
+                <Button onPress={handleLogMeal} style={styles.logMealButton}>
+                  <Ionicons name="checkmark-circle" size={20} color={colors.bgPrimary} style={{ marginRight: 8 }} />
+                  {editingMealId ? 'Update Meal' : 'Log Meal'}
+                </Button>
+              </View>
+            </ScrollView>
           </View>
         </View>
         </KeyboardAvoidingView>

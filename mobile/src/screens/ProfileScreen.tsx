@@ -210,8 +210,10 @@ export default function ProfileScreen() {
           onPress: async () => {
             try {
               await clearAuthToken();
-              // In a real app, you'd navigate to login screen here
-              Alert.alert('Logged Out', 'You have been logged out successfully.');
+              // Trigger global auth check — navigates back to OnboardingNavigator
+              if (typeof (global as any).refreshOnboardingStatus === 'function') {
+                (global as any).refreshOnboardingStatus();
+              }
             } catch (error) {
               console.error('Logout error:', error);
               Alert.alert('Error', 'Failed to logout. Please try again.');

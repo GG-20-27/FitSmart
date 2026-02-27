@@ -1290,7 +1290,10 @@ export class WhoopApiService {
         const cycleStartLocalDate    = localDateFmt.format(cycleStart);
         const dayAfterCycleStart     = new Date(cycleStart.getTime() + 24 * 60 * 60 * 1000);
         const dayAfterLocalDate      = localDateFmt.format(dayAfterCycleStart);
-        const isLocalDayMatch        = cycleStartLocalDate === dateStr || dayAfterLocalDate === dateStr;
+        // Only match via dayAfterLocalDate: a cycle starting ~9pm on day N covers day N+1's daytime.
+        // Using cycleStartLocalDate === dateStr causes a false positive where today's new cycle
+        // (starting yesterday evening) incorrectly wins for yesterday's data request.
+        const isLocalDayMatch        = dayAfterLocalDate === dateStr;
 
         const isMatch = isWithinCycle || isLocalDayMatch;
 

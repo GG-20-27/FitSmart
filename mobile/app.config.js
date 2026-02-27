@@ -34,9 +34,8 @@ module.exports = {
       "**/*"
     ],
     extra: {
-      // Static JWT for authentication
-      staticJwt: process.env.EXPO_PUBLIC_STATIC_JWT ||
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ3aG9vcElkIjoid2hvb3BfMjUyODM1MjgiLCJyb2xlIjoidXNlciIsImV4cCI6MjA3NDg1MzczMywiaWF0IjoxNzU5NDkzNzMzfQ.xfwpDHuUk2YCsarUJmI661vgGhs554gVzUulFsVeT8s",
+      // Static JWT for authentication (set EXPO_PUBLIC_STATIC_JWT in .env for local dev)
+      staticJwt: process.env.EXPO_PUBLIC_STATIC_JWT || undefined,
 
       // Backend API URL
       EXPO_PUBLIC_API_URL: process.env.EXPO_PUBLIC_API_URL ||
