@@ -193,6 +193,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve static files from uploads directory
   app.use('/uploads', express.static(uploadsDir));
 
+  // Privacy Policy page (required for WHOOP OAuth)
+  app.get('/privacy', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FitSmart – Privacy Policy</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 720px; margin: 60px auto; padding: 0 24px; color: #1a1a2e; line-height: 1.7; }
+    h1 { font-size: 2rem; margin-bottom: 4px; }
+    h2 { font-size: 1.1rem; margin-top: 36px; color: #333; }
+    p, li { font-size: 0.97rem; color: #444; }
+    a { color: #6366f1; }
+    .updated { color: #888; font-size: 0.85rem; margin-bottom: 32px; }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: February 2026</p>
+
+  <p>FitSmart ("we", "our", or "us") is a personal fitness intelligence app. This policy explains what data we collect, how we use it, and your rights.</p>
+
+  <h2>1. Data We Collect</h2>
+  <ul>
+    <li><strong>WHOOP health data</strong> – heart rate, HRV, sleep, recovery, and strain data accessed via the WHOOP API with your explicit consent.</li>
+    <li><strong>Meal photos</strong> – images you upload for nutrition analysis.</li>
+    <li><strong>Goals &amp; check-ins</strong> – fitness goals and daily check-in responses you enter in the app.</li>
+    <li><strong>Chat messages</strong> – messages sent to the AI coach for personalised advice.</li>
+  </ul>
+
+  <h2>2. How We Use Your Data</h2>
+  <ul>
+    <li>To generate your FitScore, recovery insights, and AI coaching summaries.</li>
+    <li>To analyse meal photos for nutritional content using OpenAI Vision.</li>
+    <li>To personalise your fitness recommendations over time.</li>
+    <li>We do <strong>not</strong> sell your data to third parties.</li>
+  </ul>
+
+  <h2>3. Data Storage</h2>
+  <p>Your data is stored in a secure PostgreSQL database hosted on Supabase (EU region). WHOOP OAuth tokens are encrypted and stored only to maintain your connection to the WHOOP API.</p>
+
+  <h2>4. Third-Party Services</h2>
+  <ul>
+    <li><strong>WHOOP API</strong> – health data is fetched from WHOOP with your permission. See <a href="https://www.whoop.com/privacy" target="_blank">WHOOP's Privacy Policy</a>.</li>
+    <li><strong>OpenAI</strong> – meal photos and chat messages are processed by OpenAI. See <a href="https://openai.com/privacy" target="_blank">OpenAI's Privacy Policy</a>.</li>
+  </ul>
+
+  <h2>5. Your Rights</h2>
+  <p>You can request deletion of all your data at any time by contacting us. Disconnecting WHOOP in the app immediately revokes our access to your WHOOP data.</p>
+
+  <h2>6. Contact</h2>
+  <p>For any privacy questions, contact us at: <a href="mailto:privacy@fitsmart.app">privacy@fitsmart.app</a></p>
+</body>
+</html>`);
+  });
+
   // Log API examples on startup
   console.log('\n🚀 FitScore GPT API Endpoints:');
   console.log('📊 Health Check: GET /api/health');
