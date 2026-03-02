@@ -7,26 +7,26 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0D86AC9A6FDB14CB9A7D1777 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 0B585A38ED55C3F99BBF8E2D /* PrivacyInfo.xcprivacy */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
-		3409E9FEC9D8D7387A5ACE1F /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8503B9172F76454501F85A20 /* ExpoModulesProvider.swift */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
+		701344E6334B415D37F900CA /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = D365195807033677CBA7B139 /* PrivacyInfo.xcprivacy */; };
+		9DA7E10689F1F71B710409B8 /* libPods-FitScoreAI.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 74EE184AB6D66C56EA1E0973 /* libPods-FitScoreAI.a */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
-		D9314ADAE0B724F32D8D50AD /* libPods-FitScoreAI.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 3D91F0E1B2014E939B56BB8D /* libPods-FitScoreAI.a */; };
+		CC5D325E179F3B71D01FBF8B /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689512BE4BDCFABF111AEB82 /* ExpoModulesProvider.swift */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		0B585A38ED55C3F99BBF8E2D /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = FitScoreAI/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		04FD455BDFF13284C23C09A6 /* Pods-FitScoreAI.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-FitScoreAI.debug.xcconfig"; path = "Target Support Files/Pods-FitScoreAI/Pods-FitScoreAI.debug.xcconfig"; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* FitScoreAI.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FitScoreAI.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = FitScoreAI/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = FitScoreAI/Info.plist; sourceTree = "<group>"; };
-		3D91F0E1B2014E939B56BB8D /* libPods-FitScoreAI.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-FitScoreAI.a"; sourceTree = BUILT_PRODUCTS_DIR; };
-		46A0C663139CA2FD9DC2F6E0 /* Pods-FitScoreAI.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-FitScoreAI.release.xcconfig"; path = "Target Support Files/Pods-FitScoreAI/Pods-FitScoreAI.release.xcconfig"; sourceTree = "<group>"; };
-		8503B9172F76454501F85A20 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-FitScoreAI/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		24ECCB73736C35BAA416AB29 /* Pods-FitScoreAI.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-FitScoreAI.release.xcconfig"; path = "Target Support Files/Pods-FitScoreAI/Pods-FitScoreAI.release.xcconfig"; sourceTree = "<group>"; };
+		689512BE4BDCFABF111AEB82 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-FitScoreAI/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		74EE184AB6D66C56EA1E0973 /* libPods-FitScoreAI.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-FitScoreAI.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = FitScoreAI/SplashScreen.storyboard; sourceTree = "<group>"; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
-		DB151535AFD0EA49AB041D40 /* Pods-FitScoreAI.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-FitScoreAI.debug.xcconfig"; path = "Target Support Files/Pods-FitScoreAI/Pods-FitScoreAI.debug.xcconfig"; sourceTree = "<group>"; };
+		D365195807033677CBA7B139 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = FitScoreAI/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = FitScoreAI/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* FitScoreAI-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "FitScoreAI-Bridging-Header.h"; path = "FitScoreAI/FitScoreAI-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -37,13 +37,21 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D9314ADAE0B724F32D8D50AD /* libPods-FitScoreAI.a in Frameworks */,
+				9DA7E10689F1F71B710409B8 /* libPods-FitScoreAI.a in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0FF9BC6A9AE19D791760B60D /* ExpoModulesProviders */ = {
+			isa = PBXGroup;
+			children = (
+				3A5F2993B36F498EDFAE81CB /* FitScoreAI */,
+			);
+			name = ExpoModulesProviders;
+			sourceTree = "<group>";
+		};
 		13B07FAE1A68108700A75B9A /* FitScoreAI */ = {
 			isa = PBXGroup;
 			children = (
@@ -53,15 +61,7 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				0B585A38ED55C3F99BBF8E2D /* PrivacyInfo.xcprivacy */,
-			);
-			name = FitScoreAI;
-			sourceTree = "<group>";
-		};
-		1C6193847EBCD1CD2FBCE341 /* FitScoreAI */ = {
-			isa = PBXGroup;
-			children = (
-				8503B9172F76454501F85A20 /* ExpoModulesProvider.swift */,
+				D365195807033677CBA7B139 /* PrivacyInfo.xcprivacy */,
 			);
 			name = FitScoreAI;
 			sourceTree = "<group>";
@@ -70,19 +70,17 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				3D91F0E1B2014E939B56BB8D /* libPods-FitScoreAI.a */,
+				74EE184AB6D66C56EA1E0973 /* libPods-FitScoreAI.a */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		63797A4915905E8F8888DA09 /* Pods */ = {
+		3A5F2993B36F498EDFAE81CB /* FitScoreAI */ = {
 			isa = PBXGroup;
 			children = (
-				DB151535AFD0EA49AB041D40 /* Pods-FitScoreAI.debug.xcconfig */,
-				46A0C663139CA2FD9DC2F6E0 /* Pods-FitScoreAI.release.xcconfig */,
+				689512BE4BDCFABF111AEB82 /* ExpoModulesProvider.swift */,
 			);
-			name = Pods;
-			path = Pods;
+			name = FitScoreAI;
 			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
@@ -99,8 +97,8 @@
 				832341AE1AAA6A7D00B99B32 /* Libraries */,
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
-				63797A4915905E8F8888DA09 /* Pods */,
-				9FD6401A3B82D2C8223AEA42 /* ExpoModulesProviders */,
+				CD5C3A6FC0533F307A17961F /* Pods */,
+				0FF9BC6A9AE19D791760B60D /* ExpoModulesProviders */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -115,14 +113,6 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		9FD6401A3B82D2C8223AEA42 /* ExpoModulesProviders */ = {
-			isa = PBXGroup;
-			children = (
-				1C6193847EBCD1CD2FBCE341 /* FitScoreAI */,
-			);
-			name = ExpoModulesProviders;
-			sourceTree = "<group>";
-		};
 		BB2F792B24A3F905000567C9 /* Supporting */ = {
 			isa = PBXGroup;
 			children = (
@@ -130,6 +120,16 @@
 			);
 			name = Supporting;
 			path = FitScoreAI/Supporting;
+			sourceTree = "<group>";
+		};
+		CD5C3A6FC0533F307A17961F /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				04FD455BDFF13284C23C09A6 /* Pods-FitScoreAI.debug.xcconfig */,
+				24ECCB73736C35BAA416AB29 /* Pods-FitScoreAI.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -140,13 +140,13 @@
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "FitScoreAI" */;
 			buildPhases = (
 				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
-				29844B3A34BF036C3A26AFA9 /* [Expo] Configure project */,
+				5C561FFDD64A6E416E3C78AE /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
 				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				B01047E74EB0AF5252F3A5A4 /* [CP] Embed Pods Frameworks */,
+				9A1E4443DAFA96F6B5B3A0DE /* [CP] Embed Pods Frameworks */,
 			);
 			buildRules = (
 			);
@@ -196,7 +196,7 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				0D86AC9A6FDB14CB9A7D1777 /* PrivacyInfo.xcprivacy in Resources */,
+				701344E6334B415D37F900CA /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -242,7 +242,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		29844B3A34BF036C3A26AFA9 /* [Expo] Configure project */ = {
+		5C561FFDD64A6E416E3C78AE /* [Expo] Configure project */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -302,7 +302,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-FitScoreAI/Pods-FitScoreAI-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		B01047E74EB0AF5252F3A5A4 /* [CP] Embed Pods Frameworks */ = {
+		9A1E4443DAFA96F6B5B3A0DE /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -332,7 +332,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */,
-				3409E9FEC9D8D7387A5ACE1F /* ExpoModulesProvider.swift in Sources */,
+				CC5D325E179F3B71D01FBF8B /* ExpoModulesProvider.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -341,7 +341,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = DB151535AFD0EA49AB041D40 /* Pods-FitScoreAI.debug.xcconfig */;
+			baseConfigurationReference = 04FD455BDFF13284C23C09A6 /* Pods-FitScoreAI.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -377,7 +377,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 46A0C663139CA2FD9DC2F6E0 /* Pods-FitScoreAI.release.xcconfig */;
+			baseConfigurationReference = 24ECCB73736C35BAA416AB29 /* Pods-FitScoreAI.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;

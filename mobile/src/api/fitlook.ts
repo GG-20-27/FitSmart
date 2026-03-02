@@ -50,6 +50,7 @@ export interface FitLookResponse {
   cached: boolean;
   created_at: string;
   needs_checkin?: boolean;
+  sleepDebtMinutes?: number | null;
 }
 
 /** Fetch today's FitLook (auto-generates if cached or check-in exists) */

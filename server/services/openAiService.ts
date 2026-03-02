@@ -514,6 +514,18 @@ export interface FitLookGenerationInput {
   userGoalTitle?: string;
   injuryNotes?: string;
   userContextSummary?: string; // pre-built from user_context table
+  advancedRecoverySignals?: {
+    respiratoryRate?: number;
+    respiratoryRateDelta?: number;
+    skinTempDelta?: number;
+    spo2?: number;
+    sleepEfficiency?: number;
+    sleepStages?: { rem: number; deep: number; light: number };
+    cycleAvgHR?: number;
+  };
+  sleepDebtMinutes?: number;
+  sleepNeededMinutes?: number;
+  actualSleepMinutes?: number;
 }
 
 // ── Deterministic meal score computation ──────────────────────────────────────
@@ -695,7 +707,7 @@ export class OpenAIService {
 
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY || '';
-    this.visionModel = 'gpt-4o';  // GPT-4 Vision model
+    this.visionModel = process.env.OPENAI_MODEL || 'gpt-4o';
     this.textModel = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
     if (!this.apiKey) {
@@ -1047,6 +1059,18 @@ Return valid JSON only — no score.`;
       completedList: string[];
       missingList: string[];
     };
+    advancedRecoverySignals?: {
+      respiratoryRate?: number;
+      respiratoryRateDelta?: number; // vs 7-day avg, positive = elevated
+      skinTempDelta?: number;        // vs 7-day avg in °C, positive = elevated
+      spo2?: number;
+      sleepEfficiency?: number;
+      sleepStages?: { rem: number; deep: number; light: number };
+      cycleAvgHR?: number;
+    };
+    sleepDebtMinutes?: number;   // negative = debt, 0 = met, positive = surplus (we use negative convention)
+    sleepNeededMinutes?: number;
+    actualSleepMinutes?: number;
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -1137,6 +1161,54 @@ Return valid JSON only — no score.`;
         } else {
           const missing = missingList.slice(0, 2).join(', ');
           contextParts.push(`📋 Daily habits: ${completed}/${total} completed. Missing: ${missing}. If relevant, include ONE sentence of light accountability — no shaming, no lecturing.`);
+        }
+      }
+
+      // Advanced recovery signals — only surface if deviating meaningfully
+      if (params.advancedRecoverySignals) {
+        const s = params.advancedRecoverySignals;
+        const signals: string[] = [];
+
+        if (s.respiratoryRateDelta != null && s.respiratoryRateDelta >= 1.5) {
+          signals.push(`Respiratory rate elevated +${s.respiratoryRateDelta.toFixed(1)} vs 7-day baseline — possible stress or immune load signal`);
+        }
+        if (s.skinTempDelta != null && s.skinTempDelta >= 0.5) {
+          signals.push(`Skin temperature +${s.skinTempDelta.toFixed(1)}°C vs baseline — potential early illness or physiological stress`);
+        }
+        if (s.spo2 != null && s.spo2 < 95) {
+          signals.push(`SpO2 at ${s.spo2}% — below normal range, monitor exertion`);
+        }
+        if (s.sleepEfficiency != null && s.sleepEfficiency < 80) {
+          signals.push(`Sleep efficiency ${s.sleepEfficiency}% — sleep was fragmented despite hours logged`);
+        }
+        if (s.sleepStages && params.sleepHours) {
+          const totalMin = params.sleepHours * 60;
+          const deepPct = totalMin > 0 ? (s.sleepStages.deep / totalMin) * 100 : 0;
+          const remPct  = totalMin > 0 ? (s.sleepStages.rem  / totalMin) * 100 : 0;
+          if (deepPct < 12) signals.push(`Deep sleep low (${s.sleepStages.deep}min, ${deepPct.toFixed(0)}% of sleep) — reduced physical restoration`);
+          if (remPct  < 15) signals.push(`REM sleep low (${s.sleepStages.rem}min, ${remPct.toFixed(0)}% of sleep) — may affect cognition and mood`);
+        }
+
+        if (signals.length > 0) {
+          contextParts.push(
+            `Advanced recovery signals (use as explanation support only — mention briefly if directly relevant, never list as raw numbers):\n` +
+            signals.map(sig => `- ${sig}`).join('\n')
+          );
+        }
+      }
+
+      // Sleep debt — use as decision driver, not informational
+      if (params.sleepDebtMinutes != null) {
+        if (params.sleepDebtMinutes > 90) {
+          const h = Math.floor(params.sleepDebtMinutes / 60);
+          const m = params.sleepDebtMinutes % 60;
+          contextParts.push(`⚠️ Sleep debt: ${h}h${m > 0 ? ` ${m}m` : ''} below WHOOP's sleep target — significant recovery deficit. Strongly prioritise sleep recovery in the Direction slide.`);
+        } else if (params.sleepDebtMinutes > 45) {
+          const h = Math.floor(params.sleepDebtMinutes / 60);
+          const m = params.sleepDebtMinutes % 60;
+          contextParts.push(`Sleep gap: ${h > 0 ? `${h}h ` : ''}${m}m below WHOOP's sleep target — include a sleep focus note in Direction.`);
+        } else if (params.sleepDebtMinutes <= 0) {
+          contextParts.push(`Sleep target met — actual sleep met or exceeded WHOOP's needed amount. Reinforce consistency briefly.`);
         }
       }
 
@@ -1309,6 +1381,49 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       if (input.userGoalTitle) parts.push(`User goal: ${input.userGoalTitle}`);
       if (input.injuryNotes) parts.push(`Injury/caution notes: ${input.injuryNotes}`);
       if (input.userContextSummary) parts.push(input.userContextSummary);
+
+      // Advanced recovery signals — only surface if deviating meaningfully
+      if (input.advancedRecoverySignals) {
+        const s = input.advancedRecoverySignals;
+        const signals: string[] = [];
+        if (s.respiratoryRateDelta != null && s.respiratoryRateDelta >= 1.5) {
+          signals.push(`Respiratory rate elevated +${s.respiratoryRateDelta.toFixed(1)} vs baseline — possible stress or immune load`);
+        }
+        if (s.skinTempDelta != null && s.skinTempDelta >= 0.5) {
+          signals.push(`Skin temp +${s.skinTempDelta.toFixed(1)}°C vs baseline — potential early illness signal`);
+        }
+        if (s.spo2 != null && s.spo2 < 95) {
+          signals.push(`SpO2 ${s.spo2}% — below normal range`);
+        }
+        if (s.sleepEfficiency != null && s.sleepEfficiency < 80) {
+          signals.push(`Sleep efficiency ${s.sleepEfficiency}% — fragmented sleep`);
+        }
+        if (s.sleepStages && input.sleepHours) {
+          const totalMin = input.sleepHours * 60;
+          const deepPct = totalMin > 0 ? (s.sleepStages.deep / totalMin) * 100 : 0;
+          if (deepPct < 12) signals.push(`Deep sleep low (${deepPct.toFixed(0)}%) — reduced physical restoration`);
+        }
+        if (signals.length > 0) {
+          parts.push(
+            `Subtle recovery signals (mention only if shaping today's plan — never list as data):\n` +
+            signals.map(sig => `- ${sig}`).join('\n')
+          );
+        }
+      }
+
+      // Sleep debt — use as priority driver for focus and actions
+      if (input.sleepDebtMinutes != null) {
+        if (input.sleepDebtMinutes > 90) {
+          const h = Math.floor(input.sleepDebtMinutes / 60);
+          const m = input.sleepDebtMinutes % 60;
+          parts.push(`⚠️ Sleep debt: ${h}h${m > 0 ? ` ${m}m` : ''} — recovery deficit is significant. Let this drive today's focus toward sleep and lower-intensity activity.`);
+        } else if (input.sleepDebtMinutes > 45) {
+          const m = input.sleepDebtMinutes;
+          parts.push(`Sleep gap: ${m}min below needed — include sleep-supporting behaviour in DO or AVOID actions.`);
+        } else if (input.sleepDebtMinutes <= 0) {
+          parts.push(`Sleep target met — reinforce this consistency in forecast or chips.`);
+        }
+      }
 
       const userPrompt = `Generate this morning's FitLook briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required v2 fields: snapshot_chips, focus, do (array of 2), avoid, forecast_line. No slides array.`;
 

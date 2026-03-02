@@ -161,6 +161,16 @@ export interface FitScoreResponse {
     onlyMealIsPureJunk: boolean;
   };
   waterIntakeBand?: '<1L' | '1–2L' | '2–3L' | '3L+' | null;
+  advancedRecoverySignals?: {
+    respiratoryRate?: number;
+    respiratoryRateDelta?: number;
+    skinTempDelta?: number;
+    spo2?: number;
+    sleepEfficiency?: number;
+    sleepStages?: { rem: number; deep: number; light: number };
+    cycleAvgHR?: number;
+  };
+  sleepDebtMinutes?: number;
   timestamp: string;
 }
 
@@ -431,6 +441,16 @@ export async function getCoachSummary(params: {
     completedList: string[];
     missingList: string[];
   };
+  advancedRecoverySignals?: {
+    respiratoryRate?: number;
+    respiratoryRateDelta?: number;
+    skinTempDelta?: number;
+    spo2?: number;
+    sleepEfficiency?: number;
+    sleepStages?: { rem: number; deep: number; light: number };
+    cycleAvgHR?: number;
+  };
+  sleepDebtMinutes?: number;
 }): Promise<CoachSummaryResponse> {
   console.log(`[API] Getting coach summary`);
 
@@ -444,4 +464,20 @@ export async function getCoachSummary(params: {
 
   console.log(`[API] Coach summary received`);
   return response;
+}
+
+export interface WhoopWorkout {
+  id: string;
+  sport_name: string;
+  start: string;
+  end: string;
+  duration_minutes: number;
+  strain: number | null;
+}
+
+/**
+ * Fetch WHOOP workouts for a specific date (for import into training log)
+ */
+export async function getWhoopWorkouts(date: string): Promise<WhoopWorkout[]> {
+  return apiRequest<WhoopWorkout[]>(`/api/whoop/workouts?date=${encodeURIComponent(date)}`);
 }

@@ -22,9 +22,9 @@ import axios from "axios";
 import { getCurrentUserId, requireAdmin } from './authMiddleware';
 import { requireJWTAuth, jwtAuthMiddleware } from './jwtAuth';
 import { db } from './db';
-import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext } from '@shared/schema';
+import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, whoopData as whoopDataTable } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
-import { eq, desc, sql, and } from 'drizzle-orm';
+import { eq, desc, sql, and, gte, lt } from 'drizzle-orm';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -2621,6 +2621,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // WHOOP workouts for a specific date (for training import)
+  app.get('/api/whoop/workouts', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const date = req.query.date as string;
+      if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: 'Missing or invalid date parameter (expected YYYY-MM-DD)' });
+      }
+
+      console.log(`[WHOOP WORKOUTS] Fetching workouts for user=${userId} date=${date}`);
+      const workouts = await whoopApiService.getWorkoutsForDate(userId, date);
+      console.log(`[WHOOP WORKOUTS] Found ${workouts.length} workout(s)`);
+      res.json(workouts);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[WHOOP WORKOUTS] Error:', message);
+      res.status(500).json({ error: 'Failed to fetch WHOOP workouts', details: message });
+    }
+  });
+
   // Secure WHOOP data endpoint for n8n automation
   app.get('/api/whoop/n8n', async (req, res) => {
     const token = req.headers['authorization'];
@@ -4390,6 +4412,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
               strainScore: todayData.strain,
               hrv: todayData.hrv,
               restingHeartRate: todayData.resting_heart_rate,
+              // Advanced signals
+              respiratoryRate: todayData.respiratory_rate,
+              skinTemperature: todayData.skin_temperature,
+              spo2Percentage: todayData.spo2_percentage,
+              sleepEfficiencyPct: todayData.sleep_efficiency_pct,
+              sleepStages: todayData.sleep_stages,
+              cycleAvgHR: todayData.average_heart_rate,
+              sleepNeededMinutes: todayData.sleep_needed_minutes,
             };
           }
         } else {
@@ -4404,6 +4434,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
               strainScore: histData.strainScore,
               hrv: histData.hrv,
               restingHeartRate: histData.restingHeartRate,
+              respiratoryRate: (histData as any).respiratoryRate,
+              skinTemperature: (histData as any).skinTempCelsius,
+              spo2Percentage: (histData as any).spo2Percentage,
             };
           }
         }
@@ -4432,6 +4465,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (hrvError) {
         console.log(`[FITSCORE] Failed to get HRV baseline: ${hrvError}`);
       }
+
+      // 2b. Build advanced recovery signals with 7-day baselines for resp rate + skin temp
+      let advancedRecoverySignals: {
+        respiratoryRate?: number;
+        respiratoryRateDelta?: number;
+        skinTempDelta?: number;
+        spo2?: number;
+        sleepEfficiency?: number;
+        sleepStages?: { rem: number; deep: number; light: number };
+        cycleAvgHR?: number;
+      } | undefined;
+
+      try {
+        const sevenDaysAgo = DateTime.fromISO(targetDate).minus({ days: 7 }).toISODate()!;
+        const recentRows = await db.select({
+          respiratoryRate: whoopDataTable.respiratoryRate,
+          skinTempCelsius: whoopDataTable.skinTempCelsius,
+        }).from(whoopDataTable).where(
+          and(eq(whoopDataTable.userId, userId), gte(whoopDataTable.date, sevenDaysAgo), lt(whoopDataTable.date, targetDate))
+        );
+
+        const rrValues = recentRows.map(r => r.respiratoryRate).filter((v): v is number => v != null);
+        const stValues = recentRows.map(r => r.skinTempCelsius).filter((v): v is number => v != null);
+        const avgRR = rrValues.length > 0 ? rrValues.reduce((a, b) => a + b, 0) / rrValues.length : null;
+        const avgST = stValues.length > 0 ? stValues.reduce((a, b) => a + b, 0) / stValues.length : null;
+
+        const wd = whoopData as any; // typed locally above, cast to access advanced fields
+        const signals: typeof advancedRecoverySignals = {};
+        if (wd?.respiratoryRate != null) signals.respiratoryRate = wd.respiratoryRate;
+        if (wd?.respiratoryRate != null && avgRR != null) signals.respiratoryRateDelta = Math.round((wd.respiratoryRate - avgRR) * 10) / 10;
+        if (wd?.skinTemperature != null && avgST != null) signals.skinTempDelta = Math.round((wd.skinTemperature - avgST) * 10) / 10;
+        if (wd?.spo2Percentage != null) signals.spo2 = Math.round(wd.spo2Percentage);
+        if (wd?.sleepEfficiencyPct != null) signals.sleepEfficiency = wd.sleepEfficiencyPct;
+        if (wd?.sleepStages) signals.sleepStages = {
+          rem:   wd.sleepStages.rem_sleep_minutes   ?? 0,
+          deep:  wd.sleepStages.deep_sleep_minutes  ?? 0,
+          light: wd.sleepStages.light_sleep_minutes ?? 0,
+        };
+        if (wd?.cycleAvgHR != null) signals.cycleAvgHR = wd.cycleAvgHR;
+        if (Object.keys(signals).length > 0) advancedRecoverySignals = signals;
+      } catch { /* graceful — never block FitScore calculation */ }
+
+      // 2c. Compute sleep debt
+      const sleepNeededMinutes = (whoopData as any)?.sleepNeededMinutes ?? undefined;
+      const actualSleepMinutes = whoopData?.sleepHours != null ? Math.round(whoopData.sleepHours * 60) : undefined;
+      const sleepDebtMinutes = sleepNeededMinutes != null && actualSleepMinutes != null
+        ? Math.max(0, sleepNeededMinutes - actualSleepMinutes)
+        : undefined;
 
       // 3. Calculate Recovery Score
       const recoveryResult = recoveryScoreService.calculateRecoveryScore({
@@ -4685,6 +4766,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           hrv: whoopData?.hrv,
           hrvBaseline,
         },
+        advancedRecoverySignals,
+        sleepDebtMinutes,
         yesterdayData: {
           recoveryScore: yesterdayData?.recoveryScore ?? null,
           sleepScore: yesterdayData?.sleepScore ?? null,
@@ -4748,6 +4831,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timingSignals,
         waterIntakeBand,
         dailyHabits, // { total, completed, completedList, missingList }
+        advancedRecoverySignals,
+        sleepDebtMinutes,
       } = req.body;
 
       console.log(`[COACH SUMMARY] Generating summary for user: ${userId}, fitScore: ${fitScore}`);
@@ -4809,6 +4894,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timingSignals: timingSignals || undefined,
         waterIntakeBand: waterIntakeBand || undefined,
         dailyHabits: dailyHabits || undefined,
+        advancedRecoverySignals: advancedRecoverySignals || undefined,
+        sleepDebtMinutes: sleepDebtMinutes ?? undefined,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);
@@ -4925,6 +5012,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let sleepHours: number | undefined;
       let hrv: number | undefined;
       let strainScore: number | undefined;
+      let fitlookAdvancedSignals: Parameters<typeof openAIService.generateFitLook>[0]['advancedRecoverySignals'];
+      let fitlookSleepDebtMinutes: number | undefined;
 
       try {
         const whoopToday = await whoopApiService.getTodaysData(userId);
@@ -4932,6 +5021,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sleepHours = whoopToday?.sleep_hours ?? whoopToday?.sleepHours ?? undefined;
         hrv = whoopToday?.hrv ?? undefined;
         strainScore = whoopToday?.strain ?? undefined;
+
+        // Advanced signals: compute 7-day baselines for respiratory rate + skin temp
+        try {
+          const sevenDaysAgo = DateTime.fromISO(todayLocal).minus({ days: 7 }).toISODate()!;
+          const baselineRows = await db.select({
+            respiratoryRate: whoopDataTable.respiratoryRate,
+            skinTempCelsius: whoopDataTable.skinTempCelsius,
+          }).from(whoopDataTable).where(
+            and(eq(whoopDataTable.userId, userId), gte(whoopDataTable.date, sevenDaysAgo), lt(whoopDataTable.date, todayLocal))
+          );
+          const rrVals = baselineRows.map(r => r.respiratoryRate).filter((v): v is number => v != null);
+          const stVals = baselineRows.map(r => r.skinTempCelsius).filter((v): v is number => v != null);
+          const avgRR = rrVals.length > 0 ? rrVals.reduce((a, b) => a + b, 0) / rrVals.length : null;
+          const avgST = stVals.length > 0 ? stVals.reduce((a, b) => a + b, 0) / stVals.length : null;
+
+          const wt = whoopToday as any;
+          const sigs: NonNullable<typeof fitlookAdvancedSignals> = {};
+          if (wt?.respiratory_rate != null) sigs.respiratoryRate = wt.respiratory_rate;
+          if (wt?.respiratory_rate != null && avgRR != null) sigs.respiratoryRateDelta = Math.round((wt.respiratory_rate - avgRR) * 10) / 10;
+          if (wt?.skin_temperature != null && avgST != null) sigs.skinTempDelta = Math.round((wt.skin_temperature - avgST) * 10) / 10;
+          if (wt?.spo2_percentage != null) sigs.spo2 = Math.round(wt.spo2_percentage);
+          if (wt?.sleep_efficiency_pct != null) sigs.sleepEfficiency = wt.sleep_efficiency_pct;
+          if (wt?.sleep_stages) sigs.sleepStages = {
+            rem: wt.sleep_stages.rem_sleep_minutes ?? 0,
+            deep: wt.sleep_stages.deep_sleep_minutes ?? 0,
+            light: wt.sleep_stages.light_sleep_minutes ?? 0,
+          };
+          if (wt?.average_heart_rate != null) sigs.cycleAvgHR = wt.average_heart_rate;
+          if (Object.keys(sigs).length > 0) fitlookAdvancedSignals = sigs;
+        } catch { /* graceful */ }
+
+        // Sleep debt
+        const sleepNeededMins = (whoopToday as any)?.sleep_needed_minutes ?? undefined;
+        const actualSleepMins = sleepHours != null ? Math.round(sleepHours * 60) : undefined;
+        if (sleepNeededMins != null && actualSleepMins != null) {
+          fitlookSleepDebtMinutes = Math.max(0, sleepNeededMins - actualSleepMins);
+        }
       } catch (e) {
         console.log('[FITLOOK] WHOOP data not available:', (e as Error).message);
       }
@@ -5043,6 +5169,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userGoalTitle,
         injuryNotes,
         userContextSummary: fitlookContextSummary,
+        advancedRecoverySignals: fitlookAdvancedSignals,
+        sleepDebtMinutes: fitlookSleepDebtMinutes,
       });
 
       // Store immutably
@@ -5053,7 +5181,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       console.log(`[FITLOOK] Generated and stored for user=${userId} date=${todayLocal}`);
-      res.json({ ...payload, cached: false, created_at: record.createdAt });
+      res.json({ ...payload, cached: false, created_at: record.createdAt, sleepDebtMinutes: fitlookSleepDebtMinutes ?? null });
 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

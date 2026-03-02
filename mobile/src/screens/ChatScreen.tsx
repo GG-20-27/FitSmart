@@ -435,6 +435,9 @@ export default function ChatScreen() {
         hasHandledPrefill.current = true;
         setInputText(params.prefilledMessage);
 
+        // Clear route params immediately so returning to this tab doesn't re-apply them
+        navigation.setParams({ prefilledMessage: undefined, autoSubmit: undefined } as any);
+
         // If autoSubmit is true, trigger auto-send
         if (params.autoSubmit) {
           setPendingAutoSend(params.prefilledMessage);
@@ -442,8 +445,8 @@ export default function ChatScreen() {
       }
 
       return () => {
-        // Reset when leaving screen so it can handle new params next time
-        hasHandledPrefill.current = false;
+        // intentionally not resetting hasHandledPrefill here —
+        // params are cleared above, so a fresh navigate will bring new params
       };
     }, [route.params])
   );

@@ -305,6 +305,15 @@ export default function FitLookScreen() {
               </View>
             ))}
           </View>
+          {fitlook.sleepDebtMinutes != null && fitlook.sleepDebtMinutes > 0 ? (
+            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 8, fontStyle: 'italic' }}>
+              {`Sleep debt: ${Math.floor(fitlook.sleepDebtMinutes / 60)}h ${fitlook.sleepDebtMinutes % 60}m`}
+            </Text>
+          ) : fitlook.sleepDebtMinutes != null && fitlook.sleepDebtMinutes <= 0 ? (
+            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 8, fontStyle: 'italic' }}>
+              Sleep target met
+            </Text>
+          ) : null}
         </View>
 
         {/* B) Today's Focus */}

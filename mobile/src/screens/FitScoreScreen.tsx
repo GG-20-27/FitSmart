@@ -21,6 +21,7 @@ import {
   calculateFitScore,
   getCoachSummary,
   getStoredFitScore,
+  getWhoopWorkouts,
   formatDate,
   type MealData,
   type TrainingDataEntry,
@@ -30,6 +31,7 @@ import {
   type CoachSlide,
   type StoredFitScore,
   type WaterIntakeBand,
+  type WhoopWorkout,
 } from '../api/fitscore';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -543,6 +545,12 @@ export default function FitScoreScreen() {
   const [trainingComment, setTrainingComment] = useState('');
   const [trainingSkipped, setTrainingSkipped] = useState(false);
 
+  // WHOOP import modal
+  const [showWhoopImport, setShowWhoopImport] = useState(false);
+  const [whoopWorkouts, setWhoopWorkouts] = useState<WhoopWorkout[]>([]);
+  const [loadingWhoopWorkouts, setLoadingWhoopWorkouts] = useState(false);
+  const [durationPickerKey, setDurationPickerKey] = useState(0);
+
   // Hydration picker — stored per date in AsyncStorage
   const [waterIntakeBand, setWaterIntakeBand] = useState<WaterIntakeBand | null>(null);
 
@@ -964,6 +972,8 @@ export default function FitScoreScreen() {
         timingSignals: fitScoreData.timingSignals,
         waterIntakeBand: fitScoreData.waterIntakeBand ?? waterIntakeBand ?? null,
         dailyHabits: habitsContext,
+        advancedRecoverySignals: fitScoreData.advancedRecoverySignals,
+        sleepDebtMinutes: fitScoreData.sleepDebtMinutes,
       });
       setCoachSummary(summary);
       if (dateStr) {
@@ -1189,6 +1199,7 @@ export default function FitScoreScreen() {
     const notes = mealNotes;
     const capturedTime = mealTime;
     const assetId = pendingMealAssetId;
+    const editId = editingMealId; // snapshot before clearing
 
     // Clear form state immediately so the next modal open starts fresh
     setPendingMealImage(null);
@@ -1202,20 +1213,34 @@ export default function FitScoreScreen() {
     // Unique negative temp ID so concurrent pending meals don't collide
     const tempId = -Date.now();
 
-    // Create temporary placeholder meal using the snapshotted values
-    const tempMeal: MealData = {
-      id: tempId,
-      mealType: mealType,
-      mealNotes: notes || undefined,
-      imageUri: imageUri,
-      date: formatDate(selectedDate),
-      uploadedAt: new Date().toISOString(),
-    };
-
-    // Add placeholder to meals array using functional update (safe with concurrent adds)
-    setMeals(currentMeals => [...currentMeals, tempMeal]);
+    // If editing, remove the old meal from UI immediately and replace with placeholder
+    if (editId) {
+      setMeals(currentMeals => currentMeals.map(m => m.id === editId ? { ...m, id: tempId, imageUri } : m));
+    } else {
+      // Create temporary placeholder meal using the snapshotted values
+      const tempMeal: MealData = {
+        id: tempId,
+        mealType: mealType,
+        mealNotes: notes || undefined,
+        imageUri: imageUri,
+        date: formatDate(selectedDate),
+        uploadedAt: new Date().toISOString(),
+      };
+      // Add placeholder to meals array using functional update (safe with concurrent adds)
+      setMeals(currentMeals => [...currentMeals, tempMeal]);
+    }
 
     try {
+      // If editing, delete the old meal from the server before uploading the replacement
+      if (editId) {
+        try {
+          await deleteMealAPI(editId);
+        } catch (err) {
+          console.error('[MEAL EDIT] Failed to delete old meal:', err);
+          // Continue regardless — upload the new version
+        }
+      }
+
       const newMeal = await uploadMeal({
         imageUri: imageUri,
         mealType: mealType,
@@ -1244,7 +1269,7 @@ export default function FitScoreScreen() {
       console.log('Meal uploaded successfully:', newMeal);
     } catch (error) {
       console.error('Failed to upload meal:', error);
-      // Remove only this upload's placeholder on error
+      // Remove the placeholder on error (edit or new)
       setMeals(currentMeals => currentMeals.filter(m => m.id !== tempId));
       Alert.alert('Upload Failed', 'Failed to upload meal. Please try again.');
     } finally {
@@ -1481,6 +1506,36 @@ export default function FitScoreScreen() {
     );
   };
 
+  const handleOpenWhoopImport = async () => {
+    setShowWhoopImport(true);
+    setLoadingWhoopWorkouts(true);
+    try {
+      const workouts = await getWhoopWorkouts(formatDate(selectedDate));
+      setWhoopWorkouts(workouts);
+    } catch (e) {
+      console.error('[WHOOP IMPORT] Failed to fetch workouts:', e);
+      setWhoopWorkouts([]);
+    } finally {
+      setLoadingWhoopWorkouts(false);
+    }
+  };
+
+  const handleImportWhoopWorkout = (workout: WhoopWorkout) => {
+    setShowWhoopImport(false);
+    // Round to nearest 10 min — iOS picker uses minuteInterval={10}
+    const totalMins = Math.round(workout.duration_minutes / 10) * 10 || 10;
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    setTrainingType(workout.sport_name);
+    setTrainingDurationHours(hours);
+    setTrainingDurationMinutes(mins);
+    setDurationPickerKey(k => k + 1); // force DateTimePicker to re-mount with new value
+    if (workout.strain != null) {
+      setTrainingComment(`WHOOP strain: ${workout.strain.toFixed(1)}`);
+    }
+    setTrainingEditing(true);
+  };
+
   const handleAutofillFromCalendar = () => {
     // TODO: Implement calendar API integration
     Alert.alert('Coming Soon', 'Calendar integration will be available soon!');
@@ -1592,7 +1647,7 @@ export default function FitScoreScreen() {
       {!isPastDate && (<View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Meals</Text>
-          {hasMeals && (isToday || isYesterday) && (
+          {hasMeals && (isToday || isYesterday) && !showFitScoreResult && (
             <TouchableOpacity
               onPress={() => setIsEditingMeals(!isEditingMeals)}
               style={styles.editButton}
@@ -1613,7 +1668,7 @@ export default function FitScoreScreen() {
           <View style={styles.emptyState}>
             <Ionicons name="restaurant-outline" size={48} color={colors.surfaceMute} />
             <Text style={styles.emptyStateText}>No meals logged yet</Text>
-            {(isToday || isYesterday) && (
+            {(isToday || isYesterday) && !showFitScoreResult && (
               <Button
                 onPress={handleAddMealPress}
                 style={styles.addButton}
@@ -1659,7 +1714,7 @@ export default function FitScoreScreen() {
                 </View>
               </TouchableOpacity>
             ))}
-            {(isToday || isYesterday) && (
+            {(isToday || isYesterday) && !showFitScoreResult && (
               <TouchableOpacity
                 style={styles.addMealCard}
                 onPress={handleAddMealPress}
@@ -1673,7 +1728,7 @@ export default function FitScoreScreen() {
       </View>)}
 
       {/* Hydration picker — optional, below Meals, today/yesterday only */}
-      {!isPastDate && (
+      {!isPastDate && !showFitScoreResult && (
         <View style={styles.waterSection}>
           <View style={styles.waterHeader}>
             <Ionicons name="water-outline" size={15} color={colors.textMuted} />
@@ -1700,7 +1755,7 @@ export default function FitScoreScreen() {
       )}
 
       {/* Daily Habits Check-in — today/yesterday only */}
-      {!isPastDate && (
+      {!isPastDate && !showFitScoreResult && (
         <View style={styles.habitsSection}>
           <View style={styles.habitsSectionHeader}>
             <Ionicons name="checkmark-circle-outline" size={15} color={colors.textMuted} />
@@ -1741,21 +1796,32 @@ export default function FitScoreScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Training</Text>
-            {hasTraining && (isToday || isYesterday) && (
-              <TouchableOpacity
-                onPress={() => setIsEditingTrainings(!isEditingTrainings)}
-                style={styles.editButton}
-              >
-                <Ionicons
-                  name={isEditingTrainings ? "checkmark-circle" : "create-outline"}
-                  size={22}
-                  color={isEditingTrainings ? colors.accent : colors.textMuted}
-                />
-                <Text style={[styles.editButtonText, isEditingTrainings && styles.editButtonTextActive]}>
-                  {isEditingTrainings ? 'Done' : 'Edit Trainings'}
-                </Text>
-              </TouchableOpacity>
-            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {(isToday || isYesterday) && !showFitScoreResult && !trainingEditing && (
+                <TouchableOpacity
+                  onPress={handleOpenWhoopImport}
+                  style={[styles.editButton, { borderWidth: 1, borderColor: colors.surfaceMute, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }]}
+                >
+                  <Ionicons name="download-outline" size={16} color={colors.textMuted} />
+                  <Text style={[styles.editButtonText, { fontSize: 12 }]}>Import WHOOP</Text>
+                </TouchableOpacity>
+              )}
+              {hasTraining && (isToday || isYesterday) && !showFitScoreResult && (
+                <TouchableOpacity
+                  onPress={() => setIsEditingTrainings(!isEditingTrainings)}
+                  style={styles.editButton}
+                >
+                  <Ionicons
+                    name={isEditingTrainings ? "checkmark-circle" : "create-outline"}
+                    size={22}
+                    color={isEditingTrainings ? colors.accent : colors.textMuted}
+                  />
+                  <Text style={[styles.editButtonText, isEditingTrainings && styles.editButtonTextActive]}>
+                    {isEditingTrainings ? 'Done' : 'Edit Trainings'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           {/* Show existing training sessions as cards */}
@@ -1822,14 +1888,23 @@ export default function FitScoreScreen() {
                   </TouchableOpacity>
                 );
               })}
-              {(isToday || isYesterday) && !trainingEditing && (
-                <TouchableOpacity
-                  style={styles.addTrainingCard}
-                  onPress={() => setTrainingEditing(true)}
-                >
-                  <Ionicons name="add-circle" size={32} color={colors.accent} />
-                  <Text style={styles.addTrainingText}>Add Training</Text>
-                </TouchableOpacity>
+              {(isToday || isYesterday) && !trainingEditing && !showFitScoreResult && (
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    style={styles.addTrainingCard}
+                    onPress={() => setTrainingEditing(true)}
+                  >
+                    <Ionicons name="add-circle" size={32} color={colors.accent} />
+                    <Text style={styles.addTrainingText}>Add Training</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addTrainingCard, { borderColor: colors.surfaceMute }]}
+                    onPress={handleOpenWhoopImport}
+                  >
+                    <Ionicons name="download-outline" size={28} color={colors.textMuted} />
+                    <Text style={[styles.addTrainingText, { color: colors.textMuted, fontSize: 11 }]}>Import WHOOP</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           )}
@@ -1838,14 +1913,23 @@ export default function FitScoreScreen() {
             <View style={styles.emptyState}>
               <Ionicons name="barbell-outline" size={48} color={colors.surfaceMute} />
               <Text style={styles.emptyStateText}>Add training context</Text>
-              {(isToday || isYesterday) && (
-                <TouchableOpacity
-                  style={styles.addTrainingEmptyCard}
-                  onPress={() => setTrainingEditing(true)}
-                >
-                  <Ionicons name="add-circle-outline" size={28} color={colors.accent} />
-                  <Text style={[styles.addTrainingText, { marginTop: 0 }]}>Add Training Details</Text>
-                </TouchableOpacity>
+              {(isToday || isYesterday) && !showFitScoreResult && (
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <TouchableOpacity
+                    style={styles.addTrainingEmptyCard}
+                    onPress={() => setTrainingEditing(true)}
+                  >
+                    <Ionicons name="add-circle-outline" size={28} color={colors.accent} />
+                    <Text style={[styles.addTrainingText, { marginTop: 0 }]}>Add Training Details</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.addTrainingEmptyCard, { borderColor: colors.surfaceMute }]}
+                    onPress={handleOpenWhoopImport}
+                  >
+                    <Ionicons name="download-outline" size={24} color={colors.textMuted} />
+                    <Text style={[styles.addTrainingText, { marginTop: 0, color: colors.textMuted, fontSize: 11 }]}>Import WHOOP</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
           ) : trainingEditing ? (
@@ -1899,6 +1983,7 @@ export default function FitScoreScreen() {
               {Platform.OS === 'ios' ? (
                 <View style={styles.iosTimePickerContainer}>
                   <DateTimePicker
+                    key={durationPickerKey}
                     value={(() => {
                       const date = new Date();
                       date.setHours(trainingDurationHours);
@@ -2572,6 +2657,99 @@ export default function FitScoreScreen() {
                 </View>
               )}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* WHOOP Import Modal */}
+      <Modal
+        visible={showWhoopImport}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowWhoopImport(false)}
+      >
+        <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.7)' }}>
+          <View style={{ backgroundColor: colors.bgSecondary, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '65%' }}>
+            {/* Handle bar */}
+            <View style={{ alignItems: 'center', paddingTop: 12, paddingBottom: 4 }}>
+              <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: colors.surfaceMute }} />
+            </View>
+
+            {/* Header */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md }}>
+              <View>
+                <Text style={{ color: colors.textPrimary, fontSize: 17, fontWeight: '700', letterSpacing: 0.2 }}>Import from WHOOP</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 2 }}>Tap an activity to auto-fill training</Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowWhoopImport(false)}
+                style={{ backgroundColor: colors.surfaceMute, borderRadius: 14, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="close" size={16} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Divider */}
+            <View style={{ height: 1, backgroundColor: colors.surfaceMute, marginHorizontal: spacing.lg }} />
+
+            {/* Content */}
+            {loadingWhoopWorkouts ? (
+              <View style={{ alignItems: 'center', paddingVertical: spacing.xl * 2 }}>
+                <ActivityIndicator color={colors.accent} size="large" />
+                <Text style={{ color: colors.textMuted, marginTop: spacing.md, fontSize: 14 }}>Fetching today's activities…</Text>
+              </View>
+            ) : whoopWorkouts.length === 0 ? (
+              <View style={{ alignItems: 'center', paddingVertical: spacing.xl * 2, paddingHorizontal: spacing.lg }}>
+                <Ionicons name="barbell-outline" size={44} color={colors.surfaceMute} />
+                <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600', marginTop: spacing.md }}>No activities found</Text>
+                <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: 'center', lineHeight: 18 }}>
+                  No WHOOP workouts recorded for this date.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ paddingHorizontal: spacing.lg }} showsVerticalScrollIndicator={false}>
+                <View style={{ paddingBottom: spacing.xl }}>
+                  {whoopWorkouts.map((w, index) => (
+                    <TouchableOpacity
+                      key={w.id}
+                      onPress={() => handleImportWhoopWorkout(w)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: colors.bgPrimary,
+                        borderRadius: 14,
+                        padding: spacing.md,
+                        marginTop: spacing.sm,
+                        borderWidth: 1,
+                        borderColor: colors.surfaceMute,
+                      }}
+                    >
+                      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: colors.bgSecondary, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md, borderWidth: 1, borderColor: colors.accent + '40' }}>
+                        <Ionicons name="fitness-outline" size={20} color={colors.accent} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ color: colors.textPrimary, fontSize: 15, fontWeight: '600' }}>{w.sport_name}</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3, gap: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                            <Ionicons name="time-outline" size={12} color={colors.textMuted} />
+                            <Text style={{ color: colors.textMuted, fontSize: 12 }}>{w.duration_minutes} min</Text>
+                          </View>
+                          {w.strain != null && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                              <Ionicons name="flash-outline" size={12} color={colors.accent} />
+                              <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '600' }}>Strain {w.strain.toFixed(1)}</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                      <View style={{ backgroundColor: colors.accent + '20', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5 }}>
+                        <Text style={{ color: colors.accent, fontSize: 12, fontWeight: '600' }}>Import</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>

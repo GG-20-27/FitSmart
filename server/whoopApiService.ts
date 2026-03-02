@@ -88,6 +88,7 @@ export interface WhoopTodayData {
   skin_temperature?: number;
   spo2_percentage?: number;
   respiratory_rate?: number;
+  sleep_needed_minutes?: number; // WHOOP's recommended sleep for the night
   calories_burned?: number;
   activity_log?: any[];
   raw_data?: any;
@@ -639,6 +640,84 @@ export class WhoopApiService {
     }
   }
 
+  async getWorkoutsForDate(userId: string, date: string): Promise<Array<{
+    id: string;
+    sport_name: string;
+    start: string;
+    end: string;
+    duration_minutes: number;
+    strain: number | null;
+  }>> {
+    if (!userId) return [];
+    try {
+      const headers = await this.authHeader(userId);
+
+      // Broad window: start = previous day T22:00Z, end = next day T02:00Z
+      // This covers any Zurich-timezone workout regardless of UTC offset (UTC+1 winter, UTC+2 summer)
+      const dayMs = new Date(date).getTime();
+      const startStr = new Date(dayMs - 2 * 3600 * 1000).toISOString();  // date minus 2h
+      const endStr   = new Date(dayMs + 26 * 3600 * 1000).toISOString(); // date plus 26h
+      const url = `${BASE}/activity/workout?start=${startStr}&end=${endStr}`;
+
+      console.log(`[WHOOP] getWorkoutsForDate userId=${userId} date=${date}`);
+      console.log(`[WHOOP] workout query URL: ${url}`);
+
+      const response = await axios.get(url, { headers, timeout: 15000 });
+
+      console.log(`[WHOOP] workout response status=${response.status} records=${response.data?.records?.length ?? 0}`);
+
+      if (!response.data?.records?.length) return [];
+
+      // Map sport_id → human name (WHOOP v2 API uses sport_id integer, not sport_name)
+      const sportNames: Record<number, string> = {
+        [-1]: 'Activity', 0: 'Running', 1: 'Cycling', 16: 'Baseball',
+        17: 'Basketball', 18: 'Rowing', 21: 'Football', 22: 'Golf',
+        24: 'Ice Hockey', 25: 'Lacrosse', 27: 'Rugby', 29: 'Skiing',
+        30: 'Soccer', 33: 'Swimming', 34: 'Tennis', 36: 'Volleyball',
+        39: 'Boxing', 42: 'Dance', 43: 'Pilates', 44: 'Yoga',
+        45: 'Weightlifting', 48: 'Functional Fitness', 52: 'Hiking',
+        55: 'Martial Arts', 56: 'Mountain Biking', 57: 'Powerlifting',
+        58: 'Rock Climbing', 61: 'Walking', 63: 'Elliptical',
+        64: 'Stairmaster', 67: 'HIIT', 70: 'Rowing Machine',
+        73: 'Floorball', 78: 'Strength', 80: 'Circuit Training',
+        83: 'Lap Swimming', 84: 'Open Water Swimming', 89: 'CrossFit',
+        91: 'Pickleball',
+      };
+
+      // Filter to workouts that actually fall on the requested date (local Zurich day)
+      const targetDateStr = date; // YYYY-MM-DD
+      return response.data.records
+        .filter((w: any) => {
+          // Keep if workout started on the requested date in Europe/Zurich
+          const localDate = new Date(w.start).toLocaleDateString('sv-SE', { timeZone: 'Europe/Zurich' });
+          return localDate === targetDateStr;
+        })
+        .map((w: any) => {
+          const startMs = new Date(w.start).getTime();
+          const endMs = new Date(w.end ?? w.start).getTime();
+          const sportId = w.sport_id ?? -1;
+          const rawLabel = w.sport_name ?? sportNames[sportId] ?? `Sport ${sportId}`;
+          const sportLabel = rawLabel.charAt(0).toUpperCase() + rawLabel.slice(1);
+          console.log(`[WHOOP] workout: id=${w.id} sport_id=${sportId} sport_name=${w.sport_name} label=${sportLabel} score_state=${w.score_state}`);
+          return {
+            id: String(w.id),
+            sport_name: sportLabel,
+            start: w.start,
+            end: w.end ?? w.start,
+            duration_minutes: Math.round((endMs - startMs) / 60000),
+            strain: w.score?.strain ?? null,
+          };
+        });
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        console.error(`[WHOOP] getWorkoutsForDate HTTP ${error.response?.status}:`, error.response?.data ?? error.message);
+      } else {
+        console.error('[WHOOP] getWorkoutsForDate error:', error instanceof Error ? error.message : String(error));
+      }
+      return [];
+    }
+  }
+
   async getBodyMeasurements(userId: string): Promise<any> {
     if (!userId) {
       throw new Error('User ID is required to get body measurements');
@@ -823,6 +902,7 @@ export class WhoopApiService {
       let sleepEfficiencyPct: number | null = null;
       let timeInBedHours: number | null = null;
       let stageSummary: any = null;
+      let sleepNeededMinutes: number | null = null;
       
       console.log(`[SLEEP DEBUG] recovery exists: ${!!recovery}, sleep_id: ${recovery?.sleep_id}`);
       if (recovery?.sleep_id) {
@@ -853,6 +933,15 @@ export class WhoopApiService {
             // Extract efficiency if present
             if (typeof sleepData?.score?.sleep_efficiency_percentage === "number") {
               sleepEfficiencyPct = Math.round(sleepData.score.sleep_efficiency_percentage);
+            }
+
+            // Extract sleep needed (for sleep debt calculation)
+            const sleepNeededObj = sleepData?.score?.sleep_needed;
+            if (sleepNeededObj) {
+              const totalMs = (sleepNeededObj.baseline_milli ?? 0)
+                + (sleepNeededObj.need_from_sleep_debt_milli ?? 0)
+                + (sleepNeededObj.need_from_recent_strain_milli ?? 0);
+              if (totalMs > 0) sleepNeededMinutes = Math.round(totalMs / 60000);
             }
 
             // Compute time in bed (hours)
@@ -956,6 +1045,7 @@ export class WhoopApiService {
         // fallback & context
         time_in_bed_hours: timeInBedHours ?? undefined,
         sleep_efficiency_pct: sleepEfficiencyPct ?? undefined,
+        sleep_needed_minutes: sleepNeededMinutes ?? undefined,
         hrv: recovery?.score?.hrv_rmssd_milli ?? undefined,
         resting_heart_rate: recovery?.score?.resting_heart_rate ?? undefined,
         average_heart_rate: workoutData?.avgHeartRate ?? latestCycle.score?.average_heart_rate ?? undefined,

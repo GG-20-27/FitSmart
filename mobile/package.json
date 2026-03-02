@@ -5,6 +5,7 @@
   "main": "node_modules/expo/AppEntry.js",
   "scripts": {
     "start": "expo start --clear",
+    "dev": "EXPO_PUBLIC_API_URL=https://fitsmart.ngrok.app expo start --clear",
     "start:tunnel": "expo start --clear --tunnel",
     "ios": "expo start --clear --ios",
     "ios:tunnel": "expo start --clear --tunnel --ios",
@@ -33,6 +34,7 @@
     "expo-image-picker": "~17.0.10",
     "expo-linear-gradient": "^15.0.7",
     "expo-secure-store": "~15.0.7",
+    "expo-updates": "~29.0.16",
     "expo-web-browser": "~15.0.9",
     "pretty-format": "^30.2.0",
     "react": "19.1.0",
