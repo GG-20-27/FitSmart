@@ -549,7 +549,6 @@ export default function FitScoreScreen() {
   const [showWhoopImport, setShowWhoopImport] = useState(false);
   const [whoopWorkouts, setWhoopWorkouts] = useState<WhoopWorkout[]>([]);
   const [loadingWhoopWorkouts, setLoadingWhoopWorkouts] = useState(false);
-  const [durationPickerKey, setDurationPickerKey] = useState(0);
 
   // Hydration picker — stored per date in AsyncStorage
   const [waterIntakeBand, setWaterIntakeBand] = useState<WaterIntakeBand | null>(null);
@@ -1522,14 +1521,13 @@ export default function FitScoreScreen() {
 
   const handleImportWhoopWorkout = (workout: WhoopWorkout) => {
     setShowWhoopImport(false);
-    // Round to nearest 10 min — iOS picker uses minuteInterval={10}
-    const totalMins = Math.round(workout.duration_minutes / 10) * 10 || 10;
+    const totalMins = workout.duration_minutes || 10;
     const hours = Math.floor(totalMins / 60);
     const mins = totalMins % 60;
+    console.log(`[WHOOP IMPORT] Setting duration: ${hours}h ${mins}min (${totalMins} total min)`);
     setTrainingType(workout.sport_name);
     setTrainingDurationHours(hours);
     setTrainingDurationMinutes(mins);
-    setDurationPickerKey(k => k + 1); // force DateTimePicker to re-mount with new value
     if (workout.strain != null) {
       setTrainingComment(`WHOOP strain: ${workout.strain.toFixed(1)}`);
     }
@@ -1889,22 +1887,13 @@ export default function FitScoreScreen() {
                 );
               })}
               {(isToday || isYesterday) && !trainingEditing && !showFitScoreResult && (
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity
-                    style={styles.addTrainingCard}
-                    onPress={() => setTrainingEditing(true)}
-                  >
-                    <Ionicons name="add-circle" size={32} color={colors.accent} />
-                    <Text style={styles.addTrainingText}>Add Training</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.addTrainingCard, { borderColor: colors.surfaceMute }]}
-                    onPress={handleOpenWhoopImport}
-                  >
-                    <Ionicons name="download-outline" size={28} color={colors.textMuted} />
-                    <Text style={[styles.addTrainingText, { color: colors.textMuted, fontSize: 11 }]}>Import WHOOP</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                  style={styles.addTrainingCard}
+                  onPress={() => setTrainingEditing(true)}
+                >
+                  <Ionicons name="add-circle" size={32} color={colors.accent} />
+                  <Text style={styles.addTrainingText}>Add Training</Text>
+                </TouchableOpacity>
               )}
             </View>
           )}
@@ -1914,22 +1903,13 @@ export default function FitScoreScreen() {
               <Ionicons name="barbell-outline" size={48} color={colors.surfaceMute} />
               <Text style={styles.emptyStateText}>Add training context</Text>
               {(isToday || isYesterday) && !showFitScoreResult && (
-                <View style={{ flexDirection: 'row', gap: 8 }}>
-                  <TouchableOpacity
-                    style={styles.addTrainingEmptyCard}
-                    onPress={() => setTrainingEditing(true)}
-                  >
-                    <Ionicons name="add-circle-outline" size={28} color={colors.accent} />
-                    <Text style={[styles.addTrainingText, { marginTop: 0 }]}>Add Training Details</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.addTrainingEmptyCard, { borderColor: colors.surfaceMute }]}
-                    onPress={handleOpenWhoopImport}
-                  >
-                    <Ionicons name="download-outline" size={24} color={colors.textMuted} />
-                    <Text style={[styles.addTrainingText, { marginTop: 0, color: colors.textMuted, fontSize: 11 }]}>Import WHOOP</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity
+                  style={styles.addTrainingEmptyCard}
+                  onPress={() => setTrainingEditing(true)}
+                >
+                  <Ionicons name="add-circle-outline" size={28} color={colors.accent} />
+                  <Text style={[styles.addTrainingText, { marginTop: 0 }]}>Add Training Details</Text>
+                </TouchableOpacity>
               )}
             </View>
           ) : trainingEditing ? (
@@ -1980,99 +1960,74 @@ export default function FitScoreScreen() {
               )}
 
               <Text style={[styles.formLabel, styles.formLabelSpaced]}>Duration <Text style={styles.mandatoryAsterisk}>*</Text></Text>
-              {Platform.OS === 'ios' ? (
-                <View style={styles.iosTimePickerContainer}>
-                  <DateTimePicker
-                    key={durationPickerKey}
-                    value={(() => {
-                      const date = new Date();
-                      date.setHours(trainingDurationHours);
-                      date.setMinutes(trainingDurationMinutes);
-                      return date;
-                    })()}
-                    mode="countdown"
-                    display="spinner"
-                    minuteInterval={10}
-                    onChange={(event: DateTimePickerEvent, selectedDate?: Date) => {
-                      if (selectedDate) {
-                        setTrainingDurationHours(selectedDate.getHours());
-                        setTrainingDurationMinutes(selectedDate.getMinutes());
-                      }
-                    }}
-                    textColor={colors.textPrimary}
-                    style={styles.iosTimePicker}
-                  />
-                </View>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    style={styles.timePickerButton}
-                    onPress={() => setShowTrainingDurationPicker(!showTrainingDurationPicker)}
-                  >
-                    <Ionicons name="time-outline" size={20} color={colors.accent} />
-                    <Text style={styles.timePickerButtonText}>
-                      {trainingDurationHours > 0 ? `${trainingDurationHours}h ` : ''}{trainingDurationMinutes}min
-                    </Text>
-                    <Ionicons name={showTrainingDurationPicker ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textMuted} />
-                  </TouchableOpacity>
-                  {showTrainingDurationPicker && (
-                    <View style={styles.durationPickerContainer}>
-                      <View style={styles.durationPickerWrapper}>
-                        <View style={styles.durationColumn}>
-                          <Text style={styles.durationColumnLabel}>Hours</Text>
-                          <ScrollView style={styles.durationScrollView} showsVerticalScrollIndicator={false}>
-                            {[0, 1, 2, 3, 4, 5].map((hour) => (
-                              <TouchableOpacity
-                                key={hour}
-                                style={[
-                                  styles.durationOption,
-                                  trainingDurationHours === hour && styles.durationOptionActive,
-                                ]}
-                                onPress={() => setTrainingDurationHours(hour)}
-                              >
-                                <Text style={[
-                                  styles.durationOptionText,
-                                  trainingDurationHours === hour && styles.durationOptionTextActive,
-                                ]}>
-                                  {hour}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
-                          </ScrollView>
-                        </View>
-                        <View style={styles.durationColumn}>
-                          <Text style={styles.durationColumnLabel}>Minutes</Text>
-                          <ScrollView style={styles.durationScrollView} showsVerticalScrollIndicator={false}>
-                            {[0, 10, 20, 30, 40, 50].map((min) => (
-                              <TouchableOpacity
-                                key={min}
-                                style={[
-                                  styles.durationOption,
-                                  trainingDurationMinutes === min && styles.durationOptionActive,
-                                ]}
-                                onPress={() => setTrainingDurationMinutes(min)}
-                              >
-                                <Text style={[
-                                  styles.durationOptionText,
-                                  trainingDurationMinutes === min && styles.durationOptionTextActive,
-                                ]}>
-                                  {min}
-                                </Text>
-                              </TouchableOpacity>
-                            ))}
-                          </ScrollView>
-                        </View>
+              <>
+                <TouchableOpacity
+                  style={styles.timePickerButton}
+                  onPress={() => setShowTrainingDurationPicker(!showTrainingDurationPicker)}
+                >
+                  <Ionicons name="time-outline" size={20} color={colors.accent} />
+                  <Text style={styles.timePickerButtonText}>
+                    {trainingDurationHours > 0 ? `${trainingDurationHours}h ` : ''}{trainingDurationMinutes}min
+                  </Text>
+                  <Ionicons name={showTrainingDurationPicker ? 'chevron-up' : 'chevron-down'} size={20} color={colors.textMuted} />
+                </TouchableOpacity>
+                {showTrainingDurationPicker && (
+                  <View style={styles.durationPickerContainer}>
+                    <View style={styles.durationPickerWrapper}>
+                      <View style={styles.durationColumn}>
+                        <Text style={styles.durationColumnLabel}>Hours</Text>
+                        <ScrollView style={styles.durationScrollView} showsVerticalScrollIndicator={false}>
+                          {[0, 1, 2, 3, 4, 5].map((hour) => (
+                            <TouchableOpacity
+                              key={hour}
+                              style={[
+                                styles.durationOption,
+                                trainingDurationHours === hour && styles.durationOptionActive,
+                              ]}
+                              onPress={() => setTrainingDurationHours(hour)}
+                            >
+                              <Text style={[
+                                styles.durationOptionText,
+                                trainingDurationHours === hour && styles.durationOptionTextActive,
+                              ]}>
+                                {hour}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
                       </View>
-                      <TouchableOpacity
-                        style={styles.durationSaveButton}
-                        onPress={() => setShowTrainingDurationPicker(false)}
-                      >
-                        <Text style={styles.durationSaveButtonText}>Save Duration</Text>
-                      </TouchableOpacity>
+                      <View style={styles.durationColumn}>
+                        <Text style={styles.durationColumnLabel}>Minutes</Text>
+                        <ScrollView style={styles.durationScrollView} showsVerticalScrollIndicator={false}>
+                          {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((min) => (
+                            <TouchableOpacity
+                              key={min}
+                              style={[
+                                styles.durationOption,
+                                trainingDurationMinutes === min && styles.durationOptionActive,
+                              ]}
+                              onPress={() => setTrainingDurationMinutes(min)}
+                            >
+                              <Text style={[
+                                styles.durationOptionText,
+                                trainingDurationMinutes === min && styles.durationOptionTextActive,
+                              ]}>
+                                {min}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
                     </View>
-                  )}
-                </>
-              )}
+                    <TouchableOpacity
+                      style={styles.durationSaveButton}
+                      onPress={() => setShowTrainingDurationPicker(false)}
+                    >
+                      <Text style={styles.durationSaveButtonText}>Save Duration</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
 
               <Text style={[styles.formLabel, styles.formLabelSpaced]}>Goal</Text>
               <TextInput
