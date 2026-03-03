@@ -20,7 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
+import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { API_BASE_URL, getAuthToken } from '../api/client';
 
 // Route params type
@@ -378,6 +378,7 @@ async function postCoachMessage(message: string, images: string[] | undefined, j
 
 export default function ChatScreen() {
   const route = useRoute<RouteProp<{ params: ChatScreenParams }, 'params'>>();
+  const navigation = useNavigation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
