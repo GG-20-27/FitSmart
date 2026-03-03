@@ -2338,12 +2338,13 @@ export default function FitScoreScreen() {
               ) : null}
               <TouchableOpacity
                 style={styles.weakLinkCTA}
-                onPress={() =>
-                  (navigation as any).navigate('FitCoach', {
+                onPress={() => {
+                  const nav = (navigation as any).getParent() ?? navigation;
+                  nav.navigate('FitCoach', {
                     prefilledMessage: weakLink.ctaMessage,
                     autoSubmit: false,
-                  })
-                }
+                  });
+                }}
                 activeOpacity={0.75}
               >
                 <Text style={styles.weakLinkCTAText}>Fix this with FitCoach</Text>

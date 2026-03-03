@@ -20,7 +20,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import Markdown from 'react-native-markdown-display';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRoute, useNavigation, RouteProp, useFocusEffect } from '@react-navigation/native';
+import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { API_BASE_URL, getAuthToken } from '../api/client';
 
 // Route params type
@@ -390,7 +390,7 @@ export default function ChatScreen() {
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string>('default');
-  const hasHandledPrefill = useRef(false);
+
   const [pendingAutoSend, setPendingAutoSend] = useState<string | null>(null);
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
   const [showSessionMenu, setShowSessionMenu] = useState(false);
@@ -427,30 +427,17 @@ export default function ChatScreen() {
     loadChatData();
   }, []);
 
-  // Reset prefill handler when screen loses focus
-  useFocusEffect(
-    useCallback(() => {
-      // On focus, check for prefilled message
-      const params = route.params;
-      if (params?.prefilledMessage && !hasHandledPrefill.current) {
-        hasHandledPrefill.current = true;
-        setInputText(params.prefilledMessage);
-
-        // Clear route params immediately so returning to this tab doesn't re-apply them
-        navigation.setParams({ prefilledMessage: undefined, autoSubmit: undefined } as any);
-
-        // If autoSubmit is true, trigger auto-send
-        if (params.autoSubmit) {
-          setPendingAutoSend(params.prefilledMessage);
-        }
+  // Handle prefilled messages from other screens
+  useEffect(() => {
+    if (route.params?.prefilledMessage) {
+      setInputText(route.params.prefilledMessage);
+      if (route.params.autoSubmit) {
+        setPendingAutoSend(route.params.prefilledMessage);
       }
-
-      return () => {
-        // intentionally not resetting hasHandledPrefill here —
-        // params are cleared above, so a fresh navigate will bring new params
-      };
-    }, [route.params])
-  );
+      // Clear params so coming back to this tab doesn't re-apply them
+      navigation.setParams({ prefilledMessage: undefined, autoSubmit: undefined } as any);
+    }
+  }, [route.params?.prefilledMessage]);
 
   // Handle auto-send when pendingAutoSend is set
   useEffect(() => {
