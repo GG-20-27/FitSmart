@@ -5298,35 +5298,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // No roast at all — compute eligibility so the mobile can show the right lock screen
-      const today = zurichNow.toISODate()!;
+      // No roast yet — eligibility is Sunday only (no active-day requirement for now)
       const isSunday = zurichNow.weekday === 7; // Luxon: 1=Mon … 7=Sun
+      const eligible = isSunday;
 
-      let activeDays = 0;
-      try {
-        for (let i = 0; i < 7; i++) {
-          const day = DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!;
-          if (day > today) break; // Don't count future days
-          const [scores, training, mealList] = await Promise.all([
-            db.select({ id: fitScores.id }).from(fitScores)
-              .where(and(eq(fitScores.userId, userId), eq(fitScores.date, day))).limit(1),
-            storage.getTrainingDataByUserAndDate(userId, day),
-            storage.getMealsByUserAndDate(userId, day),
-          ]);
-          if (scores.length > 0 || training.length > 0 || mealList.length > 0) activeDays++;
-        }
-      } catch { /* graceful */ }
-
-      const eligible = isSunday && activeDays >= 3;
-
-      console.log(`[FITROAST] No roast yet for user=${userId}: isSunday=${isSunday}, activeDays=${activeDays}, eligible=${eligible}`);
+      console.log(`[FITROAST] No roast yet for user=${userId}: isSunday=${isSunday}, eligible=${eligible}`);
 
       return res.status(404).json({
         error: 'No roast for this week yet',
         needs_generate: eligible,
         eligible,
         is_sunday: isSunday,
-        active_days: activeDays,
+        active_days: 7, // not used for gating anymore — report full week so mobile shows unlocked pips
         week_start: weekStart,
         week_end: weekEnd,
       });
@@ -5348,31 +5331,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
       const weekStart = zurichNow.startOf('week').toISODate()!;
 
-      // Eligibility check: Sunday only, ≥5 active days this week
-      const today = zurichNow.toISODate()!;
+      // Eligibility check: Sunday only
       const isSunday = zurichNow.weekday === 7;
 
-      let activeDays = 0;
-      try {
-        for (let i = 0; i < 7; i++) {
-          const day = DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!;
-          if (day > today) break;
-          const [scores, training, mealList] = await Promise.all([
-            db.select({ id: fitScores.id }).from(fitScores)
-              .where(and(eq(fitScores.userId, userId), eq(fitScores.date, day))).limit(1),
-            storage.getTrainingDataByUserAndDate(userId, day),
-            storage.getMealsByUserAndDate(userId, day),
-          ]);
-          if (scores.length > 0 || training.length > 0 || mealList.length > 0) activeDays++;
-        }
-      } catch { /* graceful */ }
-
-      if (!isSunday || activeDays < 3) {
-        const message = !isSunday
-          ? 'FitRoast is generated every Sunday based on your weekly performance.'
-          : 'FitRoast unlocks after 3 active days this week.';
-        console.log(`[FITROAST] Not eligible for user=${userId}: isSunday=${isSunday}, activeDays=${activeDays}`);
-        return res.status(403).json({ error: message, active_days: activeDays, is_sunday: isSunday, eligible: false });
+      if (!isSunday) {
+        console.log(`[FITROAST] Not eligible for user=${userId}: not Sunday (weekday=${zurichNow.weekday})`);
+        return res.status(403).json({
+          error: 'FitRoast is generated every Sunday based on your weekly performance.',
+          is_sunday: false,
+          eligible: false,
+        });
       }
 
       // Delete existing roast for this week (allow regeneration on Sunday)

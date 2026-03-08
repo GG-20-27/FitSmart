@@ -155,30 +155,17 @@ export default function FitRoastScreen() {
     );
   }
 
-  // ── Locked — not yet eligible (not Sunday or < 3 active days) ──
+  // ── Locked — only shown Mon–Sat ──
   if (screenState === 'locked') {
-    const daysLeft = Math.max(0, 3 - activeDays);
+    const today = new Date();
+    const daysUntilSunday = (7 - today.getDay()) % 7 || 7;
     return (
       <Animated.View style={[styles.fullCenter, { opacity: screenFade }]}>
-        <Ionicons name="lock-closed-outline" size={44} color={colors.surfaceMute} />
-        <Text style={styles.lockedTitle}>
-          {isSunday ? 'FitRoast Locked' : 'FitRoast Coming Sunday'}
-        </Text>
+        <Ionicons name="flame-outline" size={44} color={colors.surfaceMute} />
+        <Text style={styles.lockedTitle}>FitRoast Coming Sunday</Text>
         <Text style={styles.lockedSubtitle}>
-          FitRoast is generated every Sunday{'\n'}based on your weekly performance.
+          Every Sunday your week gets roasted.{'\n'}Come back in {daysUntilSunday} day{daysUntilSunday !== 1 ? 's' : ''}.
         </Text>
-        {/* Active-day progress pips */}
-        <View style={styles.activeDaysRow}>
-          {[1, 2, 3].map(n => (
-            <View key={n} style={[styles.activeDayPip, n <= activeDays && styles.activeDayPipFilled]} />
-          ))}
-        </View>
-        <Text style={styles.activeDaysText}>{activeDays}/3 active days this week</Text>
-        {daysLeft > 0 && (
-          <Text style={styles.lockedHint}>
-            {daysLeft} more day{daysLeft !== 1 ? 's' : ''} to unlock
-          </Text>
-        )}
       </Animated.View>
     );
   }
