@@ -24,7 +24,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, spacing, typography, radii } from '../theme';
 import { Card } from '../ui/components';
-import { apiRequest } from '../api/client';
+import { apiRequest, getIsAdmin } from '../api/client';
 import {
   getImprovementPlanStatus,
   getPlanContent,
@@ -110,6 +110,10 @@ export default function GoalsScreen() {
   const [totalStreak, setTotalStreak] = useState(0);
   const [avgFitScore, setAvgFitScore] = useState(0);
   const [fitScoreDelta, setFitScoreDelta] = useState(0);
+
+  // Admin gate
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => { getIsAdmin().then(setIsAdmin); }, []);
 
   // Improvement Plan state
   const [improvementPlanStatus, setImprovementPlanStatus] = useState<ImprovementPlanStatus | null>(null);
@@ -311,10 +315,12 @@ export default function GoalsScreen() {
     useCallback(() => {
       loadGoals();
       loadContext();
-      getImprovementPlanStatus()
-        .then(status => setImprovementPlanStatus(status))
-        .catch(() => {});
-    }, [loadGoals, loadContext])
+      if (isAdmin) {
+        getImprovementPlanStatus()
+          .then(status => setImprovementPlanStatus(status))
+          .catch(() => {});
+      }
+    }, [loadGoals, loadContext, isAdmin])
   );
 
   // One-time migration: reset all streaks that were set by the old Goals-based logic
@@ -517,8 +523,8 @@ Identify:
           ))
         )}
 
-        {/* Improvement Plans Section */}
-        {improvementPlanStatus && (improvementPlanStatus.activePlan || (improvementPlanStatus.completedPlans && improvementPlanStatus.completedPlans.length > 0)) && (
+        {/* Improvement Plans Section — admin only until feature is fully released */}
+        {isAdmin && improvementPlanStatus && (improvementPlanStatus.activePlan || (improvementPlanStatus.completedPlans && improvementPlanStatus.completedPlans.length > 0)) && (
           <View style={styles.improvementPlansCard}>
             {/* Card header matching FitScore card style */}
             <View style={styles.planCardHeader}>

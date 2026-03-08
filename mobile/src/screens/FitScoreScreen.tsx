@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
-import { apiRequest } from '../api/client';
+import { apiRequest, getIsAdmin } from '../api/client';
 import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView, Keyboard, Switch } from 'react-native';
@@ -599,6 +599,10 @@ export default function FitScoreScreen() {
   const [coachSummary, setCoachSummary] = useState<CoachSummaryResponse | null>(null);
   const [loadingCoachSummary, setLoadingCoachSummary] = useState(false);
 
+  // Admin gate
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => { getIsAdmin().then(setIsAdmin); }, []);
+
   // Improvement Plan state
   const [improvementPlanStatus, setImprovementPlanStatus] = useState<ImprovementPlanStatus | null>(null);
   const [showPlanModal, setShowPlanModal] = useState(false);
@@ -692,19 +696,20 @@ export default function FitScoreScreen() {
     })();
   }, []);
 
-  // Load improvement plan status on mount
+  // Load improvement plan status on mount (admin only)
   useEffect(() => {
+    if (!isAdmin) return;
     getImprovementPlanStatus()
       .then(status => setImprovementPlanStatus(status))
       .catch(() => {}); // non-fatal
-  }, []);
+  }, [isAdmin]);
 
-  // Load plan habits for today when active plan is known
+  // Load plan habits for today when active plan is known (admin only)
   useEffect(() => {
-    if (!improvementPlanStatus?.activePlan) { setPlanHabits([]); return; }
+    if (!isAdmin || !improvementPlanStatus?.activePlan) { setPlanHabits([]); return; }
     const todayStr = formatDate(new Date());
     getPlanHabitsToday(todayStr).then(setPlanHabits).catch(() => {});
-  }, [improvementPlanStatus?.activePlan?.id]);
+  }, [isAdmin, improvementPlanStatus?.activePlan?.id]);
 
   // Normalize "8", "830", "8:30" → "08:00", "08:30", "08:30"
   const normalizeTime = (raw: string): string => {
@@ -1870,14 +1875,14 @@ export default function FitScoreScreen() {
           <View style={styles.habitsSectionHeader}>
             <Ionicons name="checkmark-circle-outline" size={15} color={colors.textMuted} />
             <Text style={styles.habitsLabel}>Daily Habits</Text>
-            {(dailyHabits.length > 0 || planHabits.length > 0) && (
+            {(dailyHabits.length > 0 || (isAdmin && planHabits.length > 0)) && (
               <Text style={styles.habitsProgress}>
-                {dailyHabits.filter(h => h.done).length + planHabits.filter(h => h.checked).length}/{dailyHabits.length + planHabits.length} done
+                {dailyHabits.filter(h => h.done).length + (isAdmin ? planHabits.filter(h => h.checked).length : 0)}/{dailyHabits.length + (isAdmin ? planHabits.length : 0)} done
               </Text>
             )}
           </View>
 
-          {dailyHabits.length === 0 && planHabits.length === 0 ? (
+          {dailyHabits.length === 0 && (!isAdmin || planHabits.length === 0) ? (
             <Text style={styles.habitsEmptyText}>No daily habits set yet. Add them in Goals.</Text>
           ) : (
             <View style={styles.habitsChecklist}>
@@ -1896,7 +1901,7 @@ export default function FitScoreScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
-              {planHabits.length > 0 && (
+              {isAdmin && planHabits.length > 0 && (
                 <>
                   <View style={styles.planHabitsDivider} />
                   <View style={styles.planHabitsHeader}>
@@ -2487,8 +2492,8 @@ export default function FitScoreScreen() {
             </View>
           ) : null}
 
-          {/* Improvement Plan Section */}
-          {improvementPlanStatus && (improvementPlanStatus.activePlan || improvementPlanStatus.pendingPlan) && (
+          {/* Improvement Plan Section — admin only until feature is fully released */}
+          {isAdmin && improvementPlanStatus && (improvementPlanStatus.activePlan || improvementPlanStatus.pendingPlan) && (
             <View style={styles.improvementPlanSection}>
               {/* Card header */}
               <View style={styles.planCardHeader}>

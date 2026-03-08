@@ -87,6 +87,20 @@ export async function getAuthToken(): Promise<string | null> {
   }
 }
 
+/** Decode the JWT payload (no signature verification — for UI feature flags only). */
+export async function getIsAdmin(): Promise<boolean> {
+  try {
+    const token = await getAuthToken();
+    if (!token) return false;
+    const payload = token.split('.')[1];
+    if (!payload) return false;
+    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+    return decoded?.role === 'admin';
+  } catch {
+    return false;
+  }
+}
+
 export async function apiRequest<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getAuthToken();
   const url = path.startsWith('http') ? path : `${API_BASE_URL}${path}`;
