@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { apiRequest } from '../api/client';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView, Keyboard } from 'react-native';
+import Markdown from 'react-native-markdown-display';
+import * as Clipboard from 'expo-clipboard';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView, Keyboard, Switch } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -33,10 +35,37 @@ import {
   type WaterIntakeBand,
   type WhoopWorkout,
 } from '../api/fitscore';
+import {
+  getImprovementPlanStatus,
+  activateImprovementPlan,
+  getPlanContent,
+  getPlanHabitsToday,
+  togglePlanHabit,
+  generateFitCookMealPlan,
+  PILLAR_LABELS,
+  type ImprovementPlanStatus,
+  type PlanContent,
+  type TodayPlanHabit,
+} from '../api/improvementPlan';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const MODAL_HEIGHT = SCREEN_HEIGHT * 0.92;
 const DISMISS_THRESHOLD = 120;
+
+const fitCookMarkdownStyles = {
+  body: { color: colors.textPrimary, fontSize: 14, lineHeight: 22 },
+  heading1: { color: colors.textPrimary, fontSize: 18, fontWeight: '700' as const, marginTop: 16, marginBottom: 6 },
+  heading2: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' as const, marginTop: 14, marginBottom: 4 },
+  heading3: { color: colors.accent, fontSize: 14, fontWeight: '600' as const, marginTop: 10, marginBottom: 2 },
+  strong: { fontWeight: '700' as const, color: colors.textPrimary },
+  em: { fontStyle: 'italic' as const },
+  bullet_list: { marginBottom: 6 },
+  ordered_list: { marginBottom: 6 },
+  list_item: { marginBottom: 2 },
+  hr: { backgroundColor: colors.surfaceMute, height: 1, marginVertical: 12 },
+  code_block: { backgroundColor: colors.bgSecondary, borderRadius: 6, padding: 10, fontSize: 12 },
+  code_inline: { backgroundColor: colors.bgSecondary, borderRadius: 4, paddingHorizontal: 4, fontSize: 12 },
+};
 
 function CoachModal({
   visible,
@@ -569,6 +598,26 @@ export default function FitScoreScreen() {
   // Coach summary state
   const [coachSummary, setCoachSummary] = useState<CoachSummaryResponse | null>(null);
   const [loadingCoachSummary, setLoadingCoachSummary] = useState(false);
+
+  // Improvement Plan state
+  const [improvementPlanStatus, setImprovementPlanStatus] = useState<ImprovementPlanStatus | null>(null);
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [planContent, setPlanContent] = useState<PlanContent | null>(null);
+  const [activatingPlan, setActivatingPlan] = useState(false);
+  const [planHabits, setPlanHabits] = useState<TodayPlanHabit[]>([]);
+  // FitCook state
+  const [showFitCookModal, setShowFitCookModal] = useState(false);
+  const [fitCookFlexible, setFitCookFlexible] = useState(false);
+  const [fitCookWindows, setFitCookWindows] = useState({
+    breakfast: { from: '07:00', until: '09:00' },
+    lunch: { from: '12:00', until: '14:00' },
+    dinner: { from: '18:00', until: '20:00' },
+  });
+  const [fitCookPrefs, setFitCookPrefs] = useState('');
+  const [fitCookAllergies, setFitCookAllergies] = useState('');
+  const [fitCookLoading, setFitCookLoading] = useState(false);
+  const [fitCookResult, setFitCookResult] = useState<string | null>(null);
+  const [fitCookCopied, setFitCookCopied] = useState(false);
   const [showCoachModal, setShowCoachModal] = useState(false);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [showRecoveryAnalysis, setShowRecoveryAnalysis] = useState(false);
@@ -642,6 +691,69 @@ export default function FitScoreScreen() {
       } catch { /* graceful */ }
     })();
   }, []);
+
+  // Load improvement plan status on mount
+  useEffect(() => {
+    getImprovementPlanStatus()
+      .then(status => setImprovementPlanStatus(status))
+      .catch(() => {}); // non-fatal
+  }, []);
+
+  // Load plan habits for today when active plan is known
+  useEffect(() => {
+    if (!improvementPlanStatus?.activePlan) { setPlanHabits([]); return; }
+    const todayStr = formatDate(new Date());
+    getPlanHabitsToday(todayStr).then(setPlanHabits).catch(() => {});
+  }, [improvementPlanStatus?.activePlan?.id]);
+
+  // Normalize "8", "830", "8:30" → "08:00", "08:30", "08:30"
+  const normalizeTime = (raw: string): string => {
+    const digits = raw.replace(/\D/g, '');
+    if (!digits) return raw;
+    if (digits.length <= 2) {
+      const h = parseInt(digits, 10);
+      return `${String(h).padStart(2, '0')}:00`;
+    }
+    const h = parseInt(digits.slice(0, -2), 10);
+    const m = parseInt(digits.slice(-2), 10);
+    const clampedM = Math.min(m, 59);
+    return `${String(h).padStart(2, '0')}:${String(clampedM).padStart(2, '0')}`;
+  };
+
+  const handleOpenPlanModal = async (pillar: string) => {
+    setShowPlanModal(true);
+    if (!planContent) {
+      try {
+        const content = await getPlanContent(pillar);
+        setPlanContent(content);
+      } catch {}
+    }
+  };
+
+  const handleActivatePlan = async () => {
+    if (!improvementPlanStatus?.pendingPlan?.unlocked) return;
+    setActivatingPlan(true);
+    try {
+      const plan = await activateImprovementPlan();
+      setImprovementPlanStatus(prev => prev ? {
+        ...prev,
+        activePlan: plan,
+        pendingPlan: undefined,
+      } : prev);
+      handleOpenPlanModal(plan.pillar);
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Could not activate plan');
+    } finally {
+      setActivatingPlan(false);
+    }
+  };
+
+  const handlePlanHabitToggle = async (habitKey: string, current: boolean) => {
+    const next = !current;
+    setPlanHabits(prev => prev.map(h => h.habit_key === habitKey ? { ...h, checked: next } : h));
+    const todayStr = formatDate(new Date());
+    togglePlanHabit(todayStr, habitKey, next).catch(() => {});
+  };
 
   // Load habit definitions from goals storage on mount, then restore today's checkins
   useEffect(() => {
@@ -1758,14 +1870,14 @@ export default function FitScoreScreen() {
           <View style={styles.habitsSectionHeader}>
             <Ionicons name="checkmark-circle-outline" size={15} color={colors.textMuted} />
             <Text style={styles.habitsLabel}>Daily Habits</Text>
-            {dailyHabits.length > 0 && (
+            {(dailyHabits.length > 0 || planHabits.length > 0) && (
               <Text style={styles.habitsProgress}>
-                {dailyHabits.filter(h => h.done).length}/{dailyHabits.length} done
+                {dailyHabits.filter(h => h.done).length + planHabits.filter(h => h.checked).length}/{dailyHabits.length + planHabits.length} done
               </Text>
             )}
           </View>
 
-          {dailyHabits.length === 0 ? (
+          {dailyHabits.length === 0 && planHabits.length === 0 ? (
             <Text style={styles.habitsEmptyText}>No daily habits set yet. Add them in Goals.</Text>
           ) : (
             <View style={styles.habitsChecklist}>
@@ -1784,6 +1896,28 @@ export default function FitScoreScreen() {
                   </Text>
                 </TouchableOpacity>
               ))}
+              {planHabits.length > 0 && (
+                <>
+                  <View style={styles.planHabitsDivider} />
+                  <View style={styles.planHabitsHeader}>
+                    <Ionicons name="shield-checkmark-outline" size={12} color={colors.accent} />
+                    <Text style={styles.planHabitsLabel}>Plan Habits</Text>
+                  </View>
+                  {planHabits.map(h => (
+                    <TouchableOpacity
+                      key={h.habit_key}
+                      style={styles.habitRow}
+                      onPress={() => handlePlanHabitToggle(h.habit_key, h.checked)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.habitCheckbox, h.checked && styles.habitCheckboxDone]}>
+                        {h.checked && <Ionicons name="checkmark" size={13} color="#FFFFFF" />}
+                      </View>
+                      <Text style={[styles.habitText, h.checked && styles.habitTextDone]}>{h.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </>
+              )}
             </View>
           )}
         </View>
@@ -2352,6 +2486,380 @@ export default function FitScoreScreen() {
               </TouchableOpacity>
             </View>
           ) : null}
+
+          {/* Improvement Plan Section */}
+          {improvementPlanStatus && (improvementPlanStatus.activePlan || improvementPlanStatus.pendingPlan) && (
+            <View style={styles.improvementPlanSection}>
+              {/* Card header */}
+              <View style={styles.planCardHeader}>
+                <View style={styles.planCardIconWrap}>
+                  <Ionicons name="shield-checkmark-outline" size={15} color={colors.accent} />
+                </View>
+                <Text style={styles.planCardLabel}>Improvement Plan</Text>
+              </View>
+
+              {/* Active plan */}
+              {improvementPlanStatus.activePlan && (() => {
+                const plan = improvementPlanStatus.activePlan!;
+                const dayCount = Math.max(1, Math.ceil((Date.now() - new Date(plan.activatedAt).getTime()) / 86400000));
+                const avg = plan.currentRollingAvg ?? 0;
+                const progress = Math.min(avg / 7.0, 1);
+                const avgColor = avg >= 7 ? colors.success : avg >= 5 ? colors.warning : avg > 0 ? colors.danger : colors.textMuted;
+                const days = plan.daysCount ?? 0;
+                return (
+                  <View style={styles.improvementPlanCard}>
+                    <Text style={styles.planActiveName}>{`${PILLAR_LABELS[plan.pillar]} Plan`}</Text>
+                    <Text style={styles.planActiveMeta}>{`Active · Day ${days}`}</Text>
+                    <View style={styles.planProgressRow}>
+                      <View style={styles.planProgressBar}>
+                        <View style={[styles.planProgressFill, { width: `${progress * 100}%` as any }]} />
+                      </View>
+                      <Text style={[styles.planProgressLabel, { color: avgColor }]}>
+                        {avg > 0 ? `${avg.toFixed(1)} / 7.0` : '— / 7.0'}
+                      </Text>
+                    </View>
+                    <Text style={styles.planDaysCountedLabel}>{`Days counted: ${days}/7`}</Text>
+                    <TouchableOpacity
+                      style={styles.planViewBtn}
+                      onPress={() => handleOpenPlanModal(plan.pillar)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.planViewBtnText}>View Plan</Text>
+                      <Ionicons name="arrow-forward" size={13} color={colors.bgPrimary} />
+                    </TouchableOpacity>
+                  </View>
+                );
+              })()}
+
+              {/* Pending / unlocked plan */}
+              {!improvementPlanStatus.activePlan && improvementPlanStatus.pendingPlan && (
+                <View style={styles.improvementPlanCard}>
+                  {improvementPlanStatus.pendingPlan.unlocked ? (
+                    <>
+                      <Text style={styles.planActiveName}>
+                        {`${PILLAR_LABELS[improvementPlanStatus.pendingPlan.pillar]} Plan ready`}
+                      </Text>
+                      <Text style={styles.planActiveMeta}>
+                        {`${PILLAR_LABELS[improvementPlanStatus.pendingPlan.pillar]} was your lowest pillar ${improvementPlanStatus.pendingPlan.weaknessCount}× this week`}
+                      </Text>
+                      <TouchableOpacity
+                        style={styles.planViewBtn}
+                        onPress={handleActivatePlan}
+                        disabled={activatingPlan}
+                        activeOpacity={0.75}
+                      >
+                        {activatingPlan ? (
+                          <ActivityIndicator size="small" color={colors.bgPrimary} />
+                        ) : (
+                          <>
+                            <Ionicons name="shield-checkmark-outline" size={14} color={colors.bgPrimary} />
+                            <Text style={styles.planViewBtnText}>{`Start ${PILLAR_LABELS[improvementPlanStatus.pendingPlan.pillar]} Plan`}</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.planActiveName}>
+                        {`${PILLAR_LABELS[improvementPlanStatus.pendingPlan.pillar]} is your weak pillar`}
+                      </Text>
+                      <Text style={styles.planActiveMeta}>
+                        {`Lowest ${improvementPlanStatus.pendingPlan.weaknessCount}× this week`}
+                      </Text>
+                      <View style={styles.planDotsRow}>
+                        {[0,1,2,3,4].map(i => (
+                          <View key={i} style={[styles.planDot, i < improvementPlanStatus.pendingPlan!.weaknessCount && styles.planDotFilled]} />
+                        ))}
+                        <Text style={styles.planDotsLabel}>{`${improvementPlanStatus.pendingPlan.weaknessCount}/5 — plan unlocks at 5`}</Text>
+                      </View>
+                    </>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Plan Modal */}
+          <Modal
+            visible={showPlanModal}
+            animationType="slide"
+            presentationStyle="fullScreen"
+            onRequestClose={() => setShowPlanModal(false)}
+          >
+            <View style={styles.planModalContainer}>
+              {/* Close button */}
+              <TouchableOpacity
+                onPress={() => { setShowPlanModal(false); setPlanContent(null); }}
+                style={styles.planModalCloseBtn}
+              >
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+
+              {planContent ? (
+                <ScrollView contentContainerStyle={{ paddingBottom: 48 }}>
+                  {/* Hero header */}
+                  {(() => {
+                    const plan = improvementPlanStatus?.activePlan;
+                    const dayCount = plan ? Math.max(1, Math.ceil((Date.now() - new Date(plan.activatedAt).getTime()) / 86400000)) : null;
+                    const avg = plan?.currentRollingAvg ?? 0;
+                    const progress = Math.min(avg / 7.0, 1);
+                    const avgColor = avg >= 7 ? colors.success : avg >= 5 ? colors.warning : avg > 0 ? colors.danger : colors.textMuted;
+                    const days = plan?.daysCount ?? 0;
+                    return (
+                      <View style={styles.planModalHero}>
+                        <View style={styles.planModalHeroIcon}>
+                          <Ionicons name="shield-checkmark-outline" size={32} color={colors.accent} />
+                        </View>
+                        <Text style={styles.planModalHeroTitle}>{planContent.title}</Text>
+                        {plan && (
+                          <>
+                            <Text style={styles.planModalHeroMeta}>{`Day ${days}`}</Text>
+                            <View style={styles.planModalProgressWrap}>
+                              <View style={styles.planModalProgressBg}>
+                                <View style={[styles.planModalProgressFill, { width: `${progress * 100}%` as any }]} />
+                              </View>
+                              <Text style={[styles.planModalProgressTarget, { color: avgColor }]}>
+                                {`Avg ${avg > 0 ? avg.toFixed(1) : '—'} / 7.0`}
+                              </Text>
+                            </View>
+                            <Text style={styles.planModalDaysCountedLabel}>{`Days counted: ${days}/7`}</Text>
+                          </>
+                        )}
+                      </View>
+                    );
+                  })()}
+
+                  <View style={{ paddingHorizontal: spacing.xl }}>
+                    {/* Trigger line */}
+                    <Text style={styles.planModalTrigger}>{planContent.triggerLine}</Text>
+
+                    {/* Evidence — only when available */}
+                    {planContent.evidence && planContent.evidence.length > 0 && (
+                      <>
+                        <Text style={styles.planSectionLabel}>Why this plan</Text>
+                        <View style={styles.planEvidenceBlock}>
+                          {planContent.evidence.map((e, i) => (
+                            <View key={i} style={styles.planEvidenceRow}>
+                              <Ionicons name="stats-chart-outline" size={14} color={colors.accent} />
+                              <Text style={styles.planEvidenceText}>{e}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </>
+                    )}
+
+                    {/* Targets */}
+                    {planContent.targets && planContent.targets.length > 0 && (
+                      <>
+                        <Text style={styles.planSectionLabel}>Your targets</Text>
+                        <View style={styles.planTargetsBlock}>
+                          {planContent.targets.map((t, i) => (
+                            <View key={i} style={styles.planTargetRow}>
+                              <Ionicons name="add-circle-outline" size={16} color={colors.accent} />
+                              <Text style={styles.planTargetText}>{t}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </>
+                    )}
+
+                    {/* Rules card with row separators */}
+                    <Text style={styles.planSectionLabel}>Plan Habits</Text>
+                    <View style={styles.planRulesCard}>
+                      {planContent.rules.map((rule, i) => (
+                        <View key={i}>
+                          {i > 0 && <View style={styles.planRuleSeparator} />}
+                          <View style={styles.planRuleRow}>
+                            <View style={styles.planRuleNumber}>
+                              <Text style={styles.planRuleNumberText}>{i + 1}</Text>
+                            </View>
+                            <Text style={styles.planRuleText}>{rule}</Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+
+                    <Text style={styles.planModalExit}>{`Exit condition: ${planContent.exitCondition}`}</Text>
+
+                    {/* FitCook button — nutrition plans only */}
+                    {improvementPlanStatus?.activePlan?.pillar === 'nutrition' && (
+                      <TouchableOpacity
+                        style={styles.fitCookBtn}
+                        onPress={() => { setFitCookResult(null); setShowFitCookModal(true); }}
+                        activeOpacity={0.75}
+                      >
+                        <Ionicons name="restaurant-outline" size={16} color={colors.bgPrimary} />
+                        <Text style={styles.fitCookBtnText}>Generate Meal Plan</Text>
+                      </TouchableOpacity>
+                    )}
+
+                  {/* FitCook sub-modal — nested inside plan modal so it renders above it on iOS */}
+                  <Modal
+                    visible={showFitCookModal}
+                    animationType="slide"
+                    presentationStyle="pageSheet"
+                    onRequestClose={() => setShowFitCookModal(false)}
+                  >
+                    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+                      <View style={styles.fitCookModalContainer}>
+                        <View style={styles.fitCookModalHeader}>
+                          <View style={styles.fitCookModalHeaderLeft}>
+                            <Ionicons name="restaurant-outline" size={18} color={colors.accent} />
+                            <Text style={styles.fitCookModalTitle}>FitCook Meal Plan</Text>
+                          </View>
+                          <TouchableOpacity onPress={() => setShowFitCookModal(false)} style={{ padding: spacing.xs }}>
+                            <Ionicons name="close" size={22} color={colors.textMuted} />
+                          </TouchableOpacity>
+                        </View>
+
+                        {fitCookResult ? (
+                          <ScrollView style={styles.fitCookResultScroll} contentContainerStyle={{ paddingBottom: 48 }}>
+                            <Markdown style={fitCookMarkdownStyles}>{fitCookResult}</Markdown>
+                            <View style={styles.fitCookResultActions}>
+                              <TouchableOpacity
+                                style={[styles.fitCookBtn, styles.fitCookBtnOutline, fitCookCopied && styles.fitCookBtnCopied]}
+                                onPress={async () => {
+                                  await Clipboard.setStringAsync(fitCookResult);
+                                  setFitCookCopied(true);
+                                  setTimeout(() => setFitCookCopied(false), 2000);
+                                }}
+                                activeOpacity={0.75}
+                              >
+                                <Ionicons name={fitCookCopied ? 'checkmark' : 'copy-outline'} size={14} color={fitCookCopied ? colors.success : colors.accent} />
+                                <Text style={[styles.fitCookBtnText, { color: fitCookCopied ? colors.success : colors.accent }]}>
+                                  {fitCookCopied ? 'Copied!' : 'Copy'}
+                                </Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity
+                                style={styles.fitCookBtn}
+                                onPress={() => setFitCookResult(null)}
+                                activeOpacity={0.75}
+                              >
+                                <Ionicons name="refresh-outline" size={14} color={colors.bgPrimary} />
+                                <Text style={styles.fitCookBtnText}>Regenerate</Text>
+                              </TouchableOpacity>
+                            </View>
+                          </ScrollView>
+                        ) : (
+                          <ScrollView style={styles.fitCookFormScroll} contentContainerStyle={{ paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
+                            <View style={styles.fitCookRow}>
+                              <View>
+                                <Text style={styles.fitCookFieldLabel}>Flexible timing</Text>
+                                <Text style={styles.fitCookFieldHint}>App suggests sensible meal spacing</Text>
+                              </View>
+                              <Switch
+                                value={fitCookFlexible}
+                                onValueChange={setFitCookFlexible}
+                                trackColor={{ false: colors.surfaceMute, true: colors.accent + '60' }}
+                                thumbColor={fitCookFlexible ? colors.accent : colors.textMuted}
+                              />
+                            </View>
+
+                            {!fitCookFlexible && (
+                              <View style={styles.fitCookTimeSection}>
+                                {(['breakfast', 'lunch', 'dinner'] as const).map(meal => (
+                                  <View key={meal} style={styles.fitCookTimeRow}>
+                                    <Text style={styles.fitCookMealLabel}>{meal.charAt(0).toUpperCase() + meal.slice(1)}</Text>
+                                    <View style={styles.fitCookTimeFields}>
+                                      <View style={styles.fitCookTimeField}>
+                                        <Text style={styles.fitCookTimeFieldLabel}>From</Text>
+                                        <TextInput
+                                          style={styles.fitCookTimeInput}
+                                          value={fitCookWindows[meal].from}
+                                          onChangeText={v => setFitCookWindows(w => ({ ...w, [meal]: { ...w[meal], from: v } }))}
+                                          onBlur={() => setFitCookWindows(w => ({ ...w, [meal]: { ...w[meal], from: normalizeTime(w[meal].from) } }))}
+                                          placeholder="07:00"
+                                          placeholderTextColor={colors.textMuted}
+                                          keyboardType="numbers-and-punctuation"
+                                          maxLength={5}
+                                        />
+                                      </View>
+                                      <View style={styles.fitCookTimeField}>
+                                        <Text style={styles.fitCookTimeFieldLabel}>Until</Text>
+                                        <TextInput
+                                          style={styles.fitCookTimeInput}
+                                          value={fitCookWindows[meal].until}
+                                          onChangeText={v => setFitCookWindows(w => ({ ...w, [meal]: { ...w[meal], until: v } }))}
+                                          onBlur={() => setFitCookWindows(w => ({ ...w, [meal]: { ...w[meal], until: normalizeTime(w[meal].until) } }))}
+                                          placeholder="09:00"
+                                          placeholderTextColor={colors.textMuted}
+                                          keyboardType="numbers-and-punctuation"
+                                          maxLength={5}
+                                        />
+                                      </View>
+                                    </View>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+
+                            <Text style={styles.fitCookFieldLabel}>Meal preferences (optional)</Text>
+                            <TextInput
+                              style={styles.fitCookTextInput}
+                              value={fitCookPrefs}
+                              onChangeText={setFitCookPrefs}
+                              placeholder="e.g. high-protein, Mediterranean, vegetarian"
+                              placeholderTextColor={colors.textMuted}
+                              multiline
+                            />
+
+                            <Text style={[styles.fitCookFieldLabel, { marginTop: spacing.md }]}>Allergies / intolerances (optional)</Text>
+                            <TextInput
+                              style={styles.fitCookTextInput}
+                              value={fitCookAllergies}
+                              onChangeText={setFitCookAllergies}
+                              placeholder="e.g. gluten, dairy, nuts"
+                              placeholderTextColor={colors.textMuted}
+                              multiline
+                            />
+
+                            <TouchableOpacity
+                              style={[styles.fitCookBtn, { marginTop: spacing.xl }, fitCookLoading && { opacity: 0.6 }]}
+                              disabled={fitCookLoading}
+                              onPress={async () => {
+                                setFitCookLoading(true);
+                                try {
+                                  const result = await generateFitCookMealPlan({
+                                    timingMode: fitCookFlexible ? 'flexible' : 'fixed',
+                                    windows: fitCookFlexible ? undefined : fitCookWindows,
+                                    preferences: fitCookPrefs || undefined,
+                                    allergies: fitCookAllergies || undefined,
+                                  });
+                                  setFitCookResult(result.mealPlan);
+                                } catch (e: any) {
+                                  Alert.alert('FitCook Error', e?.message || 'Could not generate meal plan');
+                                } finally {
+                                  setFitCookLoading(false);
+                                }
+                              }}
+                              activeOpacity={0.75}
+                            >
+                              {fitCookLoading ? (
+                                <>
+                                  <ActivityIndicator size="small" color={colors.bgPrimary} />
+                                  <Text style={styles.fitCookBtnText}>Generating meal plan...</Text>
+                                </>
+                              ) : (
+                                <>
+                                  <Ionicons name="restaurant-outline" size={14} color={colors.bgPrimary} />
+                                  <Text style={styles.fitCookBtnText}>Generate Meal Plan</Text>
+                                </>
+                              )}
+                            </TouchableOpacity>
+                          </ScrollView>
+                        )}
+                      </View>
+                    </KeyboardAvoidingView>
+                  </Modal>
+                </View>
+              </ScrollView>
+            ) : (
+              <View style={styles.planModalLoading}>
+                <ActivityIndicator color={colors.accent} />
+              </View>
+            )}
+          </View>
+        </Modal>
 
           {/* Recalculate Button */}
           <TouchableOpacity
@@ -4749,5 +5257,449 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textMuted,
     lineHeight: 23,
+  },
+
+  // Improvement Plan
+  improvementPlanSection: {
+    backgroundColor: colors.accent + '08',
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.accent + '35',
+    padding: spacing.lg,
+    marginTop: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  planCardHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  planCardIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.accent + '15',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  planCardLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontWeight: '600' as const,
+    letterSpacing: 0.3,
+  },
+  improvementPlanCard: {
+    gap: spacing.xs,
+  },
+  planActiveName: {
+    ...typography.body,
+    fontWeight: '700' as const,
+    color: colors.textPrimary,
+    fontSize: 17,
+  },
+  planActiveMeta: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  planProgressRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  planProgressBar: {
+    flex: 1,
+    height: 5,
+    backgroundColor: colors.surfaceMute + '60',
+    borderRadius: 3,
+    overflow: 'hidden' as const,
+  },
+  planProgressFill: {
+    height: '100%' as any,
+    backgroundColor: colors.accent,
+    borderRadius: 3,
+  },
+  planProgressLabel: {
+    fontSize: 11,
+    color: colors.accent,
+    fontWeight: '600' as const,
+    minWidth: 50,
+    textAlign: 'right' as const,
+  },
+  planDaysCountedLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginBottom: spacing.sm,
+  },
+  planViewBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing.xs,
+  },
+  planViewBtnText: {
+    ...typography.small,
+    fontWeight: '600' as const,
+    color: colors.bgPrimary,
+  },
+  planDotsRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.xs,
+    marginVertical: spacing.sm,
+  },
+  planDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.surfaceMute + '60',
+  },
+  planDotFilled: {
+    backgroundColor: colors.accent,
+  },
+  planDotsLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginLeft: spacing.xs,
+  },
+
+  // Plan full-screen modal
+  planModalContainer: {
+    flex: 1,
+    backgroundColor: colors.bgPrimary,
+  },
+  planModalCloseBtn: {
+    position: 'absolute' as const,
+    top: 58,
+    right: spacing.xl,
+    padding: spacing.xs,
+    zIndex: 10,
+  },
+  planModalHero: {
+    alignItems: 'center' as const,
+    paddingTop: 60,
+    paddingBottom: spacing.xl,
+    paddingHorizontal: spacing.xl,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceMute + '40',
+  },
+  planModalHeroIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.accent + '18',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginBottom: spacing.md,
+  },
+  planModalHeroTitle: {
+    ...typography.h2,
+    fontSize: 22,
+    textAlign: 'center' as const,
+    marginBottom: spacing.xs,
+  },
+  planModalHeroMeta: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+  },
+  planModalProgressWrap: {
+    width: '100%' as any,
+    gap: spacing.xs,
+  },
+  planModalProgressBg: {
+    height: 6,
+    backgroundColor: colors.surfaceMute + '60',
+    borderRadius: 3,
+    overflow: 'hidden' as const,
+  },
+  planModalProgressFill: {
+    height: '100%' as any,
+    backgroundColor: colors.accent,
+    borderRadius: 3,
+  },
+  planModalProgressTarget: {
+    fontSize: 10,
+    color: colors.textMuted,
+    textAlign: 'right' as const,
+    fontWeight: '600' as const,
+  },
+  planModalDaysCountedLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: spacing.xs,
+  },
+  planModalTrigger: {
+    ...typography.body,
+    color: colors.textMuted,
+    marginBottom: spacing.xl,
+    marginTop: spacing.lg,
+  },
+  planRulesCard: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.md,
+    overflow: 'hidden' as const,
+    marginBottom: spacing.xl,
+  },
+  planRuleSeparator: {
+    height: 1,
+    backgroundColor: colors.surfaceMute + '40',
+    marginHorizontal: spacing.md,
+  },
+  planRuleRow: {
+    flexDirection: 'row' as const,
+    gap: spacing.md,
+    alignItems: 'flex-start' as const,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  planRuleNumber: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.accent + '20',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  planRuleNumberText: {
+    fontSize: 11,
+    color: colors.accent,
+    fontWeight: '700' as const,
+  },
+  planRuleText: {
+    ...typography.body,
+    flex: 1,
+    lineHeight: 22,
+  },
+  planModalExit: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontStyle: 'italic' as const,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceMute,
+    marginBottom: spacing.xl,
+  },
+  planModalLoading: {
+    flex: 1,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  // Plan habits sub-block inside Daily Habits
+  planHabitsDivider: {
+    height: 1,
+    backgroundColor: colors.surfaceMute,
+    marginVertical: spacing.sm,
+  },
+  planHabitsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: 4,
+  },
+  planHabitsLabel: {
+    fontSize: 11,
+    color: colors.accent,
+    fontWeight: '600',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  planSectionLabel: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontWeight: '600',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  planEvidenceBlock: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    gap: spacing.xs,
+  },
+  planEvidenceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  planEvidenceText: {
+    fontSize: 13,
+    color: colors.textPrimary,
+    flex: 1,
+  },
+  planTargetsBlock: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.sm,
+    padding: spacing.md,
+    gap: spacing.sm,
+  },
+  planTargetRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  planTargetText: {
+    fontSize: 13,
+    color: colors.textPrimary,
+    flex: 1,
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  planNoHistoryText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    marginTop: spacing.sm,
+  },
+  // FitCook modal styles
+  fitCookModalContainer: {
+    flex: 1,
+    backgroundColor: colors.bgPrimary,
+  },
+  fitCookModalHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceMute + '40',
+  },
+  fitCookModalHeaderLeft: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.sm,
+  },
+  fitCookModalTitle: {
+    ...typography.body,
+    fontWeight: '700' as const,
+    color: colors.textPrimary,
+    fontSize: 17,
+  },
+  fitCookFormScroll: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  fitCookResultScroll: {
+    flex: 1,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+  },
+  fitCookResultText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    lineHeight: 22,
+  },
+  fitCookResultActions: {
+    flexDirection: 'row' as const,
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  fitCookBtnOutline: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.accent,
+    flex: 1,
+  },
+  fitCookBtnCopied: {
+    borderColor: colors.success,
+  },
+  fitCookRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'space-between' as const,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceMute + '30',
+    marginBottom: spacing.sm,
+  },
+  fitCookFieldLabel: {
+    ...typography.small,
+    color: colors.textPrimary,
+    fontWeight: '600' as const,
+    marginBottom: 4,
+  },
+  fitCookFieldHint: {
+    fontSize: 11,
+    color: colors.textMuted,
+  },
+  fitCookTimeSection: {
+    marginBottom: spacing.md,
+  },
+  fitCookTimeRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceMute + '25',
+  },
+  fitCookMealLabel: {
+    ...typography.small,
+    color: colors.textPrimary,
+    fontWeight: '600' as const,
+    width: 72,
+  },
+  fitCookTimeFields: {
+    flex: 1,
+    flexDirection: 'row' as const,
+    gap: spacing.sm,
+  },
+  fitCookTimeField: {
+    flex: 1,
+  },
+  fitCookTimeFieldLabel: {
+    fontSize: 10,
+    color: colors.textMuted,
+    fontWeight: '600' as const,
+    letterSpacing: 0.5,
+    marginBottom: 3,
+  },
+  fitCookTimeInput: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '500' as const,
+    textAlign: 'center' as const,
+  },
+  fitCookTextInput: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    color: colors.textPrimary,
+    fontSize: 14,
+    minHeight: 44,
+    marginBottom: spacing.sm,
+  },
+  fitCookBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.md,
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing.xs,
+    marginTop: spacing.md,
+  },
+  fitCookBtnText: {
+    ...typography.small,
+    fontWeight: '600' as const,
+    color: colors.bgPrimary,
   },
 });

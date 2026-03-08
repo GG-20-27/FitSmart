@@ -1708,6 +1708,122 @@ IMPORTANT: Commit fully to the "${selectedTheme.name}" theme from the first word
       };
     }
   }
+
+  async generateFitCookMealPlan(params: {
+    planHabits: string[];
+    timingMode: 'flexible' | 'fixed';
+    windows?: {
+      breakfast: { from: string; until: string };
+      lunch: { from: string; until: string };
+      dinner: { from: string; until: string };
+    };
+    preferences?: string;
+    allergies?: string;
+    userContext?: {
+      dietPhase?: string;
+      trainingPhase?: string;
+      workHours?: string;
+      trainingSessions?: string;
+      tier1Goal?: string;
+    };
+  }): Promise<string> {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    const userCtx = params.userContext;
+    const dietPhase = userCtx?.dietPhase ?? 'Maintenance';
+    const goal = userCtx?.tier1Goal ?? 'Balanced Performance';
+
+    const timingInstruction = params.timingMode === 'fixed' && params.windows
+      ? `Fixed: Breakfast ${params.windows.breakfast.from}, Lunch ${params.windows.lunch.from}, Snack if gap >5h, Dinner ${params.windows.dinner.from}.`
+      : 'Flexible: suggest times keeping all gaps ≤5h.';
+
+    const ctxBits: string[] = [`Diet: ${dietPhase}`, `Goal: ${goal}`];
+    if (userCtx?.trainingPhase) ctxBits.push(`Training: ${userCtx.trainingPhase}`);
+    if (userCtx?.workHours) ctxBits.push(`Work hrs/wk: ${userCtx.workHours}`);
+    if (userCtx?.trainingSessions) ctxBits.push(`Sessions/wk: ${userCtx.trainingSessions}`);
+
+    const userPrompt = `${ctxBits.join(' | ')}
+Timing: ${timingInstruction}
+Plan habits (ALL must appear in "Completes" line): ${params.planHabits.join(', ')}${params.preferences ? `\nPreferences: ${params.preferences}` : ''}${params.allergies ? `\nAllergies: ${params.allergies}` : ''}`;
+
+    const FITCOOK_SYSTEM_PROMPT = `You are FitCook — a mobile meal planner. Write meal-prep friendly 1-day plans that fit one phone screen.
+
+HARD WORD LIMIT: 220 words total. Count every word. Stop before 220.
+
+MANDATORY FORMAT — reproduce exactly, fill in {placeholders}:
+
+## 1-Day Meal Plan ({diet phase} • {goal})
+**Timing:** {time} → {time} → {time} → {time}
+**~{X}–{Y} kcal • ~{Z}g protein**
+
+## Breakfast {emoji} ({time}): {one sentence, no-cook or ≤5 min, household measures only}. Prep: {N} min.
+Swap → {one alternative}
+
+## Lunch {emoji} ({time}): {one sentence — cook 2 portions, household measures}. Prep: {N} min. Make extra for dinner.
+Swap → {one alternative}
+
+## Snack {emoji} ({time}): {one sentence grab-and-go}. Prep: {N} min.
+Swap → {one alternative}
+
+## Dinner {emoji} ({time}): Lunch leftovers + {one simple twist}. Prep: {N} min.
+Swap → {one alternative}
+
+💧 Drink {X}L today — prioritise before meals and around training.
+
+🛒 Groceries: {protein 1}, {protein 2}, {carb 1}, {carb 2}, {produce 1}, {produce 2}, {produce 3}, {extra 1}, {extra 2}
+
+Completes plan habits: ✓ {habit} ✓ {habit} ✓ {habit}
+
+RULES — never break:
+1. 220 words MAX. Hard stop.
+2. Lunch and dinner MUST share base ingredients (cook once, eat twice).
+3. Breakfast: no-cook or ≤5 min only.
+4. Snack: grab-and-go only (no cooking).
+5. Exactly 1 emoji per meal header. Only 💧 and 🛒 for those sections. No other emojis.
+6. No gram weights — household measures only (1 fillet, handful, 1 cup, 1 tub, 2 eggs).
+7. Grocery list: max 9 items inline (no bullets, comma-separated).
+8. Plan habits mentioned ONLY in the final "Completes" line — never inside meal blocks.
+9. No extra sections, no spice lists, no optional items.`;
+
+    const callOpenAI = async (messages: { role: string; content: string }[]): Promise<string> => {
+      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: this.textModel, messages, max_completion_tokens: 900, temperature: 0.7 }),
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error(`[FitCook] API error ${res.status}: ${errorText}`);
+        throw new Error(`OpenAI API error: ${res.status}`);
+      }
+      const data = await res.json();
+      return data.choices?.[0]?.message?.content ?? '';
+    };
+
+    const messages = [
+      { role: 'system', content: FITCOOK_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ];
+
+    let content = await callOpenAI(messages);
+    if (!content) throw new Error('No response from FitCook');
+
+    // Server-side guardrail: if over 250 words, ask once more to shorten
+    const wordCount = content.trim().split(/\s+/).length;
+    if (wordCount > 250) {
+      console.warn(`[FitCook] Response too long (${wordCount} words), retrying with shorter instruction`);
+      content = await callOpenAI([
+        ...messages,
+        { role: 'assistant', content },
+        { role: 'user', content: 'That is too long. Rewrite it under 220 words. Cut descriptions to one clause each. Shorten the grocery list to 9 inline items. Keep the same structure.' },
+      ]);
+      if (!content) throw new Error('No response from FitCook (retry)');
+    }
+
+    return content;
+  }
 }
 
 export const openAIService = new OpenAIService();

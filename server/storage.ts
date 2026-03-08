@@ -1,6 +1,6 @@
-import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext } from "@shared/schema";
+import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, improvementPlans, planHabits, habitCheckins, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext, type ImprovementPlan, type PlanHabit, type HabitCheckin } from "@shared/schema";
 import { db } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -45,12 +45,27 @@ export interface IStorage {
 
   // FitRoast operations
   getFitroastByUserAndWeek(userId: string, weekEnd: string): Promise<FitroastWeekly | undefined>;
+  getLatestFitroast(userId: string): Promise<FitroastWeekly | undefined>;
   createFitroast(data: InsertFitroastWeekly): Promise<FitroastWeekly>;
   deleteFitroastByUserAndWeek(userId: string, weekEnd: string): Promise<void>;
 
   // User context operations
   getUserContext(userId: string): Promise<UserContext | undefined>;
   upsertUserContext(userId: string, data: Partial<InsertUserContext>): Promise<UserContext>;
+
+  // Improvement plan operations
+  getActivePlan(userId: string): Promise<ImprovementPlan | undefined>;
+  createActivePlan(userId: string, pillar: string): Promise<ImprovementPlan>;
+  completePlan(id: number, rollingAvg: number): Promise<ImprovementPlan>;
+  getCompletedPlans(userId: string): Promise<ImprovementPlan[]>;
+
+  // Plan habits operations
+  savePlanHabits(userId: string, planId: number, habits: { habitKey: string; label: string; description?: string }[]): Promise<void>;
+  getPlanHabits(planId: number): Promise<PlanHabit[]>;
+
+  // Habit checkin operations
+  upsertHabitCheckin(userId: string, habitKey: string, date: string, checked: boolean): Promise<void>;
+  getHabitCheckinsByDate(userId: string, date: string): Promise<HabitCheckin[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -235,6 +250,14 @@ export class DatabaseStorage implements IStorage {
     return row || undefined;
   }
 
+  async getLatestFitroast(userId: string): Promise<FitroastWeekly | undefined> {
+    const [row] = await db.select().from(fitroastWeekly)
+      .where(eq(fitroastWeekly.userId, userId))
+      .orderBy(desc(fitroastWeekly.weekEnd))
+      .limit(1);
+    return row || undefined;
+  }
+
   async createFitroast(data: InsertFitroastWeekly): Promise<FitroastWeekly> {
     const [row] = await db.insert(fitroastWeekly).values(data).returning();
     return row;
@@ -265,6 +288,62 @@ export class DatabaseStorage implements IStorage {
         .returning();
       return row;
     }
+  }
+
+  // Improvement plan operations
+  async getActivePlan(userId: string): Promise<ImprovementPlan | undefined> {
+    const [row] = await db.select().from(improvementPlans)
+      .where(and(eq(improvementPlans.userId, userId), eq(improvementPlans.status, 'active')));
+    return row || undefined;
+  }
+
+  async createActivePlan(userId: string, pillar: string): Promise<ImprovementPlan> {
+    const [row] = await db.insert(improvementPlans)
+      .values({ userId, pillar, status: 'active' })
+      .returning();
+    return row;
+  }
+
+  async completePlan(id: number, rollingAvg: number): Promise<ImprovementPlan> {
+    const [row] = await db.update(improvementPlans)
+      .set({ status: 'completed', completedAt: new Date(), rollingAvgAtCompletion: rollingAvg })
+      .where(eq(improvementPlans.id, id))
+      .returning();
+    return row;
+  }
+
+  async getCompletedPlans(userId: string): Promise<ImprovementPlan[]> {
+    return await db.select().from(improvementPlans)
+      .where(and(eq(improvementPlans.userId, userId), eq(improvementPlans.status, 'completed')));
+  }
+
+  // Plan habits operations
+  async savePlanHabits(userId: string, planId: number, habits: { habitKey: string; label: string; description?: string }[]): Promise<void> {
+    if (habits.length === 0) return;
+    await db.insert(planHabits)
+      .values(habits.map(h => ({ userId, planId, habitKey: h.habitKey, label: h.label, description: h.description ?? null })))
+      .onConflictDoNothing();
+  }
+
+  async getPlanHabits(planId: number): Promise<PlanHabit[]> {
+    return await db.select().from(planHabits).where(eq(planHabits.planId, planId));
+  }
+
+  // Habit checkin operations
+  async upsertHabitCheckin(userId: string, habitKey: string, date: string, checked: boolean): Promise<void> {
+    const [existing] = await db.select({ id: habitCheckins.id })
+      .from(habitCheckins)
+      .where(and(eq(habitCheckins.userId, userId), eq(habitCheckins.habitKey, habitKey), eq(habitCheckins.date, date)));
+    if (existing) {
+      await db.update(habitCheckins).set({ checked }).where(eq(habitCheckins.id, existing.id));
+    } else {
+      await db.insert(habitCheckins).values({ userId, habitKey, date, checked });
+    }
+  }
+
+  async getHabitCheckinsByDate(userId: string, date: string): Promise<HabitCheckin[]> {
+    return await db.select().from(habitCheckins)
+      .where(and(eq(habitCheckins.userId, userId), eq(habitCheckins.date, date)));
   }
 }
 

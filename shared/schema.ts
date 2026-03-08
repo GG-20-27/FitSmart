@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, timestamp, uuid, boolean, real, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, boolean, real, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -115,6 +115,9 @@ export const fitScores = pgTable("fit_scores", {
   userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
   date: text("date").notNull(), // YYYY-MM-DD format
   score: real("score").notNull(),
+  nutritionScore: real("nutrition_score"),
+  trainingScore: real("training_score"),
+  recoveryScore: real("recovery_score"),
   calculatedAt: timestamp("calculated_at").defaultNow().notNull(),
 });
 
@@ -158,6 +161,36 @@ export interface FitRoastPayload {
   theme_used?: string; // theme ID used for this roast, to avoid repeating next week
 }
 
+export const improvementPlans = pgTable("improvement_plans", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  pillar: text("pillar").notNull(), // 'nutrition' | 'training' | 'recovery'
+  status: text("status").notNull(), // 'active' | 'completed'
+  activatedAt: timestamp("activated_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
+  rollingAvgAtCompletion: real("rolling_avg_at_completion"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const planHabits = pgTable("plan_habits", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  planId: integer("plan_id").notNull().references(() => improvementPlans.id, { onDelete: 'cascade' }),
+  habitKey: text("habit_key").notNull(),
+  label: text("label").notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const habitCheckins = pgTable("habit_checkins", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  habitKey: text("habit_key").notNull(),
+  date: text("date").notNull(), // YYYY-MM-DD
+  checked: boolean("checked").notNull().default(false),
+  source: text("source").default('plan'),
+});
+
 export const userContext = pgTable("user_context", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
@@ -180,6 +213,9 @@ export const userContext = pgTable("user_context", {
   tier3WeekLoad: text("tier3_week_load").notNull().default('Normal'),
   tier3Stress: text("tier3_stress").notNull().default('Medium'),
   tier3SleepExpectation: text("tier3_sleep_expectation").notNull().default('Uncertain'),
+  // Lifestyle context
+  workHoursPerWeek: text("work_hours_per_week"),
+  trainingSessionsPerWeek: text("training_sessions_per_week"),
 });
 
 // FitLook slide shape
@@ -275,6 +311,11 @@ export const insertUserContextSchema = createInsertSchema(userContext).omit({
   updatedAt: true,
 });
 
+export const insertImprovementPlanSchema = createInsertSchema(improvementPlans).omit({
+  id: true,
+  createdAt: true,
+});
+
 // Type definitions
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
@@ -305,6 +346,11 @@ export type FitroastWeekly = typeof fitroastWeekly.$inferSelect;
 
 export type InsertUserContext = z.infer<typeof insertUserContextSchema>;
 export type UserContext = typeof userContext.$inferSelect;
+
+export type InsertImprovementPlan = z.infer<typeof insertImprovementPlanSchema>;
+export type ImprovementPlan = typeof improvementPlans.$inferSelect;
+export type PlanHabit = typeof planHabits.$inferSelect;
+export type HabitCheckin = typeof habitCheckins.$inferSelect;
 
 // WHOOP API response types
 export interface WhoopTodayResponse {

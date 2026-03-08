@@ -24,6 +24,10 @@ export interface UserContext {
   tier3WeekLoad: string;
   tier3Stress: string;
   tier3SleepExpectation: string;
+
+  // Lifestyle context
+  workHoursPerWeek: string | null;
+  trainingSessionsPerWeek: string | null;
 }
 
 export const DEFAULTS: UserContext = {
@@ -41,6 +45,8 @@ export const DEFAULTS: UserContext = {
   tier3WeekLoad: 'Normal',
   tier3Stress: 'Medium',
   tier3SleepExpectation: 'Uncertain',
+  workHoursPerWeek: null,
+  trainingSessionsPerWeek: null,
 };
 
 /** Fetch saved user context (returns defaults if not yet set) */
@@ -132,6 +138,22 @@ export const REHAB_STAGES = [
   'Sub-acute (light movement)',
   'Rehab (guided exercises)',
   'Return to training',
+];
+
+// ── Lifestyle context ─────────────────────────────────────────────────────────
+
+export const WORK_HOURS_OPTIONS = [
+  '< 20 hrs',
+  '20–35 hrs',
+  '35–45 hrs',
+  '45+ hrs',
+];
+
+export const TRAINING_SESSIONS_OPTIONS = [
+  '1–2 / week',
+  '3–4 / week',
+  '5–6 / week',
+  '7+ / week',
 ];
 
 // ── Tier 3 ────────────────────────────────────────────────────────────────────

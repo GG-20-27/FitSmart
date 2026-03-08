@@ -155,9 +155,9 @@ export default function FitRoastScreen() {
     );
   }
 
-  // ── Locked — not yet eligible (not Sunday or < 5 active days) ──
+  // ── Locked — not yet eligible (not Sunday or < 3 active days) ──
   if (screenState === 'locked') {
-    const daysLeft = Math.max(0, 5 - activeDays);
+    const daysLeft = Math.max(0, 3 - activeDays);
     return (
       <Animated.View style={[styles.fullCenter, { opacity: screenFade }]}>
         <Ionicons name="lock-closed-outline" size={44} color={colors.surfaceMute} />
@@ -169,11 +169,11 @@ export default function FitRoastScreen() {
         </Text>
         {/* Active-day progress pips */}
         <View style={styles.activeDaysRow}>
-          {[1, 2, 3, 4, 5].map(n => (
+          {[1, 2, 3].map(n => (
             <View key={n} style={[styles.activeDayPip, n <= activeDays && styles.activeDayPipFilled]} />
           ))}
         </View>
-        <Text style={styles.activeDaysText}>{activeDays}/5 active days this week</Text>
+        <Text style={styles.activeDaysText}>{activeDays}/3 active days this week</Text>
         {daysLeft > 0 && (
           <Text style={styles.lockedHint}>
             {daysLeft} more day{daysLeft !== 1 ? 's' : ''} to unlock

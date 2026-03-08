@@ -22,7 +22,7 @@ import axios from "axios";
 import { getCurrentUserId, requireAdmin } from './authMiddleware';
 import { requireJWTAuth, jwtAuthMiddleware } from './jwtAuth';
 import { db } from './db';
-import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, whoopData as whoopDataTable } from '@shared/schema';
+import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, whoopData as whoopDataTable, trainingData as trainingDataTable, meals as mealsTable, planHabits as planHabitsTable, habitCheckins as habitCheckinsTable, improvementPlans } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
 import { eq, desc, sql, and, gte, lt } from 'drizzle-orm';
 
@@ -4783,6 +4783,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timestamp: new Date().toISOString(),
       };
 
+      // Persist score + pillar breakdown to DB (upsert by user+date)
+      try {
+        await db.insert(fitScores)
+          .values({
+            userId,
+            date: targetDate,
+            score: roundedFitScore,
+            nutritionScore: Math.round(nutritionScore * 10) / 10,
+            trainingScore: Math.round(trainingScore * 10) / 10,
+            recoveryScore: Math.round(recoveryResult.score * 10) / 10,
+          })
+          .onConflictDoUpdate({
+            target: [fitScores.userId, fitScores.date],
+            set: {
+              score: roundedFitScore,
+              nutritionScore: Math.round(nutritionScore * 10) / 10,
+              trainingScore: Math.round(trainingScore * 10) / 10,
+              recoveryScore: Math.round(recoveryResult.score * 10) / 10,
+              calculatedAt: new Date(),
+            },
+          });
+        console.log(`[FITSCORE] Saved to DB: user=${userId} date=${targetDate} score=${roundedFitScore}`);
+      } catch (dbErr) {
+        // Non-fatal — score still returned to client
+        console.error('[FITSCORE] Failed to save to DB:', dbErr);
+      }
+
       res.json(response);
 
     } catch (error) {
@@ -4861,10 +4888,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
             `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, phase=${ctx.tier2Phase}, emphasis=${ctx.tier2Emphasis}`,
             `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
           ];
+          if (ctx.workHoursPerWeek) parts.push(`Work hours/week: ${ctx.workHoursPerWeek}`);
+          if (ctx.trainingSessionsPerWeek) parts.push(`Training sessions/week: ${ctx.trainingSessionsPerWeek}`);
           if (ctx.injuryType && ctx.injuryType !== 'None') {
             parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
           }
           coachContextSummary = parts.join('\n');
+        }
+      } catch { /* graceful */ }
+
+      // Inject plan habits accountability line
+      try {
+        const activePlan = await storage.getActivePlan(userId);
+        if (activePlan) {
+          const habits = await storage.getPlanHabits(activePlan.id);
+          if (habits.length > 0) {
+            const todayForCheckin = DateTime.now().setZone(process.env.USER_TZ || 'Europe/Zurich').toFormat('yyyy-MM-dd');
+            const checkins = await storage.getHabitCheckinsByDate(userId, todayForCheckin);
+            const checkedCount = checkins.filter(c => c.checked && habits.some(h => h.habitKey === c.habitKey)).length;
+            coachContextSummary = (coachContextSummary || '') +
+              `\nPlan habits: ${checkedCount}/${habits.length} ${activePlan.pillar} habits completed today.`;
+          }
         }
       } catch { /* graceful */ }
 
@@ -5147,6 +5191,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, phase=${ctx.tier2Phase}, emphasis=${ctx.tier2Emphasis}`,
             `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
           ];
+          if (ctx.workHoursPerWeek) parts.push(`Work hours/week: ${ctx.workHoursPerWeek}`);
+          if (ctx.trainingSessionsPerWeek) parts.push(`Training sessions/week: ${ctx.trainingSessionsPerWeek}`);
           if (ctx.injuryType && ctx.injuryType !== 'None') {
             parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
           }
@@ -5226,7 +5272,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
       const weekStart = zurichNow.startOf('week').toISODate()!;
 
-      // Check cache first — always serve if present
+      // Check cache for this week first — always serve if present
       const existing = await storage.getFitroastByUserAndWeek(userId, weekEnd);
       if (existing) {
         console.log(`[FITROAST] Serving cached roast for user=${userId} week=${weekEnd}`);
@@ -5237,7 +5283,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // No roast yet — compute eligibility so the mobile can show the right lock screen
+      // No roast for this week yet — if it's not Sunday, serve last week's roast so
+      // users can still read it Mon–Sat while the new week builds up
+      if (zurichNow.weekday !== 7) {
+        const latest = await storage.getLatestFitroast(userId);
+        if (latest) {
+          console.log(`[FITROAST] Serving previous roast (${latest.weekEnd}) for user=${userId} on weekday=${zurichNow.weekday}`);
+          return res.json({
+            ...JSON.parse(latest.payloadJson),
+            cached: true,
+            created_at: latest.createdAt,
+            previous_week: true,
+          });
+        }
+      }
+
+      // No roast at all — compute eligibility so the mobile can show the right lock screen
       const today = zurichNow.toISODate()!;
       const isSunday = zurichNow.weekday === 7; // Luxon: 1=Mon … 7=Sun
 
@@ -5256,7 +5317,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch { /* graceful */ }
 
-      const eligible = isSunday && activeDays >= 5;
+      const eligible = isSunday && activeDays >= 3;
 
       console.log(`[FITROAST] No roast yet for user=${userId}: isSunday=${isSunday}, activeDays=${activeDays}, eligible=${eligible}`);
 
@@ -5306,10 +5367,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch { /* graceful */ }
 
-      if (!isSunday || activeDays < 5) {
+      if (!isSunday || activeDays < 3) {
         const message = !isSunday
           ? 'FitRoast is generated every Sunday based on your weekly performance.'
-          : 'FitRoast unlocks after 5 active days this week.';
+          : 'FitRoast unlocks after 3 active days this week.';
         console.log(`[FITROAST] Not eligible for user=${userId}: isSunday=${isSunday}, activeDays=${activeDays}`);
         return res.status(403).json({ error: message, active_days: activeDays, is_sunday: isSunday, eligible: false });
       }
@@ -5553,6 +5614,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(body.tier3WeekLoad !== undefined && { tier3WeekLoad: body.tier3WeekLoad }),
         ...(body.tier3Stress !== undefined && { tier3Stress: body.tier3Stress }),
         ...(body.tier3SleepExpectation !== undefined && { tier3SleepExpectation: body.tier3SleepExpectation }),
+        ...(body.workHoursPerWeek !== undefined && { workHoursPerWeek: body.workHoursPerWeek }),
+        ...(body.trainingSessionsPerWeek !== undefined && { trainingSessionsPerWeek: body.trainingSessionsPerWeek }),
       };
 
       const ctx = await storage.upsertUserContext(userId, data);
@@ -5976,6 +6039,563 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/openapi.yaml', (req, res) => {
     res.setHeader('Content-Type', 'text/yaml');
     res.sendFile(path.join(process.cwd(), 'openapi.yaml'));
+  });
+
+  // ========== Improvement Plan Endpoints ==========
+
+  interface PlanHabitDef { id: string; label: string; description?: string; frequency: 'daily'; }
+  interface PersonalizedPlanContent {
+    title: string;
+    triggerLine: string;
+    evidence: string[];
+    targets: string[];
+    rules: string[];
+    exitCondition: string;
+    planHabits: PlanHabitDef[];
+  }
+
+  const STATIC_PLAN_HABITS: Record<string, PlanHabitDef[]> = {
+    nutrition: [
+      { id: 'nutrition_gap_le_5h',     label: 'No meal gap > 5h today',     frequency: 'daily' },
+      { id: 'nutrition_log_2meals',    label: 'Log ≥2 meals today',          frequency: 'daily' },
+      { id: 'nutrition_protein_early', label: 'Protein before 11:00',        frequency: 'daily' },
+      { id: 'nutrition_hydration',     label: 'Reach 2L+ water',             frequency: 'daily' },
+      { id: 'nutrition_no_junk',       label: 'Avoid junk-only day',         frequency: 'daily' },
+    ],
+    training: [
+      { id: 'training_log_session',      label: 'Log today\'s session',          frequency: 'daily' },
+      { id: 'training_match_intensity',  label: 'Match intensity to zone',        frequency: 'daily' },
+      { id: 'training_no_skip_green',    label: 'Don\'t skip on green recovery',  frequency: 'daily' },
+      { id: 'training_mobility',         label: 'Include mobility or warm-up',    frequency: 'daily' },
+      { id: 'training_check_recovery',   label: 'Check recovery before training', frequency: 'daily' },
+    ],
+    recovery: [
+      { id: 'recovery_sleep_7h',        label: 'Target 7–8h sleep tonight',  frequency: 'daily' },
+      { id: 'recovery_screens_off',     label: 'Screens off by 22:00',       frequency: 'daily' },
+      { id: 'recovery_log_checkin',     label: 'Log morning check-in',       frequency: 'daily' },
+      { id: 'recovery_consistent_bed',  label: 'Consistent bedtime ±30min',  frequency: 'daily' },
+      { id: 'recovery_rest_on_red',     label: 'Full rest if recovery red',  frequency: 'daily' },
+    ],
+  };
+
+  /** Generate personalized plan content from last 7 days of data */
+  async function generatePersonalizedPlanContent(userId: string, pillar: string): Promise<PersonalizedPlanContent> {
+    const exitConditionMap: Record<string, string> = {
+      nutrition: '7-day rolling avg Nutrition ≥ 7.0',
+      training:  '7-day rolling avg Training ≥ 7.0',
+      recovery:  '7-day rolling avg Recovery ≥ 7.0',
+    };
+    const titleMap: Record<string, string> = {
+      nutrition: 'Fuel Consistency Plan',
+      training:  'Training Consistency Plan',
+      recovery:  'Recovery Optimization Plan',
+    };
+
+    const fallback = (triggerLine: string): PersonalizedPlanContent => {
+      const baseRules: Record<string, string[]> = {
+        nutrition: ['No meal gap longer than 5 hours', 'Protein within 2 hours of waking', 'Minimum 2 full meals logged daily', 'Aim for 2L+ hydration', 'Avoid pure junk-food-only days'],
+        training:  ['Log every training session — no untracked days', 'Match intensity to your recovery zone', 'Minimum 3 sessions this week', 'Include at least one mobility or recovery session', 'Do not skip sessions on green recovery days'],
+        recovery:  ['Target 7–8 hours of sleep each night', 'No screens or stimulants after 22:00', 'Log your daily check-in feeling every morning', 'Keep consistent bed and wake times', 'Prioritize full rest on red recovery days'],
+      };
+      return { title: titleMap[pillar] ?? pillar, triggerLine, evidence: [], targets: [], rules: baseRules[pillar] ?? [], exitCondition: exitConditionMap[pillar] ?? '', planHabits: STATIC_PLAN_HABITS[pillar] ?? [] };
+    };
+
+    try {
+      // --- Fetch last 7 days of fit_scores for weakness context ---
+      const pillarRows = await db.select({ date: fitScores.date, nutritionScore: fitScores.nutritionScore, trainingScore: fitScores.trainingScore, recoveryScore: fitScores.recoveryScore })
+        .from(fitScores)
+        .where(and(eq(fitScores.userId, userId), sql`nutrition_score IS NOT NULL`))
+        .orderBy(desc(fitScores.date)).limit(7);
+
+      if (pillarRows.length < 1) return fallback(`${pillar.charAt(0).toUpperCase() + pillar.slice(1)} has been your lowest pillar this week.`);
+
+      const weaknessCount = pillarRows.filter(r => {
+        const n = r.nutritionScore ?? 10, t = r.trainingScore ?? 10, rc = r.recoveryScore ?? 10;
+        const min = Math.min(n, t, rc);
+        if (pillar === 'nutrition') return n === min;
+        if (pillar === 'training')  return t === min;
+        return rc === min;
+      }).length;
+
+      // --- User context for archetype ---
+      let archetype: 'athlete' | 'general' = 'general';
+      try {
+        const [ctx] = await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1);
+        const emph = (ctx?.tier2Emphasis ?? '').toLowerCase();
+        const phase = (ctx?.tier2Phase ?? '').toLowerCase();
+        if (emph.includes('sport') || emph.includes('compet') || phase.includes('peak') || phase.includes('build')) {
+          archetype = 'athlete';
+        }
+      } catch { /* graceful */ }
+
+      // ---- NUTRITION pillar ----
+      if (pillar === 'nutrition') {
+        const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        const dates = pillarRows.map(r => r.date);
+
+        // Count meals per date
+        const mealRows = await db.select({ date: mealsTable.date, analysisResult: mealsTable.analysisResult })
+          .from(mealsTable).where(and(eq(mealsTable.userId, userId), sql`date >= ${dates[dates.length - 1]}`));
+
+        const mealsByDate: Record<string, number> = {};
+        let junkDays = 0;
+        let longestGapH = 0;
+        const timedMealsByDate: Record<string, string[]> = {};
+
+        for (const m of mealRows) {
+          mealsByDate[m.date] = (mealsByDate[m.date] ?? 0) + 1;
+          try {
+            const p = JSON.parse(m.analysisResult ?? '{}');
+            if (p.meal_quality_flags?.isPureJunk) junkDays++;
+            if (p.meal_time) {
+              if (!timedMealsByDate[m.date]) timedMealsByDate[m.date] = [];
+              timedMealsByDate[m.date].push(p.meal_time);
+            }
+          } catch { /* skip */ }
+        }
+
+        // Compute junk days (per day not per meal)
+        const junkDaysSet = new Set<string>();
+        for (const m of mealRows) {
+          try { const p = JSON.parse(m.analysisResult ?? '{}'); if (p.meal_quality_flags?.isPureJunk) junkDaysSet.add(m.date); } catch { /* skip */ }
+        }
+        const actualJunkDays = junkDaysSet.size;
+
+        // Compute longest gap across all days
+        let longestGapDays = 0;
+        for (const [, times] of Object.entries(timedMealsByDate)) {
+          const sorted = times.sort();
+          for (let i = 1; i < sorted.length; i++) {
+            const [ph, pm] = sorted[i-1].split(':').map(Number);
+            const [ch, cm] = sorted[i].split(':').map(Number);
+            const gapH = (ch * 60 + cm - (ph * 60 + pm)) / 60;
+            if (gapH > longestGapH) { longestGapH = Math.round(gapH * 10) / 10; longestGapDays = 1; }
+            else if (Math.abs(gapH - longestGapH) < 0.5) longestGapDays++;
+          }
+        }
+
+        const totalDays = dates.length || 1;
+        const avgMealsPerDay = Math.round((Object.values(mealsByDate).reduce((a, b) => a + b, 0) / totalDays) * 10) / 10;
+
+        const triggerLine = weaknessCount > 0
+          ? `Nutrition was your lowest pillar ${weaknessCount}× this week${longestGapH >= 5 ? ' — mainly due to long meal gaps' : avgMealsPerDay < 2 ? ' — mainly due to low logging consistency' : ''}.`
+          : 'Nutrition has been your lowest pillar this week.';
+
+        const evidence: string[] = [];
+        if (longestGapH > 0) evidence.push(`Longest meal gap: ${longestGapH}h${longestGapDays > 1 ? ` (${longestGapDays} days)` : ''}`);
+        if (avgMealsPerDay > 0) evidence.push(`Meals logged/day: ${avgMealsPerDay} avg`);
+        if (actualJunkDays > 0) evidence.push(`Junk-only days: ${actualJunkDays}/7`);
+
+        const targets: string[] = [];
+        if (longestGapH >= 5) targets.push(`Keep meal gaps ≤5h (down from ${longestGapH}h)`);
+        if (avgMealsPerDay < 2) targets.push(`Log ≥2 meals/day (up from ${avgMealsPerDay})`);
+        if (archetype === 'athlete') {
+          targets.push('Fuel within 30 min of every session');
+        } else {
+          targets.push('Protein before 11:00 on 5/7 days');
+        }
+
+        const rules = archetype === 'athlete'
+          ? ['Fuel within 30 min before and after every session', 'No meal gap longer than 5 hours', 'Log every meal — consistency is data', 'Aim for 2L+ hydration on training days', 'Avoid pure junk-food-only days']
+          : ['No meal gap longer than 5 hours', 'Protein within 2 hours of waking', 'Minimum 2 full meals logged daily', 'Aim for 2L+ hydration', 'Avoid pure junk-food-only days'];
+
+        return { title: 'Fuel Consistency Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.nutrition, planHabits: STATIC_PLAN_HABITS.nutrition };
+      }
+
+      // ---- TRAINING pillar ----
+      if (pillar === 'training') {
+        const dates = pillarRows.map(r => r.date);
+        const trainingSessions = await db.select({ date: trainingDataTable.date, skipped: trainingDataTable.skipped })
+          .from(trainingDataTable).where(and(eq(trainingDataTable.userId, userId), sql`date >= ${dates[dates.length - 1]}`));
+
+        const sessionDays = new Set(trainingSessions.filter(s => !s.skipped).map(s => s.date)).size;
+        const skippedCount = trainingSessions.filter(s => s.skipped).length;
+
+        // Count green recovery days with no training
+        const greenNoSession = pillarRows.filter(r => {
+          const hasSession = trainingSessions.some(s => s.date === r.date && !s.skipped);
+          return (r.recoveryScore ?? 0) >= 7 && !hasSession;
+        }).length;
+
+        const triggerLine = weaknessCount > 0
+          ? `Training was your lowest pillar ${weaknessCount}× this week${skippedCount > 0 ? ` — ${skippedCount} session${skippedCount > 1 ? 's' : ''} skipped` : sessionDays < 2 ? ' — low session count' : ''}.`
+          : 'Training has been your lowest pillar this week.';
+
+        const evidence: string[] = [];
+        evidence.push(`Sessions logged in 7 days: ${sessionDays}`);
+        if (skippedCount > 0) evidence.push(`Skipped sessions: ${skippedCount}`);
+        if (greenNoSession > 0) evidence.push(`Green days with no training: ${greenNoSession}`);
+
+        const targets: string[] = [];
+        if (sessionDays < 3) targets.push(`Reach ${archetype === 'athlete' ? 4 : 3} sessions this week (currently ${sessionDays})`);
+        if (skippedCount > 0) targets.push('Zero skipped sessions this week');
+        if (greenNoSession > 1) targets.push('Train on all green recovery days');
+
+        const rules = archetype === 'athlete'
+          ? ['Log every session — no untracked training days', 'Match intensity to your recovery zone', 'Minimum 4 sessions per week', 'Include one dedicated recovery or mobility day', 'Push harder on green days, back off on red']
+          : ['Log every training session — no untracked days', 'Match intensity to your recovery zone', 'Minimum 3 sessions this week', 'Include at least one mobility or recovery session', 'Do not skip sessions on green recovery days'];
+
+        return { title: 'Training Consistency Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.training, planHabits: STATIC_PLAN_HABITS.training };
+      }
+
+      // ---- RECOVERY pillar ----
+      {
+        const whoopRows = await db.select({ date: whoopDataTable.date, sleepHours: whoopDataTable.sleepHours, recoveryScore: whoopDataTable.recoveryScore })
+          .from(whoopDataTable).where(and(eq(whoopDataTable.userId, userId), sql`date >= ${pillarRows[pillarRows.length - 1]?.date ?? ''}`))
+          .orderBy(desc(whoopDataTable.date)).limit(7);
+
+        const avgSleep = whoopRows.length > 0
+          ? Math.round((whoopRows.reduce((s, r) => s + (r.sleepHours ?? 7), 0) / whoopRows.length) * 10) / 10
+          : null;
+        const redDays = whoopRows.filter(r => (r.recoveryScore ?? 100) < 34).length;
+        const yellowDays = whoopRows.filter(r => { const s = r.recoveryScore ?? 100; return s >= 34 && s < 67; }).length;
+
+        const triggerLine = weaknessCount > 0
+          ? `Recovery was your lowest pillar ${weaknessCount}× this week${redDays > 1 ? ` — ${redDays} red recovery days` : avgSleep !== null && avgSleep < 7 ? ` — avg sleep ${avgSleep}h` : ''}.`
+          : 'Recovery has been your lowest pillar this week.';
+
+        const evidence: string[] = [];
+        if (avgSleep !== null) evidence.push(`Avg sleep: ${avgSleep}h/night`);
+        if (redDays > 0) evidence.push(`Red recovery days: ${redDays}/7`);
+        if (yellowDays > 0) evidence.push(`Yellow recovery days: ${yellowDays}/7`);
+
+        const targets: string[] = [];
+        if (avgSleep !== null && avgSleep < 7) targets.push(`Increase avg sleep to 7h+ (currently ${avgSleep}h)`);
+        if (redDays > 1) targets.push(`Reduce red days to ≤1 this week (currently ${redDays})`);
+        targets.push('Consistent bed/wake time ±30 min');
+
+        const rules = ['Target 7–8 hours of sleep each night', 'No screens or stimulants after 22:00', 'Log your daily check-in feeling every morning', 'Keep consistent bed and wake times', 'Prioritize full rest on red recovery days'];
+
+        return { title: 'Recovery Optimization Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.recovery, planHabits: STATIC_PLAN_HABITS.recovery };
+      }
+    } catch (err) {
+      console.error('[PLAN CONTENT] Personalization error, falling back to static:', err);
+      return fallback(`${pillar.charAt(0).toUpperCase() + pillar.slice(1)} has been your lowest pillar this week.`);
+    }
+  }
+
+  /** Compute weakness state from last 7 days of pillar scores */
+  async function computePillarWeakness(userId: string): Promise<{ pillar: string; weaknessCount: number } | null> {
+    // Admin bypass: always return a visible pending plan for testing
+    const adminWhoopId = process.env.ADMIN_WHOOP_ID || '25283528';
+    if (userId === `whoop_${adminWhoopId}`) {
+      // Use real data if available, otherwise return a stub so the UI is always visible
+      const rows = await db.select({
+        nutritionScore: fitScores.nutritionScore,
+        trainingScore: fitScores.trainingScore,
+        recoveryScore: fitScores.recoveryScore,
+      })
+        .from(fitScores)
+        .where(and(
+          eq(fitScores.userId, userId),
+          sql`nutrition_score IS NOT NULL AND training_score IS NOT NULL AND recovery_score IS NOT NULL`,
+        ))
+        .orderBy(desc(fitScores.date))
+        .limit(7);
+
+      if (rows.length === 0) {
+        return { pillar: 'nutrition', weaknessCount: 5 }; // stub: show unlocked state
+      }
+      const counts: Record<string, number> = { nutrition: 0, training: 0, recovery: 0 };
+      for (const row of rows) {
+        const n = row.nutritionScore!; const t = row.trainingScore!; const r = row.recoveryScore!;
+        const min = Math.min(n, t, r);
+        if (n === min) counts.nutrition++;
+        else if (t === min) counts.training++;
+        else counts.recovery++;
+      }
+      const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+      // Force weaknessCount to at least 5 so admin always sees unlocked state
+      return { pillar: dominant[0], weaknessCount: Math.max(dominant[1], 5) };
+    }
+
+    const rows = await db.select({
+      nutritionScore: fitScores.nutritionScore,
+      trainingScore: fitScores.trainingScore,
+      recoveryScore: fitScores.recoveryScore,
+    })
+      .from(fitScores)
+      .where(and(
+        eq(fitScores.userId, userId),
+        sql`nutrition_score IS NOT NULL AND training_score IS NOT NULL AND recovery_score IS NOT NULL`,
+      ))
+      .orderBy(desc(fitScores.date))
+      .limit(7);
+
+    if (rows.length === 0) return null;
+
+    const counts: Record<string, number> = { nutrition: 0, training: 0, recovery: 0 };
+    for (const row of rows) {
+      const n = row.nutritionScore!;
+      const t = row.trainingScore!;
+      const r = row.recoveryScore!;
+      const min = Math.min(n, t, r);
+      // Tiebreak: nutrition > training > recovery (most commonly culprit first)
+      if (n === min) counts.nutrition++;
+      else if (t === min) counts.training++;
+      else counts.recovery++;
+    }
+
+    const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+    if (dominant[1] < 3) return null;
+    return { pillar: dominant[0], weaknessCount: dominant[1] };
+  }
+
+  /** Compute 7-day rolling average for a specific pillar */
+  async function computePillarRollingAvg(userId: string, pillar: string): Promise<number | null> {
+    const col = pillar === 'nutrition' ? fitScores.nutritionScore
+               : pillar === 'training' ? fitScores.trainingScore
+               : fitScores.recoveryScore;
+
+    const rows = await db.select({ score: col })
+      .from(fitScores)
+      .where(and(eq(fitScores.userId, userId), sql`${col} IS NOT NULL`))
+      .orderBy(desc(fitScores.date))
+      .limit(7);
+
+    if (rows.length === 0) return null;
+    const avg = rows.reduce((sum, r) => sum + (r.score ?? 0), 0) / rows.length;
+    return Math.round(avg * 10) / 10;
+  }
+
+  // GET /api/improvement-plan — current plan status
+  app.get('/api/improvement-plan', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      let activePlan = await storage.getActivePlan(userId);
+      let activePlanCurrentAvg: number | null = null;
+      let activePlanDaysCount = 0;
+
+      // Auto-complete check: if active plan pillar 7-day avg >= 7.0
+      if (activePlan) {
+        const col = activePlan.pillar === 'nutrition' ? fitScores.nutritionScore
+                   : activePlan.pillar === 'training' ? fitScores.trainingScore
+                   : fitScores.recoveryScore;
+
+        const [daysResult] = await db.select({ count: sql<number>`count(*)` })
+          .from(fitScores)
+          .where(and(eq(fitScores.userId, userId), sql`${col} IS NOT NULL`));
+        activePlanDaysCount = Math.min(Number(daysResult?.count ?? 0), 7);
+
+        const avg = await computePillarRollingAvg(userId, activePlan.pillar);
+        if (avg !== null && avg >= 7.0) {
+          await storage.completePlan(activePlan.id, avg);
+          console.log(`[IMPROVEMENT PLAN] Auto-completed ${activePlan.pillar} plan for ${userId}, avg=${avg}`);
+          activePlan = undefined;
+          activePlanDaysCount = 0;
+        } else {
+          activePlanCurrentAvg = avg;
+        }
+      }
+
+      const completedPlans = await storage.getCompletedPlans(userId);
+
+      // Compute pending plan (only if no active plan)
+      let pendingPlan = null;
+      if (!activePlan) {
+        const weakness = await computePillarWeakness(userId);
+        if (weakness) {
+          pendingPlan = {
+            pillar: weakness.pillar,
+            weaknessCount: weakness.weaknessCount,
+            unlocked: weakness.weaknessCount >= 5,
+          };
+        }
+      }
+
+      res.json({
+        activePlan: activePlan ? {
+          id: activePlan.id,
+          pillar: activePlan.pillar,
+          activatedAt: activePlan.activatedAt,
+          currentRollingAvg: activePlanCurrentAvg,
+          daysCount: activePlanDaysCount,
+        } : undefined,
+        pendingPlan,
+        completedPlans: completedPlans.map(p => ({
+          id: p.id,
+          pillar: p.pillar,
+          completedAt: p.completedAt,
+          rollingAvgAtCompletion: p.rollingAvgAtCompletion,
+        })),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[IMPROVEMENT PLAN] GET error:', message);
+      res.status(500).json({ error: 'Failed to fetch improvement plan', details: message });
+    }
+  });
+
+  // POST /api/improvement-plan/activate — activate the unlocked pending plan
+  app.post('/api/improvement-plan/activate', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const existing = await storage.getActivePlan(userId);
+      if (existing) {
+        return res.status(409).json({ error: 'A plan is already active' });
+      }
+
+      const weakness = await computePillarWeakness(userId);
+      if (!weakness || weakness.weaknessCount < 5) {
+        return res.status(400).json({ error: 'Plan not yet unlocked (need 5 weakness days)' });
+      }
+
+      const plan = await storage.createActivePlan(userId, weakness.pillar);
+      console.log(`[IMPROVEMENT PLAN] Activated ${weakness.pillar} plan for ${userId}`);
+
+      // Auto-create plan habits
+      try {
+        const content = await generatePersonalizedPlanContent(userId, weakness.pillar);
+        await storage.savePlanHabits(userId, plan.id, content.planHabits.map(h => ({ habitKey: h.id, label: h.label, description: h.description })));
+        console.log(`[IMPROVEMENT PLAN] Saved ${content.planHabits.length} habits for plan ${plan.id}`);
+      } catch (e) {
+        console.error('[IMPROVEMENT PLAN] Failed to save plan habits:', e);
+      }
+
+      res.json({
+        id: plan.id,
+        pillar: plan.pillar,
+        activatedAt: plan.activatedAt,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[IMPROVEMENT PLAN] Activate error:', message);
+      res.status(500).json({ error: 'Failed to activate plan', details: message });
+    }
+  });
+
+  // GET /api/improvement-plan/content?pillar=nutrition — personalized plan content
+  app.get('/api/improvement-plan/content', requireJWTAuth, async (req, res) => {
+    const { pillar } = req.query;
+    if (!pillar || typeof pillar !== 'string' || !['nutrition', 'training', 'recovery'].includes(pillar)) {
+      return res.status(400).json({ error: 'Invalid pillar. Use: nutrition | training | recovery' });
+    }
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      const content = await generatePersonalizedPlanContent(userId, pillar);
+      res.json(content);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to generate plan content', details: message });
+    }
+  });
+
+  // GET /api/plan-habits/today?date=YYYY-MM-DD — plan habits + check-in state for today
+  app.get('/api/plan-habits/today', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      const { date } = req.query;
+      if (!date || typeof date !== 'string') return res.status(400).json({ error: 'date query param required (YYYY-MM-DD)' });
+
+      const activePlan = await storage.getActivePlan(userId);
+      if (!activePlan) return res.json({ planHabits: [] });
+
+      let [habits, checkins] = await Promise.all([
+        storage.getPlanHabits(activePlan.id),
+        storage.getHabitCheckinsByDate(userId, date),
+      ]);
+
+      // Re-seed if habits are missing or don't match the expected static set
+      const staticHabits = STATIC_PLAN_HABITS[activePlan.pillar] ?? [];
+      const currentKeys = new Set(habits.map(h => h.habitKey));
+      const needsReseed = staticHabits.length > 0 && (habits.length === 0 || !staticHabits.every(h => currentKeys.has(h.id)));
+      if (needsReseed) {
+        // Remove any stale habits and insert the canonical static set
+        await db.delete(planHabitsTable).where(eq(planHabitsTable.planId, activePlan.id));
+        await storage.savePlanHabits(userId, activePlan.id, staticHabits.map(h => ({ habitKey: h.id, label: h.label, description: h.description })));
+        habits = await storage.getPlanHabits(activePlan.id);
+        // Refresh checkins since habit keys may have changed
+        checkins = await storage.getHabitCheckinsByDate(userId, date);
+      }
+
+      const checkinMap = new Map(checkins.map(c => [c.habitKey, c.checked]));
+      res.json({
+        planHabits: habits.map(h => ({
+          habit_key: h.habitKey,
+          label: h.label,
+          description: h.description ?? undefined,
+          checked: checkinMap.get(h.habitKey) ?? false,
+        })),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to fetch plan habits', details: message });
+    }
+  });
+
+  // POST /api/plan-habits/checkin — toggle a plan habit check-in
+  app.post('/api/plan-habits/checkin', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      const { date, habit_key, checked } = req.body;
+      if (!date || !habit_key || typeof checked !== 'boolean') {
+        return res.status(400).json({ error: 'date, habit_key, and checked (boolean) are required' });
+      }
+      await storage.upsertHabitCheckin(userId, habit_key, date, checked);
+      res.json({ ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to save habit check-in', details: message });
+    }
+  });
+
+  // POST /api/improvement-plan/meal-plan — FitCook meal plan generator
+  app.post('/api/improvement-plan/meal-plan', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const { timingMode, windows, preferences, allergies } = req.body;
+      if (!timingMode || !['flexible', 'fixed'].includes(timingMode)) {
+        return res.status(400).json({ error: 'timingMode must be "flexible" or "fixed"' });
+      }
+
+      // Get active plan + its habits
+      const activePlan = await storage.getActivePlan(userId);
+      if (!activePlan) return res.status(400).json({ error: 'No active improvement plan' });
+
+      let habits = await storage.getPlanHabits(activePlan.id);
+      // Auto-seed if plan was activated before habits were persisted
+      if (habits.length === 0) {
+        const staticHabits = STATIC_PLAN_HABITS[activePlan.pillar] ?? [];
+        if (staticHabits.length > 0) {
+          await storage.savePlanHabits(userId, activePlan.id, staticHabits.map(h => ({ habitKey: h.id, label: h.label, description: h.description })));
+          habits = await storage.getPlanHabits(activePlan.id);
+        }
+      }
+      const planHabits = habits.map(h => h.label);
+
+      // Get user context for personalization
+      const ctx = await storage.getUserContext(userId).catch(() => undefined);
+
+      const mealPlan = await openAIService.generateFitCookMealPlan({
+        planHabits,
+        timingMode,
+        windows: timingMode === 'fixed' ? windows : undefined,
+        preferences: preferences || undefined,
+        allergies: allergies || undefined,
+        userContext: ctx ? {
+          dietPhase: ctx.tier2DietPhase,
+          trainingPhase: ctx.tier2Phase,
+          tier1Goal: ctx.tier1Goal,
+          workHours: ctx.workHoursPerWeek || undefined,
+          trainingSessions: ctx.trainingSessionsPerWeek || undefined,
+        } : undefined,
+      });
+
+      res.json({ mealPlan });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITCOOK] Meal plan error:', message);
+      res.status(500).json({ error: 'Failed to generate meal plan', details: message });
+    }
   });
 
   // Static file serving
