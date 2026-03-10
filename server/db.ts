@@ -10,9 +10,11 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 50,                  // Support up to 50 concurrent connections (safe for 10+ users)
-  idleTimeoutMillis: 30000, // Release idle connections after 30s
-  connectionTimeoutMillis: 5000, // Fail fast if pool exhausted
+  max: 10,
+  idleTimeoutMillis: 10000,
+  connectionTimeoutMillis: 10000,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
   ssl: {
     rejectUnauthorized: false
   }
