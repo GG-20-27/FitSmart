@@ -238,8 +238,10 @@ export class TrainingScoreService {
         return { min: 7, max: 12, ideal: 9.5 };
       }
       if (rehab.includes('return') || goal.includes('return')) {
-        // Return-to-training: progressive ramp, still below full load
-        return { min: 9, max: 15, ideal: 12 };
+        // Return-to-training: progressive ramp — wider band since daily WHOOP strain
+        // accumulates from all activity, not just the workout. Don't penalise moderate
+        // training days that sit above a narrow upper limit.
+        return { min: 8, max: 18, ideal: 12 };
       }
       // Default rehab band: covers 'Rehab' stage, post-surgery goal, post-op injury, unspecified stage
       return { min: 8, max: 13, ideal: 10.5 };
@@ -582,7 +584,8 @@ export class TrainingScoreService {
     const inj     = (input.injuryType  || '').toLowerCase();
 
     const isAcuteRehab     = rehab.includes('acute');
-    const isRehabFromStage = !isAcuteRehab && (rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return') || goal.includes('rehab'));
+    const isReturnPhase    = !isAcuteRehab && (rehab.includes('return') || goal.includes('return'));
+    const isRehabFromStage = !isAcuteRehab && !isReturnPhase && (rehab.includes('sub') || rehab.includes('rehab'));
     const isRehabFromGoal  = fg.includes('surgery') || fg.includes('post-op') || fg.includes('post op') || fg.includes('recover from') || inj.includes('post-surgery') || inj.includes('post-op');
     const isRehabPhase     = isRehabFromStage || isRehabFromGoal;
     const isDeload         = load === 'light' || note.includes('deload');
@@ -600,6 +603,15 @@ export class TrainingScoreService {
         parts.push('Overreach detected — strain exceeded what is appropriate for acute recovery; protect the healing process');
       } else {
         parts.push('Moderate effort during acute recovery — monitor how the body responds');
+      }
+    } else if (isReturnPhase) {
+      // Return-to-training: progressive phase — be encouraging, not alarmist
+      if (strainGoodFit) {
+        parts.push('Good return-to-training session — strain is in the right range for progressive loading');
+      } else if (strainOverreach) {
+        parts.push('Slightly above target range for return-to-training — ease back a touch next session, but this is manageable');
+      } else {
+        parts.push('Session fits your return-to-training phase — keep building gradually');
       }
     } else if (isRehabPhase) {
       if (strainGoodFit) {
@@ -645,7 +657,7 @@ export class TrainingScoreService {
     }
 
     // Strain appropriateness (only for non-context-specific cases)
-    if (!isAcuteRehab && !isRehabPhase && !isDeload && !isHighPerf) {
+    if (!isAcuteRehab && !isReturnPhase && !isRehabPhase && !isDeload && !isHighPerf) {
       if (breakdown.strainAppropriatenessScore >= 3.5) {
         parts.push('Training load was well-matched to your recovery state');
       } else if (breakdown.strainAppropriatenessScore < 2 && input.strainScore && input.strainScore > 15 && recoveryZone !== 'green') {

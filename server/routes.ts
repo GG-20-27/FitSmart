@@ -175,6 +175,44 @@ function calculateAverages(days: number = 7): any {
   }
 }
 
+// ── Macro target calculation utility ─────────────────────────────────────────
+function calculateMacroTargets(params: {
+  weightKg: number;
+  tier1Goal?: string;
+  tier2DietPhase?: string;
+  trainingSessionsPerWeek?: string | null;
+}): { proteinTarget: number; calorieTarget: number } {
+  const goal = (params.tier1Goal ?? '').toLowerCase();
+  const diet = (params.tier2DietPhase ?? '').toLowerCase();
+  const sessions = (params.trainingSessionsPerWeek ?? '').toLowerCase();
+
+  // Protein multiplier (g per kg bodyweight) — distinct per goal
+  let proteinMultiplier = 1.6; // default (longevity/health, rehab)
+  if (goal.includes('high performance')) proteinMultiplier = 2.0;
+  else if (goal.includes('balanced performance')) proteinMultiplier = 1.8;
+  else if (goal.includes('recomp') || goal.includes('body recomp')) proteinMultiplier = 1.9;
+  else if (goal.includes('rehab') || goal.includes('longevity')) proteinMultiplier = 1.8;
+  // Diet phase overrides
+  if (diet.includes('cut')) proteinMultiplier = Math.max(proteinMultiplier, 2.0);
+  else if (diet.includes('aggressive bulk')) proteinMultiplier = Math.max(proteinMultiplier, 1.9);
+  const proteinTarget = Math.round((params.weightKg * proteinMultiplier) / 5) * 5;
+
+  // TDEE estimate (kcal per kg)
+  let activityMultiplier = 32; // moderate default
+  if (sessions.includes('1') || sessions.includes('2')) activityMultiplier = 28;
+  if (sessions.includes('5') || sessions.includes('6') || sessions.includes('7')) activityMultiplier = 36;
+  let tdee = params.weightKg * activityMultiplier;
+
+  // Goal + diet adjustments
+  if (goal.includes('high performance')) tdee *= 1.10;
+  if (diet.includes('cut')) tdee *= 0.85;
+  else if (diet.includes('aggressive bulk')) tdee *= 1.15;
+  else if (diet.includes('lean bulk')) tdee *= 1.10;
+  const calorieTarget = Math.round(tdee / 50) * 50;
+
+  return { proteinTarget, calorieTarget };
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Enable CORS for all routes with pre-flight support
   app.use(cors({
@@ -3828,6 +3866,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ai_analysis: analysis.ai_analysis,
         meal_quality_flags: analysis.meal_quality_flags ?? null,
         meal_time: (mealTime as string) || null, // HH:MM from mobile time picker
+        estimated_calories: analysis.estimatedCalories ?? null,
+        estimated_protein: analysis.estimatedProtein ?? null,
       };
 
       const updatedMeal = await storage.updateMeal(meal.id, {
@@ -3849,6 +3889,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           nutritionScoreDisplay: analysis.score_display,
           analysis: analysis.ai_analysis,
           mealQualityFlags: analysis.meal_quality_flags ?? null,
+          estimatedCalories: analysis.estimatedCalories ?? null,
+          estimatedProtein: analysis.estimatedProtein ?? null,
         }
       });
     } catch (error) {
@@ -3927,12 +3969,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Parse analysis result if it exists
         let nutritionScore: number | undefined;
         let analysis: string | undefined;
+        let estimatedCalories: number | null = null;
+        let estimatedProtein: number | null = null;
 
         if (meal.analysisResult) {
           try {
             const parsed = JSON.parse(meal.analysisResult);
             nutritionScore = parsed.nutrition_subscore;
             analysis = parsed.ai_analysis;
+            if (typeof parsed.estimated_calories === 'number') estimatedCalories = parsed.estimated_calories;
+            if (typeof parsed.estimated_protein === 'number') estimatedProtein = parsed.estimated_protein;
           } catch (e) {
             console.error(`Failed to parse analysis for meal ${meal.id}:`, e);
           }
@@ -3947,6 +3993,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           uploadedAt: meal.uploadedAt,
           nutritionScore,
           analysis,
+          estimatedCalories,
+          estimatedProtein,
         };
       });
 
@@ -4891,7 +4939,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (ctx.workHoursPerWeek) parts.push(`Work hours/week: ${ctx.workHoursPerWeek}`);
           if (ctx.trainingSessionsPerWeek) parts.push(`Training sessions/week: ${ctx.trainingSessionsPerWeek}`);
           if (ctx.injuryType && ctx.injuryType !== 'None') {
-            parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
+            let injuryLine = `Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}`;
+            if (ctx.rehabStage) {
+              const stageExpectation: Record<string, string> = {
+                'Acute (rest & protection)':  'Complete rest is correct. Do NOT suggest more activity. Praise any rest taken.',
+                'Sub-acute (light movement)': 'Light movement is appropriate. WHOOP strain 2–6 is correct. Gently encourage gradual progression.',
+                'Rehab (guided exercises)':   'Guided rehab exercises are the goal. WHOOP strain 4–10 is appropriate. Push user to stay consistent with their sessions and track progression.',
+                'Return to training':         'Progressive loading is the goal. WHOOP strain 8–15 is the target range. Encourage increasing intensity week by week within safe limits.',
+              };
+              const expectation = stageExpectation[ctx.rehabStage];
+              injuryLine += `. Rehab stage: ${ctx.rehabStage}${expectation ? `. Training slide context: ${expectation}` : ''}`;
+            }
+            parts.push(injuryLine);
           }
           coachContextSummary = parts.join('\n');
         }
@@ -4911,6 +4970,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
       } catch { /* graceful */ }
+
+      // Aggregate estimated meal macros from today's logged meals
+      let mealMacros: { totalCalories: number | null; totalProtein: number | null; calorieTarget?: number | null; proteinTarget?: number | null } | undefined;
+      try {
+        const todayForMeals = DateTime.now().setZone(process.env.USER_TZ || 'Europe/Zurich').toFormat('yyyy-MM-dd');
+        const todayMeals = await storage.getMealsByUserAndDate(userId, todayForMeals);
+        let totalCal = 0, totalProt = 0, hasCalorie = false, hasProtein = false;
+        for (const m of todayMeals) {
+          if (m.analysisResult) {
+            try {
+              const p = JSON.parse(m.analysisResult);
+              if (typeof p.estimated_calories === 'number') { totalCal += p.estimated_calories; hasCalorie = true; }
+              if (typeof p.estimated_protein === 'number') { totalProt += p.estimated_protein; hasProtein = true; }
+            } catch { /* skip */ }
+          }
+        }
+        if (hasCalorie || hasProtein) {
+          const ctx = await storage.getUserContext(userId);
+          mealMacros = {
+            totalCalories: hasCalorie ? totalCal : null,
+            totalProtein: hasProtein ? totalProt : null,
+            calorieTarget: ctx?.calorieTarget ?? null,
+            proteinTarget: ctx?.proteinTarget ?? null,
+          };
+        }
+      } catch { /* graceful */ }
+
+      // Fetch recent training context (last 3 days before today)
+      let recentTrainingHistory: string | undefined;
+      try {
+        const recentRows = await db.select({
+          date: fitScores.date,
+          trainingScore: fitScores.trainingScore,
+          score: fitScores.score,
+        })
+        .from(fitScores)
+        .where(and(
+          eq(fitScores.userId, userId),
+          sql`${fitScores.date} < ${todayLocal}`,
+          sql`${fitScores.trainingScore} IS NOT NULL`,
+        ))
+        .orderBy(desc(fitScores.date))
+        .limit(3);
+
+        if (recentRows.length > 0) {
+          recentTrainingHistory = recentRows
+            .map(r => `${r.date}: trainingScore=${r.trainingScore}, fitScore=${r.score}`)
+            .join('; ');
+        }
+      } catch { /* non-fatal */ }
 
       const summary = await openAIService.generateDailySummary({
         fitScore: fitScore || 5.0,
@@ -4940,6 +5049,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dailyHabits: dailyHabits || undefined,
         advancedRecoverySignals: advancedRecoverySignals || undefined,
         sleepDebtMinutes: sleepDebtMinutes ?? undefined,
+        mealMacros,
+        recentTrainingHistory,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);
@@ -5568,7 +5679,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tier2Emphasis = body.tier2Emphasis ?? undefined;
       const sportSpecific = tier2Emphasis === 'Sport-Specific' ? (body.sportSpecific ?? null) : null;
 
-      const data = {
+      // Numeric body fields
+      const weightKg = body.weightKg != null ? parseFloat(body.weightKg as string) : undefined;
+      const heightCm = body.heightCm != null ? parseFloat(body.heightCm as string) : undefined;
+      const proteinTargetOverride = body.proteinTarget != null ? parseInt(body.proteinTarget as string, 10) : undefined;
+      const calorieTargetOverride = body.calorieTarget != null ? parseInt(body.calorieTarget as string, 10) : undefined;
+      const macroTargetOverridden = body.macroTargetOverridden != null
+        ? body.macroTargetOverridden === 'true' || (body.macroTargetOverridden as any) === true
+        : undefined;
+
+      const data: Record<string, any> = {
         ...(body.tier1Goal !== undefined && { tier1Goal: body.tier1Goal }),
         ...(body.tier1Priority !== undefined && { tier1Priority: body.tier1Priority }),
         ...(body.tier2Phase !== undefined && { tier2Phase: body.tier2Phase }),
@@ -5584,9 +5704,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(body.tier3SleepExpectation !== undefined && { tier3SleepExpectation: body.tier3SleepExpectation }),
         ...(body.workHoursPerWeek !== undefined && { workHoursPerWeek: body.workHoursPerWeek }),
         ...(body.trainingSessionsPerWeek !== undefined && { trainingSessionsPerWeek: body.trainingSessionsPerWeek }),
+        ...(weightKg != null && !isNaN(weightKg) && { weightKg }),
+        ...(heightCm != null && !isNaN(heightCm) && { heightCm }),
+        ...(macroTargetOverridden !== undefined && { macroTargetOverridden }),
+        // Manual overrides: store directly and mark as overridden.
+        // Skip when macroTargetOverridden is being reset to false — values will be recalculated.
+        ...(macroTargetOverridden !== false && proteinTargetOverride != null && !isNaN(proteinTargetOverride) && { proteinTarget: proteinTargetOverride, macroTargetOverridden: true }),
+        ...(macroTargetOverridden !== false && calorieTargetOverride != null && !isNaN(calorieTargetOverride) && { calorieTarget: calorieTargetOverride, macroTargetOverridden: true }),
       };
 
-      const ctx = await storage.upsertUserContext(userId, data);
+      // Auto-recalculate targets when weight/goal changes and not manually overridden.
+      // Also recalculate when macroTargetOverridden is explicitly reset to false.
+      let ctx = await storage.upsertUserContext(userId, data);
+      const shouldRecalc = ctx.weightKg && (!ctx.macroTargetOverridden || macroTargetOverridden === false);
+      if (shouldRecalc) {
+        const targets = calculateMacroTargets({
+          weightKg: ctx.weightKg!,
+          tier1Goal: ctx.tier1Goal,
+          tier2DietPhase: ctx.tier2DietPhase,
+          trainingSessionsPerWeek: ctx.trainingSessionsPerWeek,
+        });
+        ctx = await storage.upsertUserContext(userId, targets);
+      }
       res.json(ctx);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -6309,15 +6448,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return { pillar: dominant[0], weaknessCount: dominant[1] };
   }
 
-  /** Compute 7-day rolling average for a specific pillar */
-  async function computePillarRollingAvg(userId: string, pillar: string): Promise<number | null> {
+  /** Compute 7-day rolling average for a specific pillar, optionally since a specific date */
+  async function computePillarRollingAvg(userId: string, pillar: string, sinceDate?: string): Promise<number | null> {
     const col = pillar === 'nutrition' ? fitScores.nutritionScore
                : pillar === 'training' ? fitScores.trainingScore
                : fitScores.recoveryScore;
 
     const rows = await db.select({ score: col })
       .from(fitScores)
-      .where(and(eq(fitScores.userId, userId), sql`${col} IS NOT NULL`))
+      .where(and(
+        eq(fitScores.userId, userId),
+        sql`${col} IS NOT NULL`,
+        ...(sinceDate ? [gte(fitScores.date, sinceDate)] : []),
+      ))
       .orderBy(desc(fitScores.date))
       .limit(7);
 
@@ -6342,12 +6485,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
                    : activePlan.pillar === 'training' ? fitScores.trainingScore
                    : fitScores.recoveryScore;
 
+        // Only count days logged since the plan was activated
+        const activatedDate = activePlan.activatedAt instanceof Date
+          ? activePlan.activatedAt.toISOString().slice(0, 10)
+          : String(activePlan.activatedAt).slice(0, 10);
+
         const [daysResult] = await db.select({ count: sql<number>`count(*)` })
           .from(fitScores)
-          .where(and(eq(fitScores.userId, userId), sql`${col} IS NOT NULL`));
+          .where(and(eq(fitScores.userId, userId), sql`${col} IS NOT NULL`, gte(fitScores.date, activatedDate)));
         activePlanDaysCount = Math.min(Number(daysResult?.count ?? 0), 7);
 
-        const avg = await computePillarRollingAvg(userId, activePlan.pillar);
+        const avg = await computePillarRollingAvg(userId, activePlan.pillar, activatedDate);
         if (avg !== null && avg >= 7.0) {
           await storage.completePlan(activePlan.id, avg);
           console.log(`[IMPROVEMENT PLAN] Auto-completed ${activePlan.pillar} plan for ${userId}, avg=${avg}`);
@@ -6520,7 +6668,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
-      const { timingMode, windows, preferences, allergies } = req.body;
+      const { timingMode, windows, preferences, allergies, previousPlan } = req.body;
       if (!timingMode || !['flexible', 'fixed'].includes(timingMode)) {
         return res.status(400).json({ error: 'timingMode must be "flexible" or "fixed"' });
       }
@@ -6549,6 +6697,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         windows: timingMode === 'fixed' ? windows : undefined,
         preferences: preferences || undefined,
         allergies: allergies || undefined,
+        previousPlan: previousPlan || undefined,
+        proteinTarget: ctx?.proteinTarget ?? undefined,
+        calorieTarget: ctx?.calorieTarget ?? undefined,
         userContext: ctx ? {
           dietPhase: ctx.tier2DietPhase,
           trainingPhase: ctx.tier2Phase,
@@ -6563,6 +6714,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[FITCOOK] Meal plan error:', message);
       res.status(500).json({ error: 'Failed to generate meal plan', details: message });
+    }
+  });
+
+  // POST /api/improvement-plan/meal-plan/single — regenerate one meal slot
+  app.post('/api/improvement-plan/meal-plan/single', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const { mealType, existingMeal, timing, preferences, allergies } = req.body;
+      if (!mealType || !['Breakfast', 'Lunch', 'Snack', 'Dinner'].includes(mealType)) {
+        return res.status(400).json({ error: 'mealType must be Breakfast, Lunch, Snack, or Dinner' });
+      }
+
+      const ctx = await storage.getUserContext(userId).catch(() => undefined);
+
+      const meal = await openAIService.generateSingleFitCookMeal({
+        mealType,
+        existingMeal: existingMeal || '',
+        timing: timing || '12:00',
+        preferences: preferences || undefined,
+        allergies: allergies || undefined,
+        proteinTarget: ctx?.proteinTarget ?? undefined,
+      });
+
+      res.json({ meal });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITCOOK SINGLE] error:', message);
+      res.status(500).json({ error: 'Failed to regenerate meal', details: message });
+    }
+  });
+
+  // POST /api/improvement-plan/meal-plan/groceries — generate grocery list from current meals
+  app.post('/api/improvement-plan/meal-plan/groceries', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const { meals } = req.body;
+      if (!Array.isArray(meals) || meals.length === 0) {
+        return res.status(400).json({ error: 'meals array required' });
+      }
+
+      const groceries = await openAIService.generateGroceriesFromMeals(meals);
+      res.json({ groceries });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITCOOK GROCERIES] error:', message);
+      res.status(500).json({ error: 'Failed to generate grocery list', details: message });
     }
   });
 

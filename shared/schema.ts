@@ -216,6 +216,12 @@ export const userContext = pgTable("user_context", {
   // Lifestyle context
   workHoursPerWeek: text("work_hours_per_week"),
   trainingSessionsPerWeek: text("training_sessions_per_week"),
+  // Body & macro targets
+  weightKg: real("weight_kg"),
+  heightCm: real("height_cm"),
+  proteinTarget: integer("protein_target"),
+  calorieTarget: integer("calorie_target"),
+  macroTargetOverridden: boolean("macro_target_overridden").notNull().default(false),
 });
 
 // FitLook slide shape

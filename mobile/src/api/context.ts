@@ -28,6 +28,13 @@ export interface UserContext {
   // Lifestyle context
   workHoursPerWeek: string | null;
   trainingSessionsPerWeek: string | null;
+
+  // Body & macro targets
+  weightKg: number | null;
+  heightCm: number | null;
+  proteinTarget: number | null;
+  calorieTarget: number | null;
+  macroTargetOverridden: boolean;
 }
 
 export const DEFAULTS: UserContext = {
@@ -47,6 +54,11 @@ export const DEFAULTS: UserContext = {
   tier3SleepExpectation: 'Uncertain',
   workHoursPerWeek: null,
   trainingSessionsPerWeek: null,
+  weightKg: null,
+  heightCm: null,
+  proteinTarget: null,
+  calorieTarget: null,
+  macroTargetOverridden: false,
 };
 
 /** Fetch saved user context (returns defaults if not yet set) */

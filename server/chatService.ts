@@ -65,7 +65,7 @@ export class ChatService {
 
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY || '';
-    this.model = process.env.OPENAI_MODEL || 'gpt-5.2-2025-12-11';
+    this.model = process.env.OPENAI_MODEL || 'gpt-5.4-2026-03-05';
     this.fallbackModel = process.env.OPENAI_FALLBACK_MODEL || 'gpt-5-mini-2025-08-07';
     this.timeout = 120000; // 120s — OpenAI can be slow under load / complex prompts
 

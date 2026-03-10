@@ -26,7 +26,7 @@ export class ChatSummarizationService {
 
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY || '';
-    this.model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    this.model = process.env.OPENAI_MODEL || 'gpt-5.4-2026-03-05';
 
     if (!this.apiKey) {
       console.warn('[SUMMARIZATION SERVICE] OpenAI API key not configured - summarization unavailable');

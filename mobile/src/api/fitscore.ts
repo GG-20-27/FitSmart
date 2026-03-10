@@ -35,6 +35,8 @@ export interface MealData {
   nutritionScoreDisplay?: number; // score_display (int, for UI)
   analysis?: string;              // structured ✅/⚠️/🔧 text
   mealQualityFlags?: MealQualityFlags;
+  estimatedCalories?: number | null;
+  estimatedProtein?: number | null;
 }
 
 export interface TrainingDataEntry {

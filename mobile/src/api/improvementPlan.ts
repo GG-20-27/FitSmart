@@ -25,8 +25,29 @@ export async function generateFitCookMealPlan(params: {
   };
   preferences?: string;
   allergies?: string;
+  previousPlan?: string;
 }): Promise<{ mealPlan: string }> {
   return apiRequest<{ mealPlan: string }>('/api/improvement-plan/meal-plan', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function generateGroceryList(meals: string[]): Promise<{ groceries: string[] }> {
+  return apiRequest<{ groceries: string[] }>('/api/improvement-plan/meal-plan/groceries', {
+    method: 'POST',
+    body: JSON.stringify({ meals }),
+  });
+}
+
+export async function regenerateSingleMeal(params: {
+  mealType: 'Breakfast' | 'Lunch' | 'Snack' | 'Dinner';
+  existingMeal: string;
+  timing: string;
+  preferences?: string;
+  allergies?: string;
+}): Promise<{ meal: string }> {
+  return apiRequest<{ meal: string }>('/api/improvement-plan/meal-plan/single', {
     method: 'POST',
     body: JSON.stringify(params),
   });

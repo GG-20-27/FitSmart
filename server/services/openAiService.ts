@@ -44,6 +44,8 @@ Slide 1 — "The Day":
 - context_strip: OMIT entirely. Set context_strip to null or empty string.
 - chips: MUST be exactly these 4 items with actual breakdown scores from the metrics provided: ["Recovery: X.X", "Training: X.X", "Nutrition: X.X", "FitScore: X.X"]
 - Give an honest, grounded read of the day
+- If recent training history is provided: use it to frame today. If user trained well in the last 1–2 days, a rest or light day today is intentional recovery — say so. If 2+ consecutive days with no training during a phase that requires sessions, note that consistency is the gap.
+- IMPORTANT: your training framing in Slide 1 MUST be consistent with the verdict in Slide 3 — never say training "wasn't the limiter" in Slide 1 if Slide 3 calls it a miss, and vice versa.
 
 Slide 2 — "Recovery":
 - Mention sleep hours and/or recovery %
@@ -51,9 +53,12 @@ Slide 2 — "Recovery":
 - chips: sleep hours, HRV, zone, etc.
 
 Slide 3 — "Training":
-- Evaluate alignment with recovery + goals
-- Use conditional reasoning: "If this was a recovery session, it aligned well. If the goal was to push, intensity could have been higher."
-- chips: session count, strain, zone, etc.
+- Evaluate training alignment based on user's ACTUAL goal and context — commit to a verdict, do NOT hedge with "if this was recovery... if the goal was to push..." language.
+- If recent training history is provided: factor it into the verdict BEFORE judging. If the user trained well in the last 1–2 days, today's rest or light day is valid recovery — do NOT call it a miss. Only flag as a miss if there are 2+ consecutive days without sessions during a phase that requires them (e.g. Rehab guided exercises stage).
+- If rehab stage context is provided: evaluate within that stage's expectations. For guided exercise stages, encourage consistency and specific progression. For acute/rest stages, affirm rest as the correct choice.
+- If no injury context: evaluate against training goal, strain, zone, and weekly pattern.
+- IMPORTANT: your verdict here MUST be consistent with how Slide 1 frames training — both slides must agree on whether today's training was acceptable or a miss.
+- chips: session count, strain, zone, injury stage (if applicable)
 
 Slide 4 — "Nutrition":
 - Mention meal count
@@ -155,6 +160,7 @@ FACTORS — assess each with status + confidence + evidence:
    - "warning": protein is clearly absent or trivially small
    - "unknown": can't determine from image — blurry, unclear, or ambiguous
    THRESHOLD: ≥15–20g for main meals, ≥8g for snacks
+   SNACK EXCEPTION: If the meal type is a snack and it consists primarily of whole fruit or raw vegetables (e.g., berries, apple slices, fruit bowl, carrot sticks), mark proteinAdequacy as "unknown" — these are intentionally light snacks and the absence of protein is not a nutritional gap in this context.
 
 2. fiberPlantVolume
    - "good": vegetables, legumes, fruit, or intact whole grains clearly visible AND constitute a meaningful portion of the meal (roughly ≥25% of visible plate area). A small garnish — single cherry tomato, parsley sprig, herb dust, thin cucumber slice — does NOT qualify as "good".
@@ -165,6 +171,7 @@ FACTORS — assess each with status + confidence + evidence:
    - "good": ≥3 distinct food groups clearly identifiable
    - "warning": monotonous — only 1–2 ingredient types
    - "unknown": can't count food groups confidently
+   SNACK NOTE: A mix of ≥2 different fruits (e.g., berries + banana, apple + grapes) or fruit + nuts counts as sufficient variety for a snack — mark as "good" or "unknown", not "warning".
 
 4. processingLoad
    - "good": whole or minimally processed foods dominate (fresh meat, whole veg, eggs, whole grains)
@@ -188,6 +195,7 @@ DESCRIPTION LINES — derive from your factor results:
 - gap: name the most impactful WARNING factor only. If none, say "No major gaps." Explicitly say why it matters in context.
 - upgrade: one concrete action (verb first, ≤90 chars). Tie to the top warning. If no warnings, suggest an enhancement.
 NOTE: Do NOT mention a factor in gap/upgrade if you rated it "good" or "unknown" — only cite real warnings.
+INGREDIENT RULE: If the user notes mention a specific ingredient (e.g., "with berries", "added nuts", "includes spinach"), do NOT suggest adding that same ingredient in the upgrade — assume it is present even if you cannot see it clearly in the image.
 
 DIET PHASE CONTEXT (if provided):
 - Recovery fueling: micronutrient density and anti-inflammatory quality matter; note processing issues in gap
@@ -205,7 +213,9 @@ Respond ONLY with valid JSON — no markdown, no extra text:
   },
   "strength": "<1 sentence, ≤120 chars — specific, not generic>",
   "gap":      "<1 sentence, ≤120 chars — explicit warning factor + why it matters>",
-  "upgrade":  "<1 sentence, ≤100 chars — starts with an action verb>"
+  "upgrade":  "<1 sentence, ≤100 chars — starts with an action verb>",
+  "estimatedCalories": <rough integer kcal estimate based on visible portion and typical values>,
+  "estimatedProtein":  <rough integer grams protein estimate based on visible protein sources>
 }`;
 
 export interface MealQualityFlag {
@@ -241,6 +251,8 @@ export interface MealAnalysisResult {
   score_raw: number;
   score_display: number;
   meal_quality_flags?: MealQualityFlags;
+  estimatedCalories?: number | null;
+  estimatedProtein?: number | null;
 }
 
 export interface TrainingAnalysisResult {
@@ -707,8 +719,8 @@ export class OpenAIService {
 
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY || '';
-    this.visionModel = process.env.OPENAI_MODEL || 'gpt-4o';
-    this.textModel = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+    this.visionModel = process.env.OPENAI_MODEL || 'gpt-5.4-2026-03-05';
+    this.textModel = process.env.OPENAI_MODEL || 'gpt-5.4-2026-03-05';
 
     if (!this.apiKey) {
       console.error('[OpenAI Service] API key not configured');
@@ -764,7 +776,7 @@ Return valid JSON only — no score.`;
               ]
             }
           ],
-          max_completion_tokens: 600,
+          max_completion_tokens: 700,
           temperature: 0.4,  // lower temp for more consistent factor classification
           response_format: { type: 'json_object' }
         })
@@ -845,13 +857,20 @@ Return valid JSON only — no score.`;
         isUltraProcessedCombo,
       };
 
-      console.log(`[OpenAI Service] Analysis complete: score_raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk} phase=${goalPhase || 'none'}`);
+      const estimatedCalories = typeof aiResult.estimatedCalories === 'number' && aiResult.estimatedCalories > 0
+        ? Math.round(aiResult.estimatedCalories) : null;
+      const estimatedProtein = typeof aiResult.estimatedProtein === 'number' && aiResult.estimatedProtein > 0
+        ? Math.round(aiResult.estimatedProtein) : null;
+
+      console.log(`[OpenAI Service] Analysis complete: score_raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk} phase=${goalPhase || 'none'} estimatedCal=${estimatedCalories} estimatedProt=${estimatedProtein}`);
       return {
         nutrition_subscore: score_raw, // backward compat
         ai_analysis,
         score_raw,
         score_display,
         meal_quality_flags,
+        estimatedCalories,
+        estimatedProtein,
       };
 
     } catch (error) {
@@ -1071,6 +1090,13 @@ Return valid JSON only — no score.`;
     sleepDebtMinutes?: number;   // negative = debt, 0 = met, positive = surplus (we use negative convention)
     sleepNeededMinutes?: number;
     actualSleepMinutes?: number;
+    mealMacros?: {
+      totalCalories?: number | null;
+      totalProtein?: number | null;
+      calorieTarget?: number | null;
+      proteinTarget?: number | null;
+    };
+    recentTrainingHistory?: string;
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -1127,6 +1153,39 @@ Return valid JSON only — no score.`;
         contextParts.push('Nutrition: No meals logged');
       }
 
+      // Meal macro estimates with target comparison
+      if (params.mealMacros) {
+        const { totalCalories, totalProtein, calorieTarget, proteinTarget } = params.mealMacros;
+        const macroParts: string[] = [];
+        if (totalCalories != null) {
+          let calStr = `~${totalCalories} kcal total`;
+          if (calorieTarget) calStr += ` (${Math.round((totalCalories / calorieTarget) * 100)}% of ${calorieTarget} kcal target)`;
+          macroParts.push(calStr);
+        }
+        if (totalProtein != null) {
+          let protStr = `~${totalProtein}g protein`;
+          if (proteinTarget) protStr += ` (${Math.round((totalProtein / proteinTarget) * 100)}% of ${proteinTarget}g target)`;
+          macroParts.push(protStr);
+        }
+        if (macroParts.length > 0) {
+          const calPct = totalCalories != null && calorieTarget ? totalCalories / calorieTarget : null;
+          const protPct = totalProtein != null && proteinTarget ? totalProtein / proteinTarget : null;
+          let macroInstruction = `Estimated meal macros today: ${macroParts.join(', ')}.`;
+          if ((calPct != null && calPct < 0.80) || (protPct != null && protPct < 0.80)) {
+            macroInstruction += ` Targets are significantly under-reached.`;
+            if (protPct != null && protPct < 0.80) {
+              macroInstruction += ` In the Nutrition slide, explicitly mention that protein is at ${Math.round(protPct * 100)}% of target and recommend adding a high-protein snack or meal (e.g. Greek yoghurt, cottage cheese, chicken breast).`;
+            }
+            if (calPct != null && calPct < 0.80) {
+              macroInstruction += ` Calorie intake is ${Math.round(calPct * 100)}% of target — note that an additional meal would help reach the daily energy target.`;
+            }
+          } else {
+            macroInstruction += ` These are rough visual estimates — reference directionally if relevant.`;
+          }
+          contextParts.push(macroInstruction);
+        }
+      }
+
       if (params.userGoal) {
         contextParts.push(`User goal: ${params.userGoal}`);
       }
@@ -1137,6 +1196,10 @@ Return valid JSON only — no score.`;
 
       if (params.userContextSummary) {
         contextParts.push(params.userContextSummary);
+      }
+
+      if (params.recentTrainingHistory) {
+        contextParts.push(`Recent training scores (last up to 3 days before today): ${params.recentTrainingHistory}.`);
       }
 
       // Hydration (only advise if data is present and indicates low intake)
@@ -1719,6 +1782,9 @@ IMPORTANT: Commit fully to the "${selectedTheme.name}" theme from the first word
     };
     preferences?: string;
     allergies?: string;
+    previousPlan?: string;
+    proteinTarget?: number;
+    calorieTarget?: number;
     userContext?: {
       dietPhase?: string;
       trainingPhase?: string;
@@ -1744,48 +1810,84 @@ IMPORTANT: Commit fully to the "${selectedTheme.name}" theme from the first word
     if (userCtx?.workHours) ctxBits.push(`Work hrs/wk: ${userCtx.workHours}`);
     if (userCtx?.trainingSessions) ctxBits.push(`Sessions/wk: ${userCtx.trainingSessions}`);
 
+    const macroHints: string[] = [];
+    if (params.calorieTarget) macroHints.push(`~${params.calorieTarget} kcal daily target`);
+    if (params.proteinTarget) macroHints.push(`~${params.proteinTarget}g protein daily target`);
+    const macroHint = macroHints.length > 0 ? `\nMacro targets: ${macroHints.join(', ')} — reflect this in the macros line.` : '';
+
     const userPrompt = `${ctxBits.join(' | ')}
 Timing: ${timingInstruction}
-Plan habits (ALL must appear in "Completes" line): ${params.planHabits.join(', ')}${params.preferences ? `\nPreferences: ${params.preferences}` : ''}${params.allergies ? `\nAllergies: ${params.allergies}` : ''}`;
+Plan habits (ALL must appear in "Completes" line): ${params.planHabits.join(', ')}${params.preferences ? `\nPreferences: ${params.preferences}` : ''}${params.allergies ? `\nAllergies: ${params.allergies}` : ''}${macroHint}`;
 
-    const FITCOOK_SYSTEM_PROMPT = `You are FitCook — a mobile meal planner. Write meal-prep friendly 1-day plans that fit one phone screen.
+    const FITCOOK_SYSTEM_PROMPT = `You are FitCook — a mobile-first daily meal planner. Output clean plain text only — NO markdown (#, **, *, _).
 
-HARD WORD LIMIT: 220 words total. Count every word. Stop before 220.
+HARD WORD LIMIT: 200 words total. Stop before 200.
 
-MANDATORY FORMAT — reproduce exactly, fill in {placeholders}:
+MEAL DIVERSITY — always follow these rules:
+• Pick one protein from this pool: chicken, turkey, tuna, salmon, eggs, tofu, lean beef, cottage cheese, Greek yogurt, lentils. Do NOT default to chicken every time.
+• Lunch protein ≠ dinner protein unless using leftovers.
+• Rotate meal formats each generation: rice bowl, pasta dish, wrap, salad bowl, scramble, soup/stew, stir fry, sandwich. Never repeat the same format as the last plan.
+• Breakfast pool: yogurt bowl, egg scramble + toast, protein smoothie, cottage cheese bowl, oatmeal + fruit, breakfast wrap.
+• Snack pool: Greek yogurt + nuts, cottage cheese + fruit, protein shake + fruit, boiled eggs + fruit, protein bar + fruit.
 
-## 1-Day Meal Plan ({diet phase} • {goal})
-**Timing:** {time} → {time} → {time} → {time}
-**~{X}–{Y} kcal • ~{Z}g protein**
+CUISINE RULE: If a cuisine preference is given, use its characteristic carbs, sauces, and flavour elements in at least 2 meals.
+• Italian: pasta, passata, mozzarella, olive oil, basil, parmesan
+• Mexican: tortillas, beans, salsa, avocado, lime
+• Asian: soy sauce, sesame oil, rice, ginger, stir fry
+• Mediterranean: olive oil, feta, cucumber, tomato, lemon
 
-## Breakfast {emoji} ({time}): {one sentence, no-cook or ≤5 min, household measures only}. Prep: {N} min.
+OUTPUT EXACTLY this structure (blank line between each section):
+
+Today's Fuel Plan ({diet} • {goal})
+Timing: {time} → {time} → {time} → {time}
+~{X}–{Y} kcal • ~{Z}g protein
+Completes today's plan habits:
+✓ {habit}
+✓ {habit}
+✓ {habit}
+
+Breakfast {emoji} ({time})
+{one-line meal, household measures, no-cook or ≤5 min}
+Prep: {N} min
 Swap → {one alternative}
 
-## Lunch {emoji} ({time}): {one sentence — cook 2 portions, household measures}. Prep: {N} min. Make extra for dinner.
+Lunch {emoji} ({time})
+{one-line meal — cook 2 portions}
+Prep: {N} min
+Prep tip → Make 2 portions for dinner
 Swap → {one alternative}
 
-## Snack {emoji} ({time}): {one sentence grab-and-go}. Prep: {N} min.
+Snack {emoji} ({time})
+{grab-and-go option}
+Prep: {N} min
 Swap → {one alternative}
 
-## Dinner {emoji} ({time}): Lunch leftovers + {one simple twist}. Prep: {N} min.
+Dinner {emoji} ({time})
+Lunch leftovers + {one simple twist}
+Prep: {N} min
 Swap → {one alternative}
 
-💧 Drink {X}L today — prioritise before meals and around training.
+Hydration 💧
+{X}L today
+Tip → {one short tip}
 
-🛒 Groceries: {protein 1}, {protein 2}, {carb 1}, {carb 2}, {produce 1}, {produce 2}, {produce 3}, {extra 1}, {extra 2}
-
-Completes plan habits: ✓ {habit} ✓ {habit} ✓ {habit}
+Groceries 🛒
+Protein: {items}
+Carbs: {items}
+Produce: {items}
+Extras: {items}
 
 RULES — never break:
-1. 220 words MAX. Hard stop.
-2. Lunch and dinner MUST share base ingredients (cook once, eat twice).
-3. Breakfast: no-cook or ≤5 min only.
-4. Snack: grab-and-go only (no cooking).
-5. Exactly 1 emoji per meal header. Only 💧 and 🛒 for those sections. No other emojis.
-6. No gram weights — household measures only (1 fillet, handful, 1 cup, 1 tub, 2 eggs).
-7. Grocery list: max 9 items inline (no bullets, comma-separated).
-8. Plan habits mentioned ONLY in the final "Completes" line — never inside meal blocks.
-9. No extra sections, no spice lists, no optional items.`;
+1. 200 words MAX.
+2. NO markdown — no ##, no **, no *.
+3. Lunch + dinner share base ingredients (cook once, eat twice).
+4. Breakfast: no-cook or ≤5 min only.
+5. Snack: grab-and-go, no cooking.
+6. Exactly 1 emoji per meal header (use 🥣🍳🥚🍲🥗🍛🌮🍱🥙🍎🥤). Only 💧 and 🛒 for their sections.
+7. No gram weights — household measures only.
+8. Grocery categories: Protein, Carbs, Produce, Extras. Max 3 items each. Capitalize each item.
+9. Plan habits ONLY in "Completes today's plan habits:" block — never in meal blocks.
+10. No spice lists, no optional items, no recipe descriptions.`;
 
     const callOpenAI = async (messages: { role: string; content: string }[]): Promise<string> => {
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1802,10 +1904,24 @@ RULES — never break:
       return data.choices?.[0]?.message?.content ?? '';
     };
 
-    const messages = [
+    const messages: { role: string; content: string }[] = [
       { role: 'system', content: FITCOOK_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ];
+
+    // If regenerating, prepend the previous plan as context and require genuine variety
+    if (params.previousPlan) {
+      // Extract the main proteins used so we can explicitly prohibit them
+      const prevProteinMatch = params.previousPlan.match(/\b(chicken|turkey|tuna|salmon|eggs?|tofu|beef|cottage cheese|greek yogurt|lentils)\b/gi);
+      const usedProteins = prevProteinMatch ? [...new Set(prevProteinMatch.map(p => p.toLowerCase()))].join(', ') : '';
+      const avoidMsg = usedProteins
+        ? `Switch all proteins — avoid: ${usedProteins}. Pick a different meal format (e.g. if previous was a rice bowl, use pasta or a wrap). Use different carbs and vegetables throughout.`
+        : 'Generate a completely different plan. Use different proteins, carbs, vegetables, and meal formats. Do not repeat any of the same main ingredients.';
+      messages.push(
+        { role: 'assistant', content: params.previousPlan },
+        { role: 'user', content: avoidMsg },
+      );
+    }
 
     let content = await callOpenAI(messages);
     if (!content) throw new Error('No response from FitCook');
@@ -1817,12 +1933,86 @@ RULES — never break:
       content = await callOpenAI([
         ...messages,
         { role: 'assistant', content },
-        { role: 'user', content: 'That is too long. Rewrite it under 220 words. Cut descriptions to one clause each. Shorten the grocery list to 9 inline items. Keep the same structure.' },
+        { role: 'user', content: 'That is too long. Rewrite it under 200 words. Cut descriptions to one clause each. Keep the same structure.' },
       ]);
       if (!content) throw new Error('No response from FitCook (retry)');
     }
 
     return content;
+  }
+
+  /**
+   * Regenerate a single meal within an existing FitCook plan.
+   * Returns just the new meal block text (same format as a meal section in the full plan).
+   */
+  async generateSingleFitCookMeal(params: {
+    mealType: 'Breakfast' | 'Lunch' | 'Snack' | 'Dinner';
+    existingMeal: string;   // current meal block to replace
+    timing: string;         // e.g. "07:00"
+    preferences?: string;
+    allergies?: string;
+    proteinTarget?: number;
+  }): Promise<string> {
+    if (!this.apiKey) throw new Error('OpenAI API key not configured');
+
+    const singleMealPrompt = `You are FitCook. Regenerate ONLY the ${params.mealType} meal below with a different protein, carb base, and meal format.
+
+Current meal to replace:
+${params.existingMeal}
+
+Rules:
+- Output ONLY the meal block (no plan header, no habits, no groceries, no hydration)
+- Use this exact format:
+${params.mealType} {emoji} (${params.timing})
+{one-line meal, household measures}
+Prep: {N} min${params.mealType === 'Lunch' ? '\nPrep tip → Make 2 portions for dinner' : ''}
+Swap → {one alternative}
+- NO markdown. 1 emoji only. Household measures, no gram weights.${params.mealType === 'Breakfast' ? ' No-cook or ≤5 min.' : ''}${params.mealType === 'Snack' ? ' Grab-and-go, no cooking.' : ''}
+- Use a DIFFERENT protein, carb, and format from the current meal.${params.proteinTarget ? `\n- Target ~${Math.round(params.proteinTarget / 4)}g protein for this meal.` : ''}${params.preferences ? `\n- Preferences: ${params.preferences}` : ''}${params.allergies ? `\n- Allergies: ${params.allergies}` : ''}`;
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: singleMealPrompt }], max_completion_tokens: 120, temperature: 0.9 }),
+    });
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    const data = await res.json();
+    return (data.choices?.[0]?.message?.content ?? '').trim();
+  }
+
+  /**
+   * Generate a categorized grocery list from a set of meal descriptions.
+   * Returns lines in the format "Category: item1, item2, item3".
+   */
+  async generateGroceriesFromMeals(meals: string[]): Promise<string[]> {
+    if (!this.apiKey) throw new Error('OpenAI API key not configured');
+
+    const prompt = `Given these meals, output a grocery shopping list grouped into exactly 4 categories. Output ONLY the list — no intro, no explanation.
+
+Meals:
+${meals.join('\n\n')}
+
+Required format (4 lines, one per category):
+Protein: item1, item2, item3
+Carbs: item1, item2, item3
+Produce: item1, item2, item3
+Extras: item1, item2, item3
+
+Rules:
+- Max 4 items per category
+- Capitalize each item
+- Only include ingredients actually needed for the meals above
+- No duplicates across categories`;
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: prompt }], max_completion_tokens: 80, temperature: 0.3 }),
+    });
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    const data = await res.json();
+    const text: string = data.choices?.[0]?.message?.content ?? '';
+    return text.split('\n').map((l: string) => l.trim()).filter(Boolean);
   }
 }
 

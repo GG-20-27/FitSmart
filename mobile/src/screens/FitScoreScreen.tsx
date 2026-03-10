@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { apiRequest, getIsAdmin } from '../api/client';
-import Markdown from 'react-native-markdown-display';
 import * as Clipboard from 'expo-clipboard';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView, Keyboard, Switch } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -42,6 +41,8 @@ import {
   getPlanHabitsToday,
   togglePlanHabit,
   generateFitCookMealPlan,
+  regenerateSingleMeal,
+  generateGroceryList,
   PILLAR_LABELS,
   type ImprovementPlanStatus,
   type PlanContent,
@@ -52,20 +53,266 @@ const SCREEN_HEIGHT = Dimensions.get('window').height;
 const MODAL_HEIGHT = SCREEN_HEIGHT * 0.92;
 const DISMISS_THRESHOLD = 120;
 
-const fitCookMarkdownStyles = {
-  body: { color: colors.textPrimary, fontSize: 14, lineHeight: 22 },
-  heading1: { color: colors.textPrimary, fontSize: 18, fontWeight: '700' as const, marginTop: 16, marginBottom: 6 },
-  heading2: { color: colors.textPrimary, fontSize: 16, fontWeight: '700' as const, marginTop: 14, marginBottom: 4 },
-  heading3: { color: colors.accent, fontSize: 14, fontWeight: '600' as const, marginTop: 10, marginBottom: 2 },
-  strong: { fontWeight: '700' as const, color: colors.textPrimary },
-  em: { fontStyle: 'italic' as const },
-  bullet_list: { marginBottom: 6 },
-  ordered_list: { marginBottom: 6 },
-  list_item: { marginBottom: 2 },
-  hr: { backgroundColor: colors.surfaceMute, height: 1, marginVertical: 12 },
-  code_block: { backgroundColor: colors.bgSecondary, borderRadius: 6, padding: 10, fontSize: 12 },
-  code_inline: { backgroundColor: colors.bgSecondary, borderRadius: 4, paddingHorizontal: 4, fontSize: 12 },
-};
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/^#{1,6}\s+/gm, '')       // ## Heading → Heading
+    .replace(/\*\*(.+?)\*\*/g, '$1')   // **bold** → bold
+    .replace(/\*(.+?)\*/g, '$1')       // *italic* → italic
+    .replace(/`(.+?)`/g, '$1')         // `code` → code
+    .trim();
+}
+
+interface FitCookMealBlock {
+  header: string;
+  main: string;
+  prep: string;
+  prepTip?: string;
+  swap: string;
+}
+interface ParsedFitCookPlan {
+  title: string;
+  timing: string;
+  macros: string;
+  completesTitle: string;
+  completesHabits: string[];
+  meals: FitCookMealBlock[];
+  hydrationAmount: string;
+  hydrationTip: string;
+  groceries: string[];
+}
+
+function cleanPlanLine(line: string): string {
+  return line
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .trim();
+}
+
+function parseCompletesHabits(line: string, colonIdx: number): string[] {
+  const inline = line.slice(colonIdx + 1).trim();
+  if (!inline) return [];
+  return inline.split(/\s*✓\s*/).filter(Boolean).map(h => h.trim());
+}
+
+function parseFitCookPlan(text: string): ParsedFitCookPlan {
+  const result: ParsedFitCookPlan = {
+    title: '', timing: '', macros: '', completesTitle: '', completesHabits: [],
+    meals: [], hydrationAmount: '', hydrationTip: '', groceries: [],
+  };
+  const paragraphs = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+  for (const para of paragraphs) {
+    const lines = para.split('\n').map(cleanPlanLine).filter(Boolean);
+    if (!lines.length) continue;
+    const first = lines[0];
+    if (/Fuel Plan|Meal Plan/.test(first)) {
+      result.title = first;
+      let inCompletes = false;
+      for (const line of lines.slice(1)) {
+        if (line.startsWith('Timing:')) { result.timing = line.replace('Timing:', '').trim(); inCompletes = false; }
+        else if (line.startsWith('~') || line.includes('kcal')) { result.macros = line; inCompletes = false; }
+        else if (line.startsWith('Completes')) {
+          result.completesTitle = line;
+          inCompletes = true;
+          const ci = line.indexOf(':');
+          if (ci !== -1) {
+            const habits = parseCompletesHabits(line, ci);
+            if (habits.length) { result.completesHabits = habits; inCompletes = false; }
+          }
+        } else if (inCompletes && line.startsWith('✓')) {
+          result.completesHabits.push(line.replace(/^✓\s*/, '').trim());
+        }
+      }
+    } else if (first.startsWith('Completes')) {
+      // Standalone Completes paragraph (old format at bottom)
+      result.completesTitle = first;
+      const ci = first.indexOf(':');
+      if (ci !== -1) result.completesHabits = parseCompletesHabits(first, ci);
+      for (const line of lines.slice(1)) {
+        if (line.startsWith('✓')) result.completesHabits.push(line.replace(/^✓\s*/, '').trim());
+      }
+    } else if (/^(Breakfast|Lunch|Snack|Dinner)/.test(first)) {
+      // Handle old format: "Breakfast 🥣 (07:00): description. Prep: N min."
+      const colonIdx = first.search(/:\s/);
+      const header = colonIdx !== -1 ? first.slice(0, colonIdx).trim() : first;
+      const inlineContent = colonIdx !== -1 ? first.slice(colonIdx + 2).trim() : '';
+      const meal: FitCookMealBlock = { header, main: '', prep: '', swap: '' };
+      if (inlineContent) {
+        const prepMatch = inlineContent.match(/(?:\.?\s*)Prep:\s*([\d]+\s*min)/i);
+        if (prepMatch) {
+          meal.prep = prepMatch[1];
+          meal.main = inlineContent.replace(/\.?\s*Prep:\s*[\d]+\s*min\.?/i, '').replace(/\.$/, '').trim();
+        } else {
+          meal.main = inlineContent.replace(/\.$/, '').trim();
+        }
+      }
+      for (const line of lines.slice(1)) {
+        if (/^Prep tip\s*→/.test(line)) meal.prepTip = line.replace(/^Prep tip\s*→\s*/, '').trim();
+        else if (line.startsWith('Prep:')) meal.prep = line.replace('Prep:', '').trim().replace(/\.$/, '');
+        else if (/^Swap\s*→/.test(line)) meal.swap = line.replace(/^Swap\s*→\s*/, '').trim();
+        else if (!meal.main) meal.main = line.replace(/\.$/, '');
+      }
+      result.meals.push(meal);
+    } else if (first.startsWith('Hydration')) {
+      for (const line of lines.slice(1)) {
+        if (/^Tip\s*→/.test(line)) result.hydrationTip = line.replace(/^Tip\s*→\s*/, '').trim();
+        else if (!result.hydrationAmount) result.hydrationAmount = line;
+      }
+    } else if (first.startsWith('💧')) {
+      // Old format: single hydration line
+      result.hydrationAmount = first.replace(/^💧\s*/, '').replace(/^Drink\s+/, '').trim();
+    } else if (first.startsWith('Groceries')) {
+      result.groceries = lines.slice(1);
+    } else if (first.startsWith('🛒')) {
+      // Old format: "🛒 Groceries: item1, item2, ..."
+      const items = first.replace(/^🛒\s*(Groceries:?\s*)?/i, '').trim();
+      if (items) result.groceries = [items];
+    }
+  }
+  return result;
+}
+
+function FitCookPlanView({
+  text,
+  mealOverrides,
+  onRegenerateMeal,
+  regeneratingMealIdx,
+  preferences,
+  allergies,
+}: {
+  text: string;
+  mealOverrides?: Record<number, FitCookMealBlock>;
+  onRegenerateMeal?: (mealIdx: number, meal: FitCookMealBlock) => void;
+  regeneratingMealIdx?: number | null;
+  preferences?: string;
+  allergies?: string;
+}) {
+  const [copiedMeal, setCopiedMeal] = useState<number | null>(null);
+  const plan = parseFitCookPlan(text);
+
+  if (!plan.title && !plan.meals.length) {
+    return <Text style={{ color: colors.textPrimary, fontSize: 14, lineHeight: 22 }}>{text}</Text>;
+  }
+
+  const copyMeal = async (meal: FitCookMealBlock, idx: number) => {
+    const lines = [meal.header, meal.main, meal.prep ? `Prep: ${meal.prep}` : '', meal.prepTip ?? '', meal.swap ? `Swap → ${meal.swap}` : ''].filter(Boolean);
+    await Clipboard.setStringAsync(lines.join('\n'));
+    setCopiedMeal(idx);
+    setTimeout(() => setCopiedMeal(null), 2000);
+  };
+
+  return (
+    <View>
+      {/* Clean header — no card, plain hierarchy */}
+      <Text style={{ fontSize: 17, fontWeight: '700', color: colors.textPrimary, marginBottom: 4 }}>{plan.title}</Text>
+      {!!plan.timing && <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: 2 }}>{`🕐 ${plan.timing}`}</Text>}
+      {!!plan.macros && <Text style={{ fontSize: 12, color: colors.textMuted, marginBottom: spacing.md }}>{plan.macros}</Text>}
+
+      {/* Vertical habits checklist */}
+      {plan.completesHabits.length > 0 && (
+        <View style={{ marginBottom: spacing.lg }}>
+          <Text style={{ fontSize: 11, fontWeight: '600', color: colors.textMuted, letterSpacing: 0.5, marginBottom: 6, textTransform: 'uppercase' }}>Today's Plan Habits</Text>
+          {plan.completesHabits.map((habit, i) => (
+            <Text key={i} style={{ fontSize: 13, color: colors.success, lineHeight: 20 }}>{`✓  ${habit}`}</Text>
+          ))}
+        </View>
+      )}
+
+      {/* Divider before meals */}
+      <View style={{ height: 1, backgroundColor: colors.surfaceMute + '40', marginBottom: spacing.md }} />
+
+      {/* Meal cards with copy + per-meal regenerate buttons */}
+      {plan.meals.map((meal, i) => {
+        const displayMeal = mealOverrides?.[i] ?? meal;
+        const isRegenerating = regeneratingMealIdx === i;
+        return (
+        <View key={i} style={{ backgroundColor: colors.bgSecondary, borderRadius: radii.md, padding: spacing.md, marginBottom: spacing.sm, opacity: isRegenerating ? 0.6 : 1 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: colors.textPrimary, flex: 1 }}>{displayMeal.header}</Text>
+            <View style={{ flexDirection: 'row', gap: 4 }}>
+              {onRegenerateMeal && (
+                <TouchableOpacity onPress={() => !isRegenerating && onRegenerateMeal(i, displayMeal)} style={{ padding: 4 }}>
+                  {isRegenerating
+                    ? <ActivityIndicator size={13} color={colors.accent} />
+                    : <Ionicons name="refresh-outline" size={14} color={colors.textMuted} />}
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity onPress={() => copyMeal(displayMeal, i)} style={{ padding: 4 }}>
+                <Ionicons name={copiedMeal === i ? 'checkmark' : 'copy-outline'} size={14} color={copiedMeal === i ? colors.success : colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+          </View>
+          <Text style={{ fontSize: 14, color: colors.textPrimary, lineHeight: 20, marginBottom: 6 }}>{displayMeal.main}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap', marginBottom: displayMeal.swap ? 6 : 0 }}>
+            {!!displayMeal.prep && (
+              <View style={{ backgroundColor: colors.accent + '18', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2 }}>
+                <Text style={{ fontSize: 11, color: colors.accent, fontWeight: '600' }}>{`Prep: ${displayMeal.prep}`}</Text>
+              </View>
+            )}
+            {!!displayMeal.prepTip && (
+              <Text style={{ fontSize: 11, color: colors.textMuted, fontStyle: 'italic' }}>{displayMeal.prepTip}</Text>
+            )}
+          </View>
+          {!!displayMeal.swap && <Text style={{ fontSize: 12, color: colors.textMuted }}>{`Swap → ${displayMeal.swap}`}</Text>}
+        </View>
+        );
+      })}
+
+      {/* Hydration — simplified */}
+      {!!plan.hydrationAmount && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, backgroundColor: colors.bgSecondary, borderRadius: radii.md, padding: spacing.md, marginBottom: spacing.sm }}>
+          <Text style={{ fontSize: 18 }}>💧</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }}>Hydration</Text>
+            <Text style={{ fontSize: 13, color: colors.textMuted }}>{plan.hydrationAmount}</Text>
+          </View>
+        </View>
+      )}
+
+    </View>
+  );
+}
+
+function GroceryCard({ groceries, onCopy }: { groceries: string[]; onCopy: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    await onCopy();
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+  return (
+    <View style={{ backgroundColor: colors.bgSecondary, borderRadius: radii.md, padding: spacing.md, marginBottom: spacing.sm }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+          <Text style={{ fontSize: 16 }}>🛒</Text>
+          <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textPrimary }}>Groceries</Text>
+        </View>
+        <TouchableOpacity onPress={handleCopy} style={{ padding: 4 }}>
+          <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={14} color={copied ? colors.success : colors.textMuted} />
+        </TouchableOpacity>
+      </View>
+      {groceries.map((line, i) => {
+        const ci = line.indexOf(':');
+        if (ci !== -1) {
+          const cat = line.slice(0, ci).trim();
+          const items = line.slice(ci + 1).trim().split(',').map(s => {
+            const t = s.trim();
+            return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
+          }).filter(Boolean);
+          return (
+            <View key={i} style={{ marginBottom: spacing.sm }}>
+              <Text style={{ fontSize: 10, fontWeight: '600', color: colors.textMuted, letterSpacing: 0.5, marginBottom: 3, textTransform: 'uppercase' }}>{cat}</Text>
+              {items.map((item, j) => (
+                <Text key={j} style={{ fontSize: 13, color: colors.textPrimary, lineHeight: 20 }}>{item}</Text>
+              ))}
+            </View>
+          );
+        }
+        return <Text key={i} style={{ fontSize: 13, color: colors.textPrimary, lineHeight: 20 }}>{line}</Text>;
+      })}
+    </View>
+  );
+}
 
 function CoachModal({
   visible,
@@ -620,8 +867,20 @@ export default function FitScoreScreen() {
   const [fitCookPrefs, setFitCookPrefs] = useState('');
   const [fitCookAllergies, setFitCookAllergies] = useState('');
   const [fitCookLoading, setFitCookLoading] = useState(false);
+  const [fitCookRegenerating, setFitCookRegenerating] = useState(false);
   const [fitCookResult, setFitCookResult] = useState<string | null>(null);
+  const [fitCookMealOverrides, setFitCookMealOverrides] = useState<Record<number, FitCookMealBlock>>({});
+  const [fitCookRegeneratingMealIdx, setFitCookRegeneratingMealIdx] = useState<number | null>(null);
   const [fitCookCopied, setFitCookCopied] = useState(false);
+  const [fitCookGroceries, setFitCookGroceries] = useState<string[] | null>(null);
+  const [fitCookGroceriesStale, setFitCookGroceriesStale] = useState(false);
+  const [fitCookGroceriesLoading, setFitCookGroceriesLoading] = useState(false);
+  const fitCookLastSettings = useRef<{
+    timingMode: 'flexible' | 'fixed';
+    windows?: { breakfast: { from: string; until: string }; lunch: { from: string; until: string }; dinner: { from: string; until: string } };
+    preferences?: string;
+    allergies?: string;
+  } | null>(null);
   const [showCoachModal, setShowCoachModal] = useState(false);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [showRecoveryAnalysis, setShowRecoveryAnalysis] = useState(false);
@@ -1047,6 +1306,11 @@ export default function FitScoreScreen() {
       } : undefined;
       fetchCoachSummary(result, formatDate(selectedDate), habitsCtx);
 
+      // Refresh improvement plan status so daysCount picks up today's logged score
+      getImprovementPlanStatus()
+        .then(status => setImprovementPlanStatus(status))
+        .catch(() => {}); // non-fatal
+
     } catch (error) {
       console.error('[FITSCORE] Calculation failed:', error);
       Alert.alert(
@@ -1385,9 +1649,22 @@ export default function FitScoreScreen() {
       console.log('Meal uploaded successfully:', newMeal);
     } catch (error) {
       console.error('Failed to upload meal:', error);
-      // Remove the placeholder on error (edit or new)
-      setMeals(currentMeals => currentMeals.filter(m => m.id !== tempId));
-      Alert.alert('Upload Failed', 'Failed to upload meal. Please try again.');
+      // The meal may have been saved on the server even if the response was lost
+      // (e.g. user backgrounded app during the AI analysis step). Refresh from
+      // server so the meal appears if it was actually saved.
+      try {
+        const refreshed = await getMealsByDate(formatDate(selectedDate));
+        setMeals(refreshed);
+        // If the meal shows up in the refresh, silently recover — no error needed
+        const wasFound = refreshed.some(m => m.id > 0 && m.mealType === mealType);
+        if (!wasFound) {
+          Alert.alert('Upload Failed', 'Failed to upload meal. Please try again.');
+        }
+      } catch {
+        // If refresh also fails, fall back to removing the placeholder
+        setMeals(currentMeals => currentMeals.filter(m => m.id !== tempId));
+        Alert.alert('Upload Failed', 'Failed to upload meal. Please try again.');
+      }
     } finally {
       setAnalyzingMeal(false);
     }
@@ -1820,6 +2097,12 @@ export default function FitScoreScreen() {
                 )}
                 <View style={styles.mealOverlay}>
                   <Text style={styles.mealType}>{meal.mealType}</Text>
+                  {meal.id > 0 && !isEditingMeals && meal.estimatedCalories != null && (
+                    <Text style={styles.mealMacroHint}>{`~${meal.estimatedCalories} kcal`}</Text>
+                  )}
+                  {meal.id > 0 && !isEditingMeals && meal.estimatedProtein != null && (
+                    <Text style={styles.mealMacroHint}>{`~${meal.estimatedProtein}g protein`}</Text>
+                  )}
                   {meal.id > 0 && !isEditingMeals && meal.analysis && (
                     <Text style={styles.tapHint}>✨ Tap to view</Text>
                   )}
@@ -2506,24 +2789,22 @@ export default function FitScoreScreen() {
               {/* Active plan */}
               {improvementPlanStatus.activePlan && (() => {
                 const plan = improvementPlanStatus.activePlan!;
-                const dayCount = Math.max(1, Math.ceil((Date.now() - new Date(plan.activatedAt).getTime()) / 86400000));
                 const avg = plan.currentRollingAvg ?? 0;
-                const progress = Math.min(avg / 7.0, 1);
-                const avgColor = avg >= 7 ? colors.success : avg >= 5 ? colors.warning : avg > 0 ? colors.danger : colors.textMuted;
                 const days = plan.daysCount ?? 0;
+                const dayProgress = Math.min(days / 7, 1);
+                const avgColor = avg >= 7 ? colors.success : avg >= 5 ? colors.warning : avg > 0 ? colors.danger : colors.textMuted;
                 return (
                   <View style={styles.improvementPlanCard}>
                     <Text style={styles.planActiveName}>{`${PILLAR_LABELS[plan.pillar]} Plan`}</Text>
-                    <Text style={styles.planActiveMeta}>{`Active · Day ${days}`}</Text>
+                    <Text style={styles.planActiveMeta}>{`Active · Day ${days} of 7`}</Text>
                     <View style={styles.planProgressRow}>
                       <View style={styles.planProgressBar}>
-                        <View style={[styles.planProgressFill, { width: `${progress * 100}%` as any }]} />
+                        <View style={[styles.planProgressFill, { width: `${dayProgress * 100}%` as any }]} />
                       </View>
                       <Text style={[styles.planProgressLabel, { color: avgColor }]}>
-                        {avg > 0 ? `${avg.toFixed(1)} / 7.0` : '— / 7.0'}
+                        {avg > 0 ? `avg ${avg.toFixed(1)}` : `${days}/7`}
                       </Text>
                     </View>
-                    <Text style={styles.planDaysCountedLabel}>{`Days counted: ${days}/7`}</Text>
                     <TouchableOpacity
                       style={styles.planViewBtn}
                       onPress={() => handleOpenPlanModal(plan.pillar)}
@@ -2718,13 +2999,107 @@ export default function FitScoreScreen() {
                         </View>
 
                         {fitCookResult ? (
-                          <ScrollView style={styles.fitCookResultScroll} contentContainerStyle={{ paddingBottom: 48 }}>
-                            <Markdown style={fitCookMarkdownStyles}>{fitCookResult}</Markdown>
+                          <>
+                            <ScrollView style={styles.fitCookResultScroll} contentContainerStyle={{ paddingBottom: 16 }}>
+                              <FitCookPlanView
+                                text={fitCookResult}
+                                mealOverrides={fitCookMealOverrides}
+                                regeneratingMealIdx={fitCookRegeneratingMealIdx}
+                                preferences={fitCookPreferences}
+                                allergies={fitCookAllergies}
+                                onRegenerateMeal={async (mealIdx, meal) => {
+                                  setFitCookRegeneratingMealIdx(mealIdx);
+                                  try {
+                                    const timeMatch = meal.header.match(/\((\d{2}:\d{2})\)/);
+                                    const timing = timeMatch?.[1] ?? '12:00';
+                                    const mealTypeMap = ['Breakfast', 'Lunch', 'Snack', 'Dinner'];
+                                    const mealType = (mealTypeMap[mealIdx] ?? 'Lunch') as 'Breakfast' | 'Lunch' | 'Snack' | 'Dinner';
+                                    const existingText = [meal.header, meal.main, meal.prep ? `Prep: ${meal.prep}` : '', meal.prepTip ?? '', meal.swap ? `Swap → ${meal.swap}` : ''].filter(Boolean).join('\n');
+                                    const res = await regenerateSingleMeal({ mealType, existingMeal: existingText, timing, preferences: fitCookPreferences || undefined, allergies: fitCookAllergies || undefined });
+                                    const parsed = parseFitCookPlan(res.meal + '\n');
+                                    const newMeal = parsed.meals[0] ?? { header: res.meal, main: '', prep: '', swap: '' };
+                                    setFitCookMealOverrides(prev => ({ ...prev, [mealIdx]: newMeal }));
+                                    if (fitCookGroceries !== null) setFitCookGroceriesStale(true);
+                                  } catch (e: any) {
+                                    Alert.alert('Error', e?.message || 'Could not regenerate meal');
+                                  } finally {
+                                    setFitCookRegeneratingMealIdx(null);
+                                  }
+                                }}
+                              />
+                              {/* Grocery card — shown after user generates */}
+                              {fitCookGroceries && (
+                                <>
+                                  {fitCookGroceriesStale && (
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.xs, marginTop: spacing.sm }}>
+                                      <Ionicons name="alert-circle-outline" size={13} color={colors.warning} />
+                                      <Text style={{ fontSize: 12, color: colors.warning }}>Meal plan changed — refresh grocery list</Text>
+                                    </View>
+                                  )}
+                                  <GroceryCard
+                                    groceries={fitCookGroceries}
+                                    onCopy={() => Clipboard.setStringAsync(fitCookGroceries.join('\n'))}
+                                  />
+                                </>
+                              )}
+                            </ScrollView>
+                            <View style={styles.fitCookResultActions}>
+                              {/* Generate / Refresh Grocery List button */}
+                              <TouchableOpacity
+                                style={[styles.fitCookBtn, styles.fitCookBtnOutline, { flex: 1 }, fitCookGroceriesLoading && { opacity: 0.6 }]}
+                                disabled={fitCookGroceriesLoading}
+                                onPress={async () => {
+                                  const basePlan = parseFitCookPlan(fitCookResult ?? '');
+                                  if (!fitCookGroceries) {
+                                    // First generate — use original grocery list from plan
+                                    setFitCookGroceries(basePlan.groceries.length > 0 ? basePlan.groceries : ['Loading...']);
+                                    if (basePlan.groceries.length === 0 || fitCookGroceriesStale) {
+                                      setFitCookGroceriesLoading(true);
+                                      try {
+                                        const mealTexts = basePlan.meals.map((m, i) => {
+                                          const meal = fitCookMealOverrides[i] ?? m;
+                                          return [meal.header, meal.main, meal.prep ? `Prep: ${meal.prep}` : '', meal.swap ? `Swap → ${meal.swap}` : ''].filter(Boolean).join('\n');
+                                        });
+                                        const result = await generateGroceryList(mealTexts);
+                                        setFitCookGroceries(result.groceries);
+                                      } catch { /* keep original */ } finally {
+                                        setFitCookGroceriesLoading(false);
+                                      }
+                                    }
+                                    setFitCookGroceriesStale(false);
+                                  } else {
+                                    // Refresh — regenerate from current meals
+                                    setFitCookGroceriesLoading(true);
+                                    try {
+                                      const mealTexts = basePlan.meals.map((m, i) => {
+                                        const meal = fitCookMealOverrides[i] ?? m;
+                                        return [meal.header, meal.main, meal.prep ? `Prep: ${meal.prep}` : '', meal.swap ? `Swap → ${meal.swap}` : ''].filter(Boolean).join('\n');
+                                      });
+                                      const result = await generateGroceryList(mealTexts);
+                                      setFitCookGroceries(result.groceries);
+                                      setFitCookGroceriesStale(false);
+                                    } catch (e: any) {
+                                      Alert.alert('Error', e?.message || 'Could not generate grocery list');
+                                    } finally {
+                                      setFitCookGroceriesLoading(false);
+                                    }
+                                  }
+                                }}
+                                activeOpacity={0.75}
+                              >
+                                {fitCookGroceriesLoading
+                                  ? <ActivityIndicator size="small" color={colors.accent} />
+                                  : <Ionicons name="cart-outline" size={14} color={colors.accent} />}
+                                <Text style={[styles.fitCookBtnText, { color: colors.accent }]}>
+                                  {fitCookGroceriesLoading ? 'Generating...' : fitCookGroceries ? (fitCookGroceriesStale ? 'Refresh Grocery List' : 'Grocery List ✓') : 'Generate Grocery List'}
+                                </Text>
+                              </TouchableOpacity>
+                            </View>
                             <View style={styles.fitCookResultActions}>
                               <TouchableOpacity
                                 style={[styles.fitCookBtn, styles.fitCookBtnOutline, fitCookCopied && styles.fitCookBtnCopied]}
                                 onPress={async () => {
-                                  await Clipboard.setStringAsync(fitCookResult);
+                                  await Clipboard.setStringAsync(stripMarkdown(fitCookResult));
                                   setFitCookCopied(true);
                                   setTimeout(() => setFitCookCopied(false), 2000);
                                 }}
@@ -2736,15 +3111,34 @@ export default function FitScoreScreen() {
                                 </Text>
                               </TouchableOpacity>
                               <TouchableOpacity
-                                style={styles.fitCookBtn}
-                                onPress={() => setFitCookResult(null)}
+                                style={[styles.fitCookBtn, fitCookRegenerating && { opacity: 0.6 }]}
+                                disabled={fitCookRegenerating}
+                                onPress={async () => {
+                                  if (!fitCookLastSettings.current) return;
+                                  setFitCookRegenerating(true);
+                                  try {
+                                    const result = await generateFitCookMealPlan({
+                                      ...fitCookLastSettings.current,
+                                      previousPlan: fitCookResult ?? undefined,
+                                    });
+                                    setFitCookResult(result.mealPlan); setFitCookMealOverrides({}); setFitCookGroceries(null); setFitCookGroceriesStale(false);
+                                  } catch (e: any) {
+                                    Alert.alert('FitCook Error', e?.message || 'Could not regenerate meal plan');
+                                  } finally {
+                                    setFitCookRegenerating(false);
+                                  }
+                                }}
                                 activeOpacity={0.75}
                               >
-                                <Ionicons name="refresh-outline" size={14} color={colors.bgPrimary} />
-                                <Text style={styles.fitCookBtnText}>Regenerate</Text>
+                                {fitCookRegenerating ? (
+                                  <ActivityIndicator size="small" color={colors.bgPrimary} />
+                                ) : (
+                                  <Ionicons name="refresh-outline" size={14} color={colors.bgPrimary} />
+                                )}
+                                <Text style={styles.fitCookBtnText}>{fitCookRegenerating ? 'Regenerating...' : 'Regenerate'}</Text>
                               </TouchableOpacity>
                             </View>
-                          </ScrollView>
+                          </>
                         ) : (
                           <ScrollView style={styles.fitCookFormScroll} contentContainerStyle={{ paddingBottom: 48 }} keyboardShouldPersistTaps="handled">
                             <View style={styles.fitCookRow}>
@@ -2822,15 +3216,17 @@ export default function FitScoreScreen() {
                               style={[styles.fitCookBtn, { marginTop: spacing.xl }, fitCookLoading && { opacity: 0.6 }]}
                               disabled={fitCookLoading}
                               onPress={async () => {
+                                const settings = {
+                                  timingMode: fitCookFlexible ? 'flexible' as const : 'fixed' as const,
+                                  windows: fitCookFlexible ? undefined : fitCookWindows,
+                                  preferences: fitCookPrefs || undefined,
+                                  allergies: fitCookAllergies || undefined,
+                                };
+                                fitCookLastSettings.current = settings;
                                 setFitCookLoading(true);
                                 try {
-                                  const result = await generateFitCookMealPlan({
-                                    timingMode: fitCookFlexible ? 'flexible' : 'fixed',
-                                    windows: fitCookFlexible ? undefined : fitCookWindows,
-                                    preferences: fitCookPrefs || undefined,
-                                    allergies: fitCookAllergies || undefined,
-                                  });
-                                  setFitCookResult(result.mealPlan);
+                                  const result = await generateFitCookMealPlan(settings);
+                                  setFitCookResult(result.mealPlan); setFitCookMealOverrides({}); setFitCookGroceries(null); setFitCookGroceriesStale(false);
                                 } catch (e: any) {
                                   Alert.alert('FitCook Error', e?.message || 'Could not generate meal plan');
                                 } finally {
@@ -3953,6 +4349,12 @@ const styles = StyleSheet.create({
     color: colors.accent,
     marginTop: spacing.xs / 2,
     fontSize: 11,
+  },
+  mealMacroHint: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.75)',
+    marginTop: 2,
+    fontWeight: '500' as const,
   },
   analysisModalOverlay: {
     flex: 1,
@@ -5610,7 +6012,11 @@ const styles = StyleSheet.create({
   fitCookResultActions: {
     flexDirection: 'row' as const,
     gap: spacing.sm,
-    marginTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceMute + '40',
+    backgroundColor: colors.bgPrimary,
   },
   fitCookBtnOutline: {
     backgroundColor: 'transparent',
