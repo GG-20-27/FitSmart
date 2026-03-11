@@ -166,12 +166,14 @@ FACTORS — assess each with status + confidence + evidence:
    - "good": vegetables, legumes, fruit, or intact whole grains clearly visible AND constitute a meaningful portion of the meal (roughly ≥25% of visible plate area). A small garnish — single cherry tomato, parsley sprig, herb dust, thin cucumber slice — does NOT qualify as "good".
    - "warning": meal is primarily refined starchy / beige with no meaningful plant matter
    - "unknown": some plant matter visible but quantity is unclear OR presence is only garnish-level (small, decorative, incidental)
+   SNACK EXCEPTION: If the meal type is a snack and the snack is primarily a protein-rich food (e.g., protein shake, Greek yogurt, cottage cheese, hard-boiled eggs, cheese, jerky, whey/casein powder mixed with liquid), mark fiberPlantVolume as "unknown" — these are intentional protein snacks and the absence of plant matter is NOT a nutritional gap for a snack.
 
 3. nutrientDiversity
    - "good": ≥3 distinct food groups clearly identifiable
    - "warning": monotonous — only 1–2 ingredient types
    - "unknown": can't count food groups confidently
    SNACK NOTE: A mix of ≥2 different fruits (e.g., berries + banana, apple + grapes) or fruit + nuts counts as sufficient variety for a snack — mark as "good" or "unknown", not "warning".
+   SNACK EXCEPTION: If the meal type is a snack and the snack is a single protein-rich item (protein shake, Greek yogurt, cottage cheese, eggs, cheese), mark nutrientDiversity as "unknown" rather than "warning" — a purposeful protein snack is not expected to be nutritionally diverse.
 
 4. processingLoad
    - "good": whole or minimally processed foods dominate (fresh meat, whole veg, eggs, whole grains)

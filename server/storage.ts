@@ -297,6 +297,11 @@ export class DatabaseStorage implements IStorage {
     return row || undefined;
   }
 
+  async getAllActivePlans(userId: string): Promise<ImprovementPlan[]> {
+    return await db.select().from(improvementPlans)
+      .where(and(eq(improvementPlans.userId, userId), eq(improvementPlans.status, 'active')));
+  }
+
   async createActivePlan(userId: string, pillar: string): Promise<ImprovementPlan> {
     const [row] = await db.insert(improvementPlans)
       .values({ userId, pillar, status: 'active' })

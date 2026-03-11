@@ -222,6 +222,8 @@ export const userContext = pgTable("user_context", {
   proteinTarget: integer("protein_target"),
   calorieTarget: integer("calorie_target"),
   macroTargetOverridden: boolean("macro_target_overridden").notNull().default(false),
+  sleepBedtime: text("sleep_bedtime"),
+  sleepWakeTime: text("sleep_wake_time"),
 });
 
 // FitLook slide shape

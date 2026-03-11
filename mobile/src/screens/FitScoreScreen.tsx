@@ -855,6 +855,9 @@ export default function FitScoreScreen() {
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [planContent, setPlanContent] = useState<PlanContent | null>(null);
   const [activatingPlan, setActivatingPlan] = useState(false);
+  const [sleepWindowSetup, setSleepWindowSetup] = useState(false);
+  const [sleepBedtime, setSleepBedtime] = useState('');
+  const [sleepWakeTime, setSleepWakeTime] = useState('');
   const [planHabits, setPlanHabits] = useState<TodayPlanHabit[]>([]);
   // FitCook state
   const [showFitCookModal, setShowFitCookModal] = useState(false);
@@ -994,14 +997,18 @@ export default function FitScoreScreen() {
     }
   };
 
-  const handleActivatePlan = async () => {
+  const handleActivatePlan = async (bedtime?: string, wakeTime?: string) => {
     if (!improvementPlanStatus?.pendingPlan?.unlocked) return;
     setActivatingPlan(true);
     try {
-      const plan = await activateImprovementPlan();
+      const plan = await activateImprovementPlan(
+        bedtime || wakeTime ? { bedtime, wakeTime } : undefined
+      );
+      setSleepWindowSetup(false);
       setImprovementPlanStatus(prev => prev ? {
         ...prev,
         activePlan: plan,
+        activePlans: [...(prev.activePlans ?? (prev.activePlan ? [prev.activePlan] : [])), plan],
         pendingPlan: undefined,
       } : prev);
       handleOpenPlanModal(plan.pillar);
@@ -2776,7 +2783,7 @@ export default function FitScoreScreen() {
           ) : null}
 
           {/* Improvement Plan Section — admin only until feature is fully released */}
-          {isAdmin && improvementPlanStatus && (improvementPlanStatus.activePlan || improvementPlanStatus.pendingPlan) && (
+          {isAdmin && improvementPlanStatus && ((improvementPlanStatus.activePlans?.length ?? 0) > 0 || improvementPlanStatus.activePlan || improvementPlanStatus.pendingPlan) && (
             <View style={styles.improvementPlanSection}>
               {/* Card header */}
               <View style={styles.planCardHeader}>
@@ -2786,16 +2793,15 @@ export default function FitScoreScreen() {
                 <Text style={styles.planCardLabel}>Improvement Plan</Text>
               </View>
 
-              {/* Active plan */}
-              {improvementPlanStatus.activePlan && (() => {
-                const plan = improvementPlanStatus.activePlan!;
+              {/* Active plans — render all (admin may have multiple) */}
+              {(improvementPlanStatus.activePlans ?? (improvementPlanStatus.activePlan ? [improvementPlanStatus.activePlan] : [])).map((plan) => {
                 const avg = plan.currentRollingAvg ?? 0;
                 const days = plan.daysCount ?? 0;
                 const dayProgress = Math.min(days / 7, 1);
                 const avgColor = avg >= 7 ? colors.success : avg >= 5 ? colors.warning : avg > 0 ? colors.danger : colors.textMuted;
                 return (
-                  <View style={styles.improvementPlanCard}>
-                    <Text style={styles.planActiveName}>{`${PILLAR_LABELS[plan.pillar]} Plan`}</Text>
+                  <View key={plan.id} style={styles.improvementPlanCard}>
+                    <Text style={styles.planActiveName}>{`${PILLAR_LABELS[plan.pillar as keyof typeof PILLAR_LABELS] ?? plan.pillar} Plan`}</Text>
                     <Text style={styles.planActiveMeta}>{`Active · Day ${days} of 7`}</Text>
                     <View style={styles.planProgressRow}>
                       <View style={styles.planProgressBar}>
@@ -2815,10 +2821,10 @@ export default function FitScoreScreen() {
                     </TouchableOpacity>
                   </View>
                 );
-              })()}
+              })}
 
               {/* Pending / unlocked plan */}
-              {!improvementPlanStatus.activePlan && improvementPlanStatus.pendingPlan && (
+              {improvementPlanStatus.pendingPlan && (
                 <View style={styles.improvementPlanCard}>
                   {improvementPlanStatus.pendingPlan.unlocked ? (
                     <>
@@ -2828,21 +2834,62 @@ export default function FitScoreScreen() {
                       <Text style={styles.planActiveMeta}>
                         {`${PILLAR_LABELS[improvementPlanStatus.pendingPlan.pillar]} was your lowest pillar ${improvementPlanStatus.pendingPlan.weaknessCount}× this week`}
                       </Text>
-                      <TouchableOpacity
-                        style={styles.planViewBtn}
-                        onPress={handleActivatePlan}
-                        disabled={activatingPlan}
-                        activeOpacity={0.75}
-                      >
-                        {activatingPlan ? (
-                          <ActivityIndicator size="small" color={colors.bgPrimary} />
-                        ) : (
-                          <>
-                            <Ionicons name="shield-checkmark-outline" size={14} color={colors.bgPrimary} />
-                            <Text style={styles.planViewBtnText}>{`Start ${PILLAR_LABELS[improvementPlanStatus.pendingPlan.pillar]} Plan`}</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
+
+                      {/* Recovery: collect sleep window before activating */}
+                      {improvementPlanStatus.pendingPlan.pillar === 'recovery' && sleepWindowSetup ? (
+                        <View style={{ marginTop: 10, gap: 8 }}>
+                          <Text style={styles.planActiveMeta}>Set your sleep window:</Text>
+                          <TextInput
+                            style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, color: colors.textPrimary, fontSize: 14, marginTop: 4 }}
+                            placeholder="Earliest bedtime (e.g. 22:30)"
+                            placeholderTextColor={colors.textMuted}
+                            value={sleepBedtime}
+                            onChangeText={setSleepBedtime}
+                          />
+                          <TextInput
+                            style={{ borderWidth: 1, borderColor: colors.border, borderRadius: 8, padding: 10, color: colors.textPrimary, fontSize: 14 }}
+                            placeholder="Latest wake time (e.g. 07:00)"
+                            placeholderTextColor={colors.textMuted}
+                            value={sleepWakeTime}
+                            onChangeText={setSleepWakeTime}
+                          />
+                          <TouchableOpacity
+                            style={styles.planViewBtn}
+                            onPress={() => handleActivatePlan(sleepBedtime || undefined, sleepWakeTime || undefined)}
+                            disabled={activatingPlan}
+                            activeOpacity={0.75}
+                          >
+                            {activatingPlan ? (
+                              <ActivityIndicator size="small" color={colors.bgPrimary} />
+                            ) : (
+                              <>
+                                <Ionicons name="shield-checkmark-outline" size={14} color={colors.bgPrimary} />
+                                <Text style={styles.planViewBtnText}>Confirm & Start Recovery Plan</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.planViewBtn}
+                          onPress={
+                            improvementPlanStatus.pendingPlan.pillar === 'recovery'
+                              ? () => setSleepWindowSetup(true)
+                              : handleActivatePlan
+                          }
+                          disabled={activatingPlan}
+                          activeOpacity={0.75}
+                        >
+                          {activatingPlan ? (
+                            <ActivityIndicator size="small" color={colors.bgPrimary} />
+                          ) : (
+                            <>
+                              <Ionicons name="shield-checkmark-outline" size={14} color={colors.bgPrimary} />
+                              <Text style={styles.planViewBtnText}>{`Start ${PILLAR_LABELS[improvementPlanStatus.pendingPlan.pillar]} Plan`}</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      )}
                     </>
                   ) : (
                     <>

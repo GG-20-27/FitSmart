@@ -62,6 +62,7 @@ export interface CompletedPlan {
 
 export interface ImprovementPlanStatus {
   activePlan?: ActivePlan;
+  activePlans?: ActivePlan[]; // all active plans (admin may have multiple)
   pendingPlan?: PendingPlan;
   completedPlans: CompletedPlan[];
 }
@@ -94,8 +95,11 @@ export async function getImprovementPlanStatus(): Promise<ImprovementPlanStatus>
   return apiRequest<ImprovementPlanStatus>('/api/improvement-plan');
 }
 
-export async function activateImprovementPlan(): Promise<ActivePlan> {
-  return apiRequest<ActivePlan>('/api/improvement-plan/activate', { method: 'POST' });
+export async function activateImprovementPlan(params?: { bedtime?: string; wakeTime?: string }): Promise<ActivePlan> {
+  return apiRequest<ActivePlan>('/api/improvement-plan/activate', {
+    method: 'POST',
+    ...(params ? { body: JSON.stringify(params) } : {}),
+  });
 }
 
 export async function getPlanContent(pillar: string): Promise<PlanContent> {

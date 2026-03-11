@@ -6177,11 +6177,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       { id: 'training_check_recovery',   label: 'Check recovery before training', frequency: 'daily' },
     ],
     recovery: [
-      { id: 'recovery_sleep_7h',        label: 'Target 7–8h sleep tonight',  frequency: 'daily' },
-      { id: 'recovery_screens_off',     label: 'Screens off by 22:00',       frequency: 'daily' },
-      { id: 'recovery_log_checkin',     label: 'Log morning check-in',       frequency: 'daily' },
-      { id: 'recovery_consistent_bed',  label: 'Consistent bedtime ±30min',  frequency: 'daily' },
-      { id: 'recovery_rest_on_red',     label: 'Full rest if recovery red',  frequency: 'daily' },
+      { id: 'recovery_sleep_7h',       label: 'Sleep ≥7h tonight',                    frequency: 'daily' },
+      { id: 'recovery_bedtime_window', label: 'In bed by your target bedtime',         frequency: 'daily' },
+      { id: 'recovery_wake_window',    label: 'Wake within your target wake window',   frequency: 'daily' },
+      { id: 'recovery_hydration_2l',   label: 'Drink ≥2L water today',                frequency: 'daily' },
+      { id: 'recovery_no_screens',     label: 'No screens 30 min before bed',          frequency: 'daily' },
     ],
   };
 
@@ -6195,14 +6195,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const titleMap: Record<string, string> = {
       nutrition: 'Fuel Consistency Plan',
       training:  'Training Consistency Plan',
-      recovery:  'Recovery Optimization Plan',
+      recovery:  'Recovery Consistency Plan',
     };
 
     const fallback = (triggerLine: string): PersonalizedPlanContent => {
       const baseRules: Record<string, string[]> = {
         nutrition: ['No meal gap longer than 5 hours', 'Protein within 2 hours of waking', 'Minimum 2 full meals logged daily', 'Aim for 2L+ hydration', 'Avoid pure junk-food-only days'],
         training:  ['Log every training session — no untracked days', 'Match intensity to your recovery zone', 'Minimum 3 sessions this week', 'Include at least one mobility or recovery session', 'Do not skip sessions on green recovery days'],
-        recovery:  ['Target 7–8 hours of sleep each night', 'No screens or stimulants after 22:00', 'Log your daily check-in feeling every morning', 'Keep consistent bed and wake times', 'Prioritize full rest on red recovery days'],
+        recovery:  ['Sleep ≥7 hours each night', 'Keep a consistent bedtime', 'Keep a consistent wake time', 'Drink ≥2L water every day', 'No screens 30 min before bed'],
       };
       return { title: titleMap[pillar] ?? pillar, triggerLine, evidence: [], targets: [], rules: baseRules[pillar] ?? [], exitCondition: exitConditionMap[pillar] ?? '', planHabits: STATIC_PLAN_HABITS[pillar] ?? [] };
     };
@@ -6369,11 +6369,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const targets: string[] = [];
         if (avgSleep !== null && avgSleep < 7) targets.push(`Increase avg sleep to 7h+ (currently ${avgSleep}h)`);
         if (redDays > 1) targets.push(`Reduce red days to ≤1 this week (currently ${redDays})`);
-        targets.push('Consistent bed/wake time ±30 min');
+        targets.push('Consistent bed/wake time within your sleep window');
 
-        const rules = ['Target 7–8 hours of sleep each night', 'No screens or stimulants after 22:00', 'Log your daily check-in feeling every morning', 'Keep consistent bed and wake times', 'Prioritize full rest on red recovery days'];
+        // Fetch stored sleep window for personalization
+        let sleepBedtime: string | null = null;
+        let sleepWakeTime: string | null = null;
+        try {
+          const [ctx] = await db.select({ sleepBedtime: userContext.sleepBedtime, sleepWakeTime: userContext.sleepWakeTime })
+            .from(userContext).where(eq(userContext.userId, userId)).limit(1);
+          sleepBedtime = ctx?.sleepBedtime ?? null;
+          sleepWakeTime = ctx?.sleepWakeTime ?? null;
+        } catch { /* graceful */ }
 
-        return { title: 'Recovery Optimization Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.recovery, planHabits: STATIC_PLAN_HABITS.recovery };
+        const recoveryHabits: PlanHabitDef[] = [
+          { id: 'recovery_sleep_7h',       label: 'Sleep ≥7h tonight',                                                                        frequency: 'daily' },
+          { id: 'recovery_bedtime_window', label: sleepBedtime  ? `In bed by ${sleepBedtime}`                : 'In bed by your target bedtime',        frequency: 'daily' },
+          { id: 'recovery_wake_window',    label: sleepWakeTime ? `Wake by ${sleepWakeTime}`                 : 'Wake within your target wake window',   frequency: 'daily' },
+          { id: 'recovery_hydration_2l',   label: 'Drink ≥2L water today',                                                                    frequency: 'daily' },
+          { id: 'recovery_no_screens',     label: sleepBedtime  ? `No screens 30 min before ${sleepBedtime}` : 'No screens 30 min before bed',          frequency: 'daily' },
+        ];
+
+        const rules = [
+          'Sleep ≥7 hours each night',
+          sleepBedtime  ? `In bed by ${sleepBedtime} every night`         : 'Keep a consistent bedtime',
+          sleepWakeTime ? `Wake by ${sleepWakeTime} every morning`         : 'Keep a consistent wake time',
+          'Drink ≥2L water every day',
+          sleepBedtime  ? `No screens or stimulants 30 min before ${sleepBedtime}` : 'No screens 30 min before bed',
+        ];
+
+        return { title: 'Recovery Consistency Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.recovery, planHabits: recoveryHabits };
       }
     } catch (err) {
       console.error('[PLAN CONTENT] Personalization error, falling back to static:', err);
@@ -6475,44 +6499,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
-      let activePlan = await storage.getActivePlan(userId);
-      let activePlanCurrentAvg: number | null = null;
-      let activePlanDaysCount = 0;
+      const adminWhoopIdForPlan = process.env.ADMIN_WHOOP_ID || '25283528';
+      const isAdminUser = userId === `whoop_${adminWhoopIdForPlan}`;
 
-      // Auto-complete check: if active plan pillar 7-day avg >= 7.0
-      if (activePlan) {
-        const col = activePlan.pillar === 'nutrition' ? fitScores.nutritionScore
-                   : activePlan.pillar === 'training' ? fitScores.trainingScore
+      // Fetch active plans — admin may have multiple
+      let rawActivePlans;
+      if (isAdminUser) {
+        rawActivePlans = await storage.getAllActivePlans(userId);
+      } else {
+        const single = await storage.getActivePlan(userId);
+        rawActivePlans = single ? [single] : [];
+      }
+
+      // Compute stats + auto-complete for each active plan
+      const builtActivePlans: Array<{ id: number; pillar: string; activatedAt: Date | string; currentRollingAvg: number | null; daysCount: number }> = [];
+      for (const plan of rawActivePlans) {
+        if (!plan) continue;
+        const col = plan.pillar === 'nutrition' ? fitScores.nutritionScore
+                   : plan.pillar === 'training' ? fitScores.trainingScore
                    : fitScores.recoveryScore;
 
-        // Only count days logged since the plan was activated
-        const activatedDate = activePlan.activatedAt instanceof Date
-          ? activePlan.activatedAt.toISOString().slice(0, 10)
-          : String(activePlan.activatedAt).slice(0, 10);
+        const activatedDate = plan.activatedAt instanceof Date
+          ? plan.activatedAt.toISOString().slice(0, 10)
+          : String(plan.activatedAt).slice(0, 10);
 
         const [daysResult] = await db.select({ count: sql<number>`count(*)` })
           .from(fitScores)
           .where(and(eq(fitScores.userId, userId), sql`${col} IS NOT NULL`, gte(fitScores.date, activatedDate)));
-        activePlanDaysCount = Math.min(Number(daysResult?.count ?? 0), 7);
+        const daysCount = Math.min(Number(daysResult?.count ?? 0), 7);
 
-        const avg = await computePillarRollingAvg(userId, activePlan.pillar, activatedDate);
+        const avg = await computePillarRollingAvg(userId, plan.pillar, activatedDate);
         if (avg !== null && avg >= 7.0) {
-          await storage.completePlan(activePlan.id, avg);
-          console.log(`[IMPROVEMENT PLAN] Auto-completed ${activePlan.pillar} plan for ${userId}, avg=${avg}`);
-          activePlan = undefined;
-          activePlanDaysCount = 0;
+          await storage.completePlan(plan.id, avg);
+          console.log(`[IMPROVEMENT PLAN] Auto-completed ${plan.pillar} plan for ${userId}, avg=${avg}`);
         } else {
-          activePlanCurrentAvg = avg;
+          builtActivePlans.push({ id: plan.id, pillar: plan.pillar, activatedAt: plan.activatedAt, currentRollingAvg: avg, daysCount });
         }
       }
 
       const completedPlans = await storage.getCompletedPlans(userId);
 
-      // Compute pending plan (only if no active plan)
+      // Compute pending plan:
+      // - for non-admin: only when no active plans
+      // - for admin: always compute, so they can see & activate additional plans
+      const activePillarSet = new Set(builtActivePlans.map(p => p.pillar));
       let pendingPlan = null;
-      if (!activePlan) {
+      if (builtActivePlans.length === 0 || isAdminUser) {
         const weakness = await computePillarWeakness(userId);
-        if (weakness) {
+        if (weakness && !activePillarSet.has(weakness.pillar)) {
           pendingPlan = {
             pillar: weakness.pillar,
             weaknessCount: weakness.weaknessCount,
@@ -6521,14 +6555,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // activePlan = first plan (backward compat); activePlans = full list for admin
+      const activePlan = builtActivePlans[0] ?? undefined;
       res.json({
-        activePlan: activePlan ? {
-          id: activePlan.id,
-          pillar: activePlan.pillar,
-          activatedAt: activePlan.activatedAt,
-          currentRollingAvg: activePlanCurrentAvg,
-          daysCount: activePlanDaysCount,
-        } : undefined,
+        activePlan,
+        activePlans: builtActivePlans,
         pendingPlan,
         completedPlans: completedPlans.map(p => ({
           id: p.id,
@@ -6550,14 +6581,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
+      const { bedtime, wakeTime } = req.body ?? {};
+
+      const adminWhoopIdActivate = process.env.ADMIN_WHOOP_ID || '25283528';
+      const isAdminActivate = userId === `whoop_${adminWhoopIdActivate}`;
+
       const existing = await storage.getActivePlan(userId);
-      if (existing) {
+      if (existing && !isAdminActivate) {
         return res.status(409).json({ error: 'A plan is already active' });
       }
 
       const weakness = await computePillarWeakness(userId);
       if (!weakness || weakness.weaknessCount < 5) {
         return res.status(400).json({ error: 'Plan not yet unlocked (need 5 weakness days)' });
+      }
+
+      // For admin with an existing plan, make sure we're not re-activating the same pillar
+      if (existing && isAdminActivate && existing.pillar === weakness.pillar) {
+        return res.status(409).json({ error: `${weakness.pillar} plan is already active` });
+      }
+
+      // Store sleep window before generating content (so personalization picks it up)
+      if (weakness.pillar === 'recovery' && (bedtime || wakeTime)) {
+        try {
+          await storage.upsertUserContext(userId, {
+            ...(bedtime  ? { sleepBedtime: bedtime }   : {}),
+            ...(wakeTime ? { sleepWakeTime: wakeTime } : {}),
+          });
+          console.log(`[IMPROVEMENT PLAN] Stored sleep window for ${userId}: bed=${bedtime}, wake=${wakeTime}`);
+        } catch (e) {
+          console.error('[IMPROVEMENT PLAN] Failed to store sleep window:', e);
+        }
       }
 
       const plan = await storage.createActivePlan(userId, weakness.pillar);
