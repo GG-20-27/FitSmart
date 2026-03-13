@@ -6216,14 +6216,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (pillarRows.length < 1) return fallback(`${pillar.charAt(0).toUpperCase() + pillar.slice(1)} has been your lowest pillar this week.`);
 
-      const weaknessCount = pillarRows.filter(r => {
-        const n = r.nutritionScore ?? 10, t = r.trainingScore ?? 10, rc = r.recoveryScore ?? 10;
-        const min = Math.min(n, t, rc);
-        if (pillar === 'nutrition') return n === min;
-        if (pillar === 'training')  return t === min;
-        return rc === min;
-      }).length;
-
       // --- User context for archetype ---
       let archetype: 'athlete' | 'general' = 'general';
       try {
@@ -6284,9 +6276,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const totalDays = dates.length || 1;
         const avgMealsPerDay = Math.round((Object.values(mealsByDate).reduce((a, b) => a + b, 0) / totalDays) * 10) / 10;
 
-        const triggerLine = weaknessCount > 0
-          ? `Nutrition was your lowest pillar ${weaknessCount}× this week${longestGapH >= 5 ? ' — mainly due to long meal gaps' : avgMealsPerDay < 2 ? ' — mainly due to low logging consistency' : ''}.`
-          : 'Nutrition has been your lowest pillar this week.';
+        const triggerLine = `Nutrition was your lowest pillar this week${longestGapH >= 5 ? ' — mainly due to long meal gaps' : avgMealsPerDay < 2 ? ' — mainly due to low logging consistency' : ''}.`;
 
         const evidence: string[] = [];
         if (longestGapH > 0) evidence.push(`Longest meal gap: ${longestGapH}h${longestGapDays > 1 ? ` (${longestGapDays} days)` : ''}`);
@@ -6324,9 +6314,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return (r.recoveryScore ?? 0) >= 7 && !hasSession;
         }).length;
 
-        const triggerLine = weaknessCount > 0
-          ? `Training was your lowest pillar ${weaknessCount}× this week${skippedCount > 0 ? ` — ${skippedCount} session${skippedCount > 1 ? 's' : ''} skipped` : sessionDays < 2 ? ' — low session count' : ''}.`
-          : 'Training has been your lowest pillar this week.';
+        const triggerLine = `Training was your lowest pillar this week${skippedCount > 0 ? ` — ${skippedCount} session${skippedCount > 1 ? 's' : ''} skipped` : sessionDays < 2 ? ' — low session count' : ''}.`;
 
         const evidence: string[] = [];
         evidence.push(`Sessions logged in 7 days: ${sessionDays}`);
@@ -6357,9 +6345,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const redDays = whoopRows.filter(r => (r.recoveryScore ?? 100) < 34).length;
         const yellowDays = whoopRows.filter(r => { const s = r.recoveryScore ?? 100; return s >= 34 && s < 67; }).length;
 
-        const triggerLine = weaknessCount > 0
-          ? `Recovery was your lowest pillar ${weaknessCount}× this week${redDays > 1 ? ` — ${redDays} red recovery days` : avgSleep !== null && avgSleep < 7 ? ` — avg sleep ${avgSleep}h` : ''}.`
-          : 'Recovery has been your lowest pillar this week.';
+        const triggerLine = `Recovery was your lowest pillar this week${redDays > 1 ? ` — ${redDays} red recovery days` : avgSleep !== null && avgSleep < 7 ? ` — avg sleep ${avgSleep}h` : ''}.`;
 
         const evidence: string[] = [];
         if (avgSleep !== null) evidence.push(`Avg sleep: ${avgSleep}h/night`);
@@ -6406,7 +6392,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   /** Compute weakness state from last 7 days of pillar scores */
-  async function computePillarWeakness(userId: string): Promise<{ pillar: string; weaknessCount: number } | null> {
+  async function computePillarWeakness(userId: string, excludePillars?: Set<string>): Promise<{ pillar: string; weaknessCount: number } | null> {
     // Admin bypass: always return a visible pending plan for testing
     const adminWhoopId = process.env.ADMIN_WHOOP_ID || '25283528';
     if (userId === `whoop_${adminWhoopId}`) {
@@ -6424,20 +6410,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .orderBy(desc(fitScores.date))
         .limit(7);
 
-      if (rows.length === 0) {
-        return { pillar: 'nutrition', weaknessCount: 5 }; // stub: show unlocked state
-      }
       const counts: Record<string, number> = { nutrition: 0, training: 0, recovery: 0 };
-      for (const row of rows) {
-        const n = row.nutritionScore!; const t = row.trainingScore!; const r = row.recoveryScore!;
-        const min = Math.min(n, t, r);
-        if (n === min) counts.nutrition++;
-        else if (t === min) counts.training++;
-        else counts.recovery++;
+      if (rows.length > 0) {
+        for (const row of rows) {
+          const n = row.nutritionScore!; const t = row.trainingScore!; const r = row.recoveryScore!;
+          const min = Math.min(n, t, r);
+          if (n === min) counts.nutrition++;
+          else if (t === min) counts.training++;
+          else counts.recovery++;
+        }
+      } else {
+        // Stub: spread across all pillars so any non-excluded one is visible
+        counts.nutrition = 5; counts.training = 3; counts.recovery = 2;
       }
-      const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-      // Force weaknessCount to at least 5 so admin always sees unlocked state
-      return { pillar: dominant[0], weaknessCount: Math.max(dominant[1], 5) };
+      // Pick highest-count pillar not already active
+      const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      const candidate = sorted.find(([p]) => !excludePillars?.has(p));
+      if (!candidate) return null;
+      return { pillar: candidate[0], weaknessCount: Math.max(candidate[1], 5) };
     }
 
     const rows = await db.select({
@@ -6545,8 +6535,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const activePillarSet = new Set(builtActivePlans.map(p => p.pillar));
       let pendingPlan = null;
       if (builtActivePlans.length === 0 || isAdminUser) {
-        const weakness = await computePillarWeakness(userId);
-        if (weakness && !activePillarSet.has(weakness.pillar)) {
+        const weakness = await computePillarWeakness(userId, activePillarSet);
+        if (weakness) {
           pendingPlan = {
             pillar: weakness.pillar,
             weaknessCount: weakness.weaknessCount,

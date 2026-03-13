@@ -2935,7 +2935,6 @@ export default function FitScoreScreen() {
                     const plan = improvementPlanStatus?.activePlan;
                     const dayCount = plan ? Math.max(1, Math.ceil((Date.now() - new Date(plan.activatedAt).getTime()) / 86400000)) : null;
                     const avg = plan?.currentRollingAvg ?? 0;
-                    const progress = Math.min(avg / 7.0, 1);
                     const avgColor = avg >= 7 ? colors.success : avg >= 5 ? colors.warning : avg > 0 ? colors.danger : colors.textMuted;
                     const days = plan?.daysCount ?? 0;
                     return (
@@ -2947,15 +2946,32 @@ export default function FitScoreScreen() {
                         {plan && (
                           <>
                             <Text style={styles.planModalHeroMeta}>{`Day ${days}`}</Text>
-                            <View style={styles.planModalProgressWrap}>
-                              <View style={styles.planModalProgressBg}>
-                                <View style={[styles.planModalProgressFill, { width: `${progress * 100}%` as any }]} />
+                            {/* Days progress bar */}
+                            <View style={{ width: '100%' as any, gap: 4 }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <Text style={{ fontSize: 10, color: colors.textMuted, fontWeight: '600', letterSpacing: 0.5 }}>DAYS</Text>
+                                <Text style={{ fontSize: 10, color: colors.textMuted }}>{`${days} / 7`}</Text>
                               </View>
-                              <Text style={[styles.planModalProgressTarget, { color: avgColor }]}>
-                                {`Avg ${avg > 0 ? avg.toFixed(1) : '—'} / 7.0`}
-                              </Text>
+                              <View style={styles.planModalProgressBg}>
+                                <View style={[styles.planModalProgressFill, { width: `${Math.min(days / 7, 1) * 100}%` as any }]} />
+                              </View>
                             </View>
-                            <Text style={styles.planModalDaysCountedLabel}>{`Days counted: ${days}/7`}</Text>
+                            {/* Avg bar — 0–10 scale with 7.0 completion threshold */}
+                            <View style={{ width: '100%' as any, gap: 4, marginTop: 8 }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                                <Text style={{ fontSize: 10, color: colors.textMuted, fontWeight: '600', letterSpacing: 0.5 }}>AVG SCORE</Text>
+                                <Text style={{ fontSize: 10, fontWeight: '700' as const, color: avgColor }}>
+                                  {avg > 0 ? avg.toFixed(1) : '—'} / 10
+                                </Text>
+                              </View>
+                              <View style={{ position: 'relative' as const }}>
+                                <View style={styles.planModalProgressBg}>
+                                  <View style={[styles.planModalProgressFill, { width: `${Math.min(avg / 10, 1) * 100}%` as any, backgroundColor: avgColor }]} />
+                                </View>
+                                <View style={{ position: 'absolute' as const, left: '70%' as any, top: -2, bottom: -2, width: 2, backgroundColor: colors.success, borderRadius: 1 }} />
+                              </View>
+                              <Text style={{ fontSize: 9, color: colors.success, textAlign: 'right' as const }}>≥ 7.0 to complete</Text>
+                            </View>
                           </>
                         )}
                       </View>
@@ -2984,7 +3000,7 @@ export default function FitScoreScreen() {
                     {/* Targets */}
                     {planContent.targets && planContent.targets.length > 0 && (
                       <>
-                        <Text style={styles.planSectionLabel}>Your targets</Text>
+                        <Text style={styles.planSectionLabel}>Plan goals</Text>
                         <View style={styles.planTargetsBlock}>
                           {planContent.targets.map((t, i) => (
                             <View key={i} style={styles.planTargetRow}>
@@ -2997,7 +3013,7 @@ export default function FitScoreScreen() {
                     )}
 
                     {/* Rules card with row separators */}
-                    <Text style={styles.planSectionLabel}>Plan Habits</Text>
+                    <Text style={styles.planSectionLabel}>Plan habits</Text>
                     <View style={styles.planRulesCard}>
                       {planContent.rules.map((rule, i) => (
                         <View key={i}>
@@ -4385,6 +4401,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3,
     elevation: 5,
+    zIndex: 10,
   },
   scoreText: {
     ...typography.small,
@@ -4395,7 +4412,7 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.accent,
     marginTop: spacing.xs / 2,
-    fontSize: 11,
+    fontSize: 9,
   },
   mealMacroHint: {
     fontSize: 10,
