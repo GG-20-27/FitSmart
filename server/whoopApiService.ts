@@ -261,45 +261,25 @@ export class WhoopApiService {
     };
 
     try {
-      const formBody = Object.entries(requestData)
-        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
-        .join('&');
+      const params = new URLSearchParams(requestData as Record<string, string>);
 
-      const response = await fetch(`${WHOOP_OAUTH_BASE}/oauth2/token`, {
-        method: 'POST',
+      const response = await axios.post(`${WHOOP_OAUTH_BASE}/oauth2/token`, params, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json',
           'User-Agent': 'FitScore-GPT-API/1.0'
         },
-        body: formBody
+        timeout: 15000
       });
 
-      const responseText = await response.text();
       console.log('[WHOOP OAUTH] Response status:', response.status);
-      console.log('[WHOOP OAUTH] Raw response body:', responseText);
-      console.log('[WHOOP OAUTH] Request data sent:', JSON.stringify(requestData, null, 2));
-
-      if (!response.ok) {
-        // Parse error response for detailed debugging
-        let errorDetails = responseText;
-        try {
-          const errorData = JSON.parse(responseText);
-          errorDetails = JSON.stringify(errorData, null, 2);
-          console.error('[WHOOP OAUTH] Detailed error response:', errorData);
-        } catch (parseError) {
-          console.error('[WHOOP OAUTH] Could not parse error response as JSON');
-        }
-        
-        throw new Error(`HTTP ${response.status}: ${errorDetails}`);
-      }
-
-      const data = JSON.parse(responseText);
       console.log('WHOOP token exchange successful');
-      return data;
+      return response.data;
     } catch (error: any) {
-      console.error('WHOOP token exchange failed:', error.message);
-      throw new Error(`Failed to exchange code for access token: ${error.message}`);
+      const status = error.response?.status;
+      const detail = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+      console.error('WHOOP token exchange failed:', status, detail);
+      throw new Error(`Failed to exchange code for access token: ${status ? `HTTP ${status}: ${detail}` : detail}`);
     }
   }
 
