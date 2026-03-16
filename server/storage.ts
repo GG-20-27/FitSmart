@@ -1,6 +1,6 @@
 import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, improvementPlans, planHabits, habitCheckins, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext, type ImprovementPlan, type PlanHabit, type HabitCheckin } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ne } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -57,6 +57,7 @@ export interface IStorage {
   getActivePlan(userId: string): Promise<ImprovementPlan | undefined>;
   createActivePlan(userId: string, pillar: string): Promise<ImprovementPlan>;
   completePlan(id: number, rollingAvg: number): Promise<ImprovementPlan>;
+  expirePlan(id: number, rollingAvg?: number | null): Promise<ImprovementPlan>;
   getCompletedPlans(userId: string): Promise<ImprovementPlan[]>;
 
   // Plan habits operations
@@ -317,9 +318,17 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
+  async expirePlan(id: number, rollingAvg?: number | null): Promise<ImprovementPlan> {
+    const [row] = await db.update(improvementPlans)
+      .set({ status: 'expired', completedAt: new Date(), rollingAvgAtCompletion: rollingAvg ?? null })
+      .where(eq(improvementPlans.id, id))
+      .returning();
+    return row;
+  }
+
   async getCompletedPlans(userId: string): Promise<ImprovementPlan[]> {
     return await db.select().from(improvementPlans)
-      .where(and(eq(improvementPlans.userId, userId), eq(improvementPlans.status, 'completed')));
+      .where(and(eq(improvementPlans.userId, userId), ne(improvementPlans.status, 'active')));
   }
 
   // Plan habits operations

@@ -17,11 +17,10 @@ export interface ActivePlan {
 }
 
 export async function generateFitCookMealPlan(params: {
-  timingMode: 'flexible' | 'fixed';
-  windows?: {
-    breakfast: { from: string; until: string };
-    lunch: { from: string; until: string };
-    dinner: { from: string; until: string };
+  times?: {
+    breakfast: string;
+    lunch: string;
+    dinner: string;
   };
   preferences?: string;
   allergies?: string;
@@ -58,12 +57,14 @@ export interface CompletedPlan {
   pillar: Pillar;
   completedAt: string | null;
   rollingAvgAtCompletion: number | null;
+  status: 'completed' | 'expired';
 }
 
 export interface ImprovementPlanStatus {
   activePlan?: ActivePlan;
   activePlans?: ActivePlan[]; // all active plans (admin may have multiple)
   pendingPlan?: PendingPlan;
+  pendingPlans?: PendingPlan[]; // all pending plans (admin sees all non-active pillars)
   completedPlans: CompletedPlan[];
 }
 
@@ -82,6 +83,7 @@ export interface PlanContent {
   rules: string[];
   exitCondition: string;
   planHabits: PlanHabitDef[];
+  trainingDirection?: { direction: string; explanation: string }; // training pillar only
 }
 
 export interface TodayPlanHabit {
@@ -95,10 +97,10 @@ export async function getImprovementPlanStatus(): Promise<ImprovementPlanStatus>
   return apiRequest<ImprovementPlanStatus>('/api/improvement-plan');
 }
 
-export async function activateImprovementPlan(params?: { bedtime?: string; wakeTime?: string }): Promise<ActivePlan> {
+export async function activateImprovementPlan(params: { pillar: string; bedtime?: string; wakeTime?: string }): Promise<ActivePlan> {
   return apiRequest<ActivePlan>('/api/improvement-plan/activate', {
     method: 'POST',
-    ...(params ? { body: JSON.stringify(params) } : {}),
+    body: JSON.stringify(params),
   });
 }
 
@@ -115,6 +117,36 @@ export async function togglePlanHabit(date: string, habit_key: string, checked: 
   await apiRequest<{ ok: boolean }>('/api/plan-habits/checkin', {
     method: 'POST',
     body: JSON.stringify({ date, habit_key, checked }),
+  });
+}
+
+export async function generateRecoveryRoutine(params: {
+  type: 'morning' | 'winddown';
+  bedtime: string;
+  wakeTime: string;
+  variant?: string;
+}): Promise<{ routine: string }> {
+  return apiRequest<{ routine: string }>('/api/improvement-plan/routines', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function abandonPlan(pillar: string): Promise<void> {
+  await apiRequest<{ ok: boolean }>('/api/improvement-plan/abandon', {
+    method: 'POST',
+    body: JSON.stringify({ pillar }),
+  });
+}
+
+export async function generateTrainingSession(params: {
+  goal: string;
+  direction?: string;
+  variant?: string;
+}): Promise<{ session: string }> {
+  return apiRequest<{ session: string }>('/api/improvement-plan/training-session', {
+    method: 'POST',
+    body: JSON.stringify(params),
   });
 }
 

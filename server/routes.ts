@@ -6159,6 +6159,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     rules: string[];
     exitCondition: string;
     planHabits: PlanHabitDef[];
+    trainingDirection?: { direction: string; explanation: string };
   }
 
   const STATIC_PLAN_HABITS: Record<string, PlanHabitDef[]> = {
@@ -6170,11 +6171,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       { id: 'nutrition_no_junk',       label: 'Avoid junk-only day',         frequency: 'daily' },
     ],
     training: [
-      { id: 'training_log_session',      label: 'Log today\'s session',          frequency: 'daily' },
-      { id: 'training_match_intensity',  label: 'Match intensity to zone',        frequency: 'daily' },
-      { id: 'training_no_skip_green',    label: 'Don\'t skip on green recovery',  frequency: 'daily' },
-      { id: 'training_mobility',         label: 'Include mobility or warm-up',    frequency: 'daily' },
-      { id: 'training_check_recovery',   label: 'Check recovery before training', frequency: 'daily' },
+      { id: 'training_consistency_session',  label: 'Complete a training session',      frequency: 'daily' },
+      { id: 'training_consistency_movement', label: '≥30 min of movement today',        frequency: 'daily' },
+      { id: 'training_consistency_warmup',   label: 'Warm up before training',          frequency: 'daily' },
+      { id: 'training_consistency_log',      label: 'Log your session in the app',      frequency: 'daily' },
+      { id: 'training_consistency_mobility', label: 'Include light mobility or rehab',  frequency: 'daily' },
+    ],
+    training_consistency: [
+      { id: 'training_consistency_session',  label: 'Complete a training session',      frequency: 'daily' },
+      { id: 'training_consistency_movement', label: '≥30 min of movement today',        frequency: 'daily' },
+      { id: 'training_consistency_warmup',   label: 'Warm up before training',          frequency: 'daily' },
+      { id: 'training_consistency_log',      label: 'Log your session in the app',      frequency: 'daily' },
+      { id: 'training_consistency_mobility', label: 'Include light mobility or rehab',  frequency: 'daily' },
+    ],
+    training_load_management: [
+      { id: 'training_load_strain_zone',   label: 'Train within recovery strain zone',  frequency: 'daily' },
+      { id: 'training_load_low_intensity', label: 'Include one low-intensity session',  frequency: 'daily' },
+      { id: 'training_load_pain_check',    label: 'Stop training if pain appears',      frequency: 'daily' },
+      { id: 'training_load_cooldown',      label: 'Cooldown after every session',       frequency: 'daily' },
+      { id: 'training_load_effort_log',    label: 'Log perceived effort after session', frequency: 'daily' },
+    ],
+    training_alignment: [
+      { id: 'training_align_planned_type', label: 'Follow the planned training type',  frequency: 'daily' },
+      { id: 'training_align_main_block',   label: 'Complete the main workout block',   frequency: 'daily' },
+      { id: 'training_align_log_focus',    label: 'Log session focus in the app',      frequency: 'daily' },
+      { id: 'training_align_warmup',       label: 'Warm up properly before session',   frequency: 'daily' },
+      { id: 'training_align_no_skip',      label: 'Avoid skipping main training block', frequency: 'daily' },
     ],
     recovery: [
       { id: 'recovery_sleep_7h',       label: 'Sleep ≥7h tonight',                    frequency: 'daily' },
@@ -6188,9 +6210,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   /** Generate personalized plan content from last 7 days of data */
   async function generatePersonalizedPlanContent(userId: string, pillar: string): Promise<PersonalizedPlanContent> {
     const exitConditionMap: Record<string, string> = {
-      nutrition: '7-day rolling avg Nutrition ≥ 7.0',
-      training:  '7-day rolling avg Training ≥ 7.0',
-      recovery:  '7-day rolling avg Recovery ≥ 7.0',
+      nutrition: 'Log at least 5 days with an average Nutrition score ≥ 7.0',
+      training:  'Log at least 5 days with an average Training score ≥ 7.0',
+      recovery:  'Log at least 5 days with an average Recovery score ≥ 7.0',
     };
     const titleMap: Record<string, string> = {
       nutrition: 'Fuel Consistency Plan',
@@ -6302,18 +6324,145 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // ---- TRAINING pillar ----
       if (pillar === 'training') {
         const dates = pillarRows.map(r => r.date);
-        const trainingSessions = await db.select({ date: trainingDataTable.date, skipped: trainingDataTable.skipped })
+        const trainingSessions = await db.select({ date: trainingDataTable.date, type: trainingDataTable.type, skipped: trainingDataTable.skipped })
           .from(trainingDataTable).where(and(eq(trainingDataTable.userId, userId), sql`date >= ${dates[dates.length - 1]}`));
 
-        const sessionDays = new Set(trainingSessions.filter(s => !s.skipped).map(s => s.date)).size;
+        const activeSessions = trainingSessions.filter(s => !s.skipped);
+        const sessionDays = new Set(activeSessions.map(s => s.date)).size;
         const skippedCount = trainingSessions.filter(s => s.skipped).length;
 
         // Count green recovery days with no training
         const greenNoSession = pillarRows.filter(r => {
-          const hasSession = trainingSessions.some(s => s.date === r.date && !s.skipped);
+          const hasSession = activeSessions.some(s => s.date === r.date);
           return (r.recoveryScore ?? 0) >= 7 && !hasSession;
         }).length;
 
+        // Load management signal: trained on low-recovery days (score < 4 out of 10)
+        const redDayTraining = pillarRows.filter(r => {
+          const hasSession = activeSessions.some(s => s.date === r.date);
+          return (r.recoveryScore ?? 10) < 4 && hasSession;
+        }).length;
+
+        // Alignment signal: logged session types don't match stated sport/goal
+        let alignmentMismatch = false;
+        let sportLabel = '';
+        if (archetype === 'athlete' && activeSessions.length >= 2) {
+          try {
+            const [ctx] = await db.select({ sportSpecific: userContext.sportSpecific })
+              .from(userContext).where(eq(userContext.userId, userId)).limit(1);
+            const sport = ctx?.sportSpecific ?? '';
+            if (sport) {
+              sportLabel = sport;
+              const sportKeyword = sport.toLowerCase().split(/[\s-]+/)[0];
+              const matchingTypes = activeSessions.filter(s =>
+                (s.type ?? '').toLowerCase().includes(sportKeyword)
+              ).length;
+              if (matchingTypes / activeSessions.length < 0.25) alignmentMismatch = true;
+            }
+          } catch { /* graceful */ }
+        }
+
+        // ---- Determine plan type ----
+        type TrainingPlanType = 'consistency' | 'load_management' | 'alignment';
+        let planType: TrainingPlanType = 'consistency';
+        const lowRecoveryDays = pillarRows.filter(r => (r.recoveryScore ?? 10) < 5).length;
+        if (redDayTraining >= 2 || (sessionDays >= 5 && lowRecoveryDays >= 3)) {
+          planType = 'load_management';
+        } else if (alignmentMismatch) {
+          planType = 'alignment';
+        }
+
+        // ---- Today's Training Direction ----
+        // Uses the most recent recovery score (0–10 scale from fit_scores) + plan type + sportLabel
+        const latestRecovery = pillarRows[0]?.recoveryScore ?? null;
+        let tdLabel: string;
+        let tdExplanation: string;
+
+        if (planType === 'load_management') {
+          if (latestRecovery !== null && latestRecovery >= 7) {
+            tdLabel = 'Light Movement';
+            tdExplanation = 'Recovery looks good today, but your plan calls for controlled load. Keep intensity moderate and prioritise quality over volume.';
+          } else if (latestRecovery !== null && latestRecovery >= 4) {
+            tdLabel = 'Recovery Mobility';
+            tdExplanation = 'Recovery is moderate today. Focus on movement quality and mobility rather than intensity.';
+          } else {
+            tdLabel = 'Rest + Mobility';
+            tdExplanation = 'Recovery is low today. A rest day with light mobility work is the right call.';
+          }
+        } else if (planType === 'alignment') {
+          if (latestRecovery !== null && latestRecovery < 4) {
+            tdLabel = 'Recovery Mobility';
+            tdExplanation = 'Recovery is low today. Prioritise rest and return to your main training focus tomorrow.';
+          } else if (sportLabel) {
+            const sportCap = sportLabel.charAt(0).toUpperCase() + sportLabel.slice(1);
+            tdLabel = `${sportCap} Focus`;
+            tdExplanation = latestRecovery !== null && latestRecovery >= 7
+              ? `Recovery is strong today — a great opportunity to put in quality work in your ${sportLabel} focus.`
+              : `Recovery is moderate. Stick to your ${sportLabel} focus with controlled effort.`;
+          } else {
+            tdLabel = latestRecovery !== null && latestRecovery >= 7 ? 'Strength Focus' : 'Endurance Session';
+            tdExplanation = latestRecovery !== null && latestRecovery >= 7
+              ? 'Recovery is strong today. Lean into a strength session to align with your training goal.'
+              : 'Recovery is moderate. A steady endurance session keeps things on track.';
+          }
+        } else {
+          // Consistency plan
+          if (latestRecovery !== null && latestRecovery >= 7) {
+            tdLabel = 'Strength Focus';
+            tdExplanation = 'Recovery is strong today. A strength-focused session is a great way to build your consistency streak.';
+          } else if (latestRecovery !== null && latestRecovery >= 4) {
+            tdLabel = 'Endurance Session';
+            tdExplanation = 'Recovery is moderate today. A steady endurance session fits well — stay within your limits and get the session done.';
+          } else {
+            tdLabel = 'Light Movement';
+            tdExplanation = 'Recovery is lower today. Light movement still counts — showing up is what matters most for building consistency.';
+          }
+        }
+        const trainingDirection = { direction: tdLabel, explanation: tdExplanation };
+
+        // ---- Load Management Plan ----
+        if (planType === 'load_management') {
+          const triggerLine = `Training was your lowest pillar this week — you trained hard on low-recovery days.`;
+          const evidence: string[] = [`Sessions on low-recovery days: ${redDayTraining}`];
+          if (sessionDays > 0) evidence.push(`Total sessions this week: ${sessionDays}`);
+          if (lowRecoveryDays > 0) evidence.push(`Low-recovery days this week: ${lowRecoveryDays}`);
+          const targets: string[] = [
+            'Stay within your recovery strain zone this week',
+            'Include at least one low-intensity session',
+            redDayTraining > 0 ? 'Avoid training on red recovery days (score < 4)' : 'Match session intensity to your daily recovery score',
+          ];
+          const rules = [
+            'Train within your recovery strain target',
+            'Include at least one low-intensity session this week',
+            'Stop training if pain or fatigue appears',
+            'Always include a cooldown after training',
+            'Log perceived effort after each session',
+          ];
+          return { title: 'Load Management Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.training, planHabits: STATIC_PLAN_HABITS.training_load_management, trainingDirection };
+        }
+
+        // ---- Alignment Plan ----
+        if (planType === 'alignment') {
+          const triggerLine = `Training was your lowest pillar this week — sessions don't match your goal${sportLabel ? ` (${sportLabel})` : ''}.`;
+          const evidence: string[] = [`Active sessions this week: ${sessionDays}`];
+          if (sportLabel) evidence.push(`Stated sport/focus: ${sportLabel}`);
+          evidence.push('Session types logged don\'t align with your stated goal');
+          const targets: string[] = [
+            sportLabel ? `Include sessions focused on ${sportLabel}` : 'Align sessions with your main training goal',
+            'Avoid unrelated training types this week',
+            'Log session type with every entry',
+          ];
+          const rules = [
+            'Follow the planned training type each session',
+            'Complete the main workout block before accessories',
+            'Log the session focus with each entry',
+            'Warm up properly before each session',
+            'Avoid skipping the main training block',
+          ];
+          return { title: 'Training Alignment Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.training, planHabits: STATIC_PLAN_HABITS.training_alignment, trainingDirection };
+        }
+
+        // ---- Consistency Plan (default) ----
         const triggerLine = `Training was your lowest pillar this week${skippedCount > 0 ? ` — ${skippedCount} session${skippedCount > 1 ? 's' : ''} skipped` : sessionDays < 2 ? ' — low session count' : ''}.`;
 
         const evidence: string[] = [];
@@ -6325,12 +6474,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (sessionDays < 3) targets.push(`Reach ${archetype === 'athlete' ? 4 : 3} sessions this week (currently ${sessionDays})`);
         if (skippedCount > 0) targets.push('Zero skipped sessions this week');
         if (greenNoSession > 1) targets.push('Train on all green recovery days');
+        if (targets.length < 2) targets.push(archetype === 'athlete' ? 'Complete at least one structured session' : 'Include ≥30 minutes of movement per session');
 
         const rules = archetype === 'athlete'
           ? ['Log every session — no untracked training days', 'Match intensity to your recovery zone', 'Minimum 4 sessions per week', 'Include one dedicated recovery or mobility day', 'Push harder on green days, back off on red']
-          : ['Log every training session — no untracked days', 'Match intensity to your recovery zone', 'Minimum 3 sessions this week', 'Include at least one mobility or recovery session', 'Do not skip sessions on green recovery days'];
+          : ['Complete a training session today', 'Include ≥30 minutes of movement', 'Warm up before training', 'Log your session in the app', 'Include light mobility or rehab work'];
 
-        return { title: 'Training Consistency Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.training, planHabits: STATIC_PLAN_HABITS.training };
+        return { title: 'Training Consistency Plan', triggerLine, evidence: evidence.slice(0, 3), targets: targets.slice(0, 3), rules, exitCondition: exitConditionMap.training, planHabits: STATIC_PLAN_HABITS.training_consistency, trainingDirection };
       }
 
       // ---- RECOVERY pillar ----
@@ -6489,17 +6639,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
-      const adminWhoopIdForPlan = process.env.ADMIN_WHOOP_ID || '25283528';
-      const isAdminUser = userId === `whoop_${adminWhoopIdForPlan}`;
-
-      // Fetch active plans — admin may have multiple
-      let rawActivePlans;
-      if (isAdminUser) {
-        rawActivePlans = await storage.getAllActivePlans(userId);
-      } else {
-        const single = await storage.getActivePlan(userId);
-        rawActivePlans = single ? [single] : [];
-      }
+      // Fetch active plan (single plan per user)
+      const single = await storage.getActivePlan(userId);
+      const rawActivePlans = single ? [single] : [];
 
       // Compute stats + auto-complete for each active plan
       const builtActivePlans: Array<{ id: number; pillar: string; activatedAt: Date | string; currentRollingAvg: number | null; daysCount: number }> = [];
@@ -6519,9 +6661,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const daysCount = Math.min(Number(daysResult?.count ?? 0), 7);
 
         const avg = await computePillarRollingAvg(userId, plan.pillar, activatedDate);
-        if (avg !== null && avg >= 7.0) {
+        if (avg !== null && avg >= 7.0 && daysCount >= 5) {
           await storage.completePlan(plan.id, avg);
-          console.log(`[IMPROVEMENT PLAN] Auto-completed ${plan.pillar} plan for ${userId}, avg=${avg}`);
+          console.log(`[IMPROVEMENT PLAN] Auto-completed ${plan.pillar} plan for ${userId}, avg=${avg}, days=${daysCount}`);
+        } else if (daysCount >= 7) {
+          // Logged 7 days but didn't reach avg ≥ 7.0 — window expired
+          await storage.expirePlan(plan.id, avg);
+          console.log(`[IMPROVEMENT PLAN] Expired ${plan.pillar} plan for ${userId}, avg=${avg}, days=${daysCount}`);
         } else {
           builtActivePlans.push({ id: plan.id, pillar: plan.pillar, activatedAt: plan.activatedAt, currentRollingAvg: avg, daysCount });
         }
@@ -6529,19 +6675,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const completedPlans = await storage.getCompletedPlans(userId);
 
-      // Compute pending plan:
-      // - for non-admin: only when no active plans
-      // - for admin: always compute, so they can see & activate additional plans
       const activePillarSet = new Set(builtActivePlans.map(p => p.pillar));
+      const allPillars = ['nutrition', 'training', 'recovery'];
+
       let pendingPlan = null;
-      if (builtActivePlans.length === 0 || isAdminUser) {
+      let pendingPlans: Array<{ pillar: string; weaknessCount: number; unlocked: boolean }> = [];
+
+      if (builtActivePlans.length === 0) {
         const weakness = await computePillarWeakness(userId, activePillarSet);
         if (weakness) {
-          pendingPlan = {
-            pillar: weakness.pillar,
-            weaknessCount: weakness.weaknessCount,
-            unlocked: weakness.weaknessCount >= 5,
-          };
+          pendingPlan = { pillar: weakness.pillar, weaknessCount: weakness.weaknessCount, unlocked: weakness.weaknessCount >= 5 };
+          pendingPlans = [pendingPlan];
         }
       }
 
@@ -6551,11 +6695,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         activePlan,
         activePlans: builtActivePlans,
         pendingPlan,
+        pendingPlans,
         completedPlans: completedPlans.map(p => ({
           id: p.id,
           pillar: p.pillar,
           completedAt: p.completedAt,
           rollingAvgAtCompletion: p.rollingAvgAtCompletion,
+          status: p.status, // 'completed' | 'expired'
         })),
       });
     } catch (error) {
@@ -6571,25 +6717,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
-      const { bedtime, wakeTime } = req.body ?? {};
+      const { pillar: requestedPillar, bedtime, wakeTime } = req.body ?? {};
 
-      const adminWhoopIdActivate = process.env.ADMIN_WHOOP_ID || '25283528';
-      const isAdminActivate = userId === `whoop_${adminWhoopIdActivate}`;
+      // Determine which pillar to activate
+      let targetPillar: string;
+      if (requestedPillar) {
+        targetPillar = requestedPillar;
+      } else {
+        const weakness = await computePillarWeakness(userId);
+        if (!weakness || weakness.weaknessCount < 5) {
+          return res.status(400).json({ error: 'Plan not yet unlocked (need 5 weakness days)' });
+        }
+        targetPillar = weakness.pillar;
+      }
 
-      const existing = await storage.getActivePlan(userId);
-      if (existing && !isAdminActivate) {
+      // Check if this pillar is already active
+      const allActive = await storage.getAllActivePlans(userId);
+      const alreadyActive = allActive.some(p => p.pillar === targetPillar);
+      if (alreadyActive) {
+        return res.status(409).json({ error: `${targetPillar} plan is already active` });
+      }
+      if (allActive.length > 0) {
         return res.status(409).json({ error: 'A plan is already active' });
       }
 
-      const weakness = await computePillarWeakness(userId);
-      if (!weakness || weakness.weaknessCount < 5) {
-        return res.status(400).json({ error: 'Plan not yet unlocked (need 5 weakness days)' });
-      }
-
-      // For admin with an existing plan, make sure we're not re-activating the same pillar
-      if (existing && isAdminActivate && existing.pillar === weakness.pillar) {
-        return res.status(409).json({ error: `${weakness.pillar} plan is already active` });
-      }
+      // weakness is no longer needed — use targetPillar directly
+      const weakness = { pillar: targetPillar, weaknessCount: 5 };
 
       // Store sleep window before generating content (so personalization picks it up)
       if (weakness.pillar === 'recovery' && (bedtime || wakeTime)) {
@@ -6628,6 +6781,64 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/improvement-plan/abandon — delete an active plan (no history recorded)
+  app.post('/api/improvement-plan/abandon', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      const { pillar } = req.body ?? {};
+      if (!pillar || !['nutrition', 'training', 'recovery'].includes(pillar)) {
+        return res.status(400).json({ error: 'Invalid pillar' });
+      }
+      await db.delete(improvementPlans)
+        .where(and(eq(improvementPlans.userId, userId), eq(improvementPlans.pillar, pillar), eq(improvementPlans.status, 'active')));
+      res.json({ ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to abandon plan', details: message });
+    }
+  });
+
+  // POST /api/improvement-plan/dev-complete — admin only, force-completes a plan for animation testing
+  app.post('/api/improvement-plan/dev-complete', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Auth required' });
+      const adminId = process.env.ADMIN_WHOOP_ID || '25283528';
+      if (userId !== `whoop_${adminId}`) return res.status(403).json({ error: 'Admin only' });
+      const { pillar } = req.body ?? {};
+      if (!pillar) return res.status(400).json({ error: 'pillar required' });
+      const active = await storage.getAllActivePlans(userId);
+      const plan = active.find((p: any) => p.pillar === pillar);
+      if (!plan) return res.status(404).json({ error: `No active ${pillar} plan` });
+      await storage.completePlan(plan.id, 8.5);
+      res.json({ ok: true, completedPlanId: plan.id });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to dev-complete plan', details: message });
+    }
+  });
+
+  // POST /api/improvement-plan/dev-expire — admin only, force-expires a plan for expiry flow testing
+  app.post('/api/improvement-plan/dev-expire', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Auth required' });
+      const adminId = process.env.ADMIN_WHOOP_ID || '25283528';
+      if (userId !== `whoop_${adminId}`) return res.status(403).json({ error: 'Admin only' });
+      const { pillar } = req.body ?? {};
+      if (!pillar) return res.status(400).json({ error: 'pillar required' });
+      const active = await storage.getAllActivePlans(userId);
+      const plan = active.find((p: any) => p.pillar === pillar);
+      if (!plan) return res.status(404).json({ error: `No active ${pillar} plan` });
+      await storage.expirePlan(plan.id, 6.4); // test avg
+      res.json({ ok: true, expiredPlanId: plan.id });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to dev-expire plan', details: message });
+    }
+  });
+
   // GET /api/improvement-plan/content?pillar=nutrition — personalized plan content
   app.get('/api/improvement-plan/content', requireJWTAuth, async (req, res) => {
     const { pillar } = req.query;
@@ -6662,13 +6873,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ]);
 
       // Re-seed if habits are missing or don't match the expected static set
-      const staticHabits = STATIC_PLAN_HABITS[activePlan.pillar] ?? [];
+      // For training plans, accept any of the three plan-type habit sets
+      let staticHabitsForReseed = STATIC_PLAN_HABITS[activePlan.pillar] ?? [];
       const currentKeys = new Set(habits.map(h => h.habitKey));
-      const needsReseed = staticHabits.length > 0 && (habits.length === 0 || !staticHabits.every(h => currentKeys.has(h.id)));
+      let needsReseed: boolean;
+      if (activePlan.pillar === 'training' && habits.length > 0) {
+        // Accept habits from any training plan type — don't overwrite specialised sets
+        const allTrainingIds = new Set([
+          ...STATIC_PLAN_HABITS.training_consistency.map(h => h.id),
+          ...STATIC_PLAN_HABITS.training_load_management.map(h => h.id),
+          ...STATIC_PLAN_HABITS.training_alignment.map(h => h.id),
+        ]);
+        needsReseed = !habits.every(h => allTrainingIds.has(h.habitKey));
+      } else {
+        needsReseed = staticHabitsForReseed.length > 0 && (habits.length === 0 || !staticHabitsForReseed.every(h => currentKeys.has(h.id)));
+      }
       if (needsReseed) {
         // Remove any stale habits and insert the canonical static set
         await db.delete(planHabitsTable).where(eq(planHabitsTable.planId, activePlan.id));
-        await storage.savePlanHabits(userId, activePlan.id, staticHabits.map(h => ({ habitKey: h.id, label: h.label, description: h.description })));
+        await storage.savePlanHabits(userId, activePlan.id, staticHabitsForReseed.map(h => ({ habitKey: h.id, label: h.label, description: h.description })));
         habits = await storage.getPlanHabits(activePlan.id);
         // Refresh checkins since habit keys may have changed
         checkins = await storage.getHabitCheckinsByDate(userId, date);
@@ -6712,12 +6935,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
-      const { timingMode, windows, preferences, allergies, previousPlan } = req.body;
-      if (!timingMode || !['flexible', 'fixed'].includes(timingMode)) {
-        return res.status(400).json({ error: 'timingMode must be "flexible" or "fixed"' });
-      }
+      const { times, preferences, allergies, previousPlan } = req.body;
 
-      // Get active plan + its habits
+      // Get active nutrition plan + its habits
       const activePlan = await storage.getActivePlan(userId);
       if (!activePlan) return res.status(400).json({ error: 'No active improvement plan' });
 
@@ -6737,8 +6957,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const mealPlan = await openAIService.generateFitCookMealPlan({
         planHabits,
-        timingMode,
-        windows: timingMode === 'fixed' ? windows : undefined,
+        times: times || undefined,
         preferences: preferences || undefined,
         allergies: allergies || undefined,
         previousPlan: previousPlan || undefined,
@@ -6808,6 +7027,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[FITCOOK GROCERIES] error:', message);
       res.status(500).json({ error: 'Failed to generate grocery list', details: message });
+    }
+  });
+
+  // POST /api/improvement-plan/routines — generate a morning or wind-down recovery routine
+  app.post('/api/improvement-plan/routines', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const { type, bedtime, wakeTime, variant } = req.body ?? {};
+      if (!type || !['morning', 'winddown'].includes(type)) {
+        return res.status(400).json({ error: 'type must be "morning" or "winddown"' });
+      }
+      if (!bedtime || !wakeTime) {
+        return res.status(400).json({ error: 'bedtime and wakeTime are required' });
+      }
+
+      const routine = await openAIService.generateRecoveryRoutine({ type, bedtime, wakeTime, variant });
+      res.json({ routine });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[RECOVERY ROUTINES] error:', message);
+      res.status(500).json({ error: 'Failed to generate routine', details: message });
+    }
+  });
+
+  // POST /api/improvement-plan/training-session — generate a single training session
+  app.post('/api/improvement-plan/training-session', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const { goal, direction, variant } = req.body ?? {};
+      const validGoals = ['Upper body strength', 'Lower body strength', 'Upper body explosiveness', 'Lower body explosiveness', 'Endurance', 'Core / mobility', 'Recovery / Light Movement'];
+      if (!goal || !validGoals.includes(goal)) {
+        return res.status(400).json({ error: `goal must be one of: ${validGoals.join(', ')}` });
+      }
+
+      // Pull user context for personalisation (injury, experience, sport)
+      const ctx = await storage.getUserContext(userId).catch(() => undefined);
+      let injuryContext: string | undefined;
+      if (ctx?.injuryType) {
+        const parts = [ctx.injuryType];
+        if (ctx.bodyRegion) parts.push(ctx.bodyRegion);
+        if (ctx.rehabStage) parts.push(`rehab: ${ctx.rehabStage}`);
+        injuryContext = parts.join(', ');
+      }
+
+      const session = await openAIService.generateTrainingSession({
+        goal,
+        direction: direction || undefined,
+        variant: variant || 'A',
+        injuryContext,
+        sessionsPerWeek: ctx?.trainingSessionsPerWeek || undefined,
+        sportSpecific: ctx?.sportSpecific || undefined,
+        tier2Phase: ctx?.tier2Phase || undefined,
+      });
+
+      res.json({ session });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[TRAINING SESSION] error:', message);
+      res.status(500).json({ error: 'Failed to generate training session', details: message });
     }
   });
 
