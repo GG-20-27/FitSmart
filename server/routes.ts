@@ -1605,11 +1605,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         id: whoopUserId,
         email: userEmail,
         whoopUserId: userProfile.user_id.toString(),
-        role: isAdmin ? 'admin' : 'user'
+        role: isAdmin ? 'admin' : 'user',
+        authProvider: 'whoop' as const,
+        dataSource: 'whoop' as const,
       };
-      
+
       console.log(`[WHOOP AUTH] User role assignment: ${isAdmin ? 'admin' : 'user'} (Admin WHOOP ID: ${adminWhoopId})`);
-      
+
       // Insert or update user in database with detailed logging
       console.log(`[WHOOP AUTH] Attempting to upsert user:`, userData);
       try {
@@ -1620,11 +1622,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await db.insert(users).values(userData);
           console.log(`[WHOOP AUTH] New user created in database: ${whoopUserId}`);
         } else {
-          // User exists, update their information including role
+          // User exists, update their information including role and authProvider/dataSource
           await db.update(users).set({
             email: userData.email,
             whoopUserId: userData.whoopUserId,
             role: userData.role,
+            authProvider: 'whoop',
+            dataSource: 'whoop',
             updatedAt: new Date()
           }).where(eq(users.id, whoopUserId));
           console.log(`[WHOOP AUTH] Existing user updated in database: ${whoopUserId}`);
@@ -1644,7 +1648,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Generate long-lived JWT token for Custom GPT integration (10 years)
       const { generateJWT } = await import('./jwtAuth');
-      const staticJwtToken = generateJWT(whoopUserId, userData.role);
+      const staticJwtToken = generateJWT(whoopUserId, userData.role, 'whoop');
       console.log(`[WHOOP AUTH] Generated static JWT token for user: ${whoopUserId} (10-year expiration)`);
       
       // Store the token with proper expiration using WHOOP user ID, including static JWT
@@ -1793,6 +1797,114 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).send(html);
     }
   });
+
+  // ─── Email Auth ────────────────────────────────────────────────────────────
+
+  // POST /api/auth/register — create an email/password account (manual-mode user)
+  app.post('/api/auth/register', async (req, res) => {
+    try {
+      const { email, password } = req.body ?? {};
+      if (!email || !password) {
+        return res.status(400).json({ error: 'email and password are required' });
+      }
+      if (typeof password !== 'string' || password.length < 8) {
+        return res.status(400).json({ error: 'password must be at least 8 characters' });
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+
+      // Check uniqueness
+      const existing = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
+      if (existing.length > 0) {
+        return res.status(409).json({ error: 'An account with this email already exists' });
+      }
+
+      const bcrypt = await import('bcrypt');
+      const passwordHash = await bcrypt.hash(password, 12);
+      const userId = `user_${crypto.randomUUID()}`;
+
+      await db.insert(users).values({
+        id: userId,
+        email: normalizedEmail,
+        whoopUserId: null,
+        role: 'user',
+        authProvider: 'email',
+        dataSource: 'manual',
+        passwordHash,
+      });
+      console.log(`[EMAIL AUTH] New user registered: ${userId}`);
+
+      const { generateJWT } = await import('./jwtAuth');
+      const token = generateJWT(userId, 'user', 'manual');
+
+      res.json({ token, userId, dataSource: 'manual' });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[EMAIL AUTH] Register error:', message);
+      res.status(500).json({ error: 'Registration failed', details: message });
+    }
+  });
+
+  // POST /api/auth/login — sign in with email + password
+  app.post('/api/auth/login', async (req, res) => {
+    try {
+      const { email, password } = req.body ?? {};
+      if (!email || !password) {
+        return res.status(400).json({ error: 'email and password are required' });
+      }
+
+      const normalizedEmail = email.trim().toLowerCase();
+      const found = await db.select().from(users).where(eq(users.email, normalizedEmail)).limit(1);
+      const user = found[0];
+
+      if (!user || user.authProvider !== 'email' || !user.passwordHash) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      const bcrypt = await import('bcrypt');
+      const valid = await bcrypt.compare(password, user.passwordHash);
+      if (!valid) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      console.log(`[EMAIL AUTH] User signed in: ${user.id}`);
+      const { generateJWT } = await import('./jwtAuth');
+      const token = generateJWT(user.id, user.role, user.dataSource);
+
+      res.json({ token, userId: user.id, dataSource: user.dataSource });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[EMAIL AUTH] Login error:', message);
+      res.status(500).json({ error: 'Login failed', details: message });
+    }
+  });
+
+  // GET /api/auth/me — return current user info
+  app.get('/api/auth/me', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+
+      const found = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      const user = found[0];
+      if (!user) return res.status(404).json({ error: 'User not found' });
+
+      res.json({
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        role: user.role,
+        authProvider: user.authProvider,
+        dataSource: user.dataSource,
+        whoopConnected: !!user.whoopUserId,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      res.status(500).json({ error: 'Failed to fetch user', details: message });
+    }
+  });
+
+  // ─── End Email Auth ─────────────────────────────────────────────────────────
 
   // WHOOP raw data debug endpoint (JWT-authenticated)
   app.get('/api/whoop/raw', requireJWTAuth, async (req, res) => {
@@ -2824,7 +2936,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { generateJWT } = await import('./jwtAuth');
       const requestedUserId = req.query.userId as string;
       const testUserId = requestedUserId ? `whoop_${requestedUserId}` : 'whoop_99999999';
-      const testToken = generateJWT(testUserId, 'user');
+      const testToken = generateJWT(testUserId, 'user', 'whoop');
       
       console.log(`[TEST] Generated JWT token for test user: ${testUserId}`);
       res.json({ 
@@ -2883,7 +2995,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Generate JWT token for authentication with role
       const { generateJWT } = await import('./jwtAuth');
-      const authToken = generateJWT(testUserId, userData.role);
+      const authToken = generateJWT(testUserId, userData.role, 'whoop');
       
       console.log(`[TEST] JWT token generated for simulated user: ${testUserId}`);
       

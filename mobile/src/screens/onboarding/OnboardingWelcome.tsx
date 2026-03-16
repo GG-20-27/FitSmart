@@ -2,9 +2,12 @@ import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Alert, ActivityIndicator, Image } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Clipboard from 'expo-clipboard';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radii, typography } from '../../theme';
 import { API_BASE_URL, setAuthToken } from '../../api/client';
+import { OnboardingStackParamList } from '../../navigation/OnboardingNavigator';
 
 interface FeatureItem {
   icon: keyof typeof Ionicons.glyphMap;
@@ -35,7 +38,10 @@ const features: FeatureItem[] = [
   },
 ];
 
+type NavigationProp = NativeStackNavigationProp<OnboardingStackParamList>;
+
 export default function OnboardingWelcome() {
+  const navigation = useNavigation<NavigationProp>();
   const [isLoading, setIsLoading] = useState(false);
 
   const handleConnectWhoop = async () => {
@@ -155,7 +161,7 @@ export default function OnboardingWelcome() {
         {/* Spacer */}
         <View style={styles.spacer} />
 
-        {/* Connect Button */}
+        {/* WHOOP login */}
         <TouchableOpacity
           style={[styles.connectButton, isLoading && styles.connectButtonDisabled]}
           onPress={handleConnectWhoop}
@@ -167,15 +173,32 @@ export default function OnboardingWelcome() {
             <Ionicons name="heart-outline" size={24} color={colors.bgPrimary} />
           )}
           <Text style={styles.connectButtonText}>
-            {isLoading ? 'Connecting...' : 'Connect with WHOOP'}
+            {isLoading ? 'Connecting...' : 'Continue with WHOOP'}
           </Text>
+        </TouchableOpacity>
+
+        {/* Divider */}
+        <View style={styles.dividerRow}>
+          <View style={styles.dividerLine} />
+          <Text style={styles.dividerText}>or</Text>
+          <View style={styles.dividerLine} />
+        </View>
+
+        {/* Email login */}
+        <TouchableOpacity
+          style={styles.emailButton}
+          onPress={() => navigation.navigate('OnboardingEmailAuth')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="mail-outline" size={22} color={colors.accent} />
+          <Text style={styles.emailButtonText}>Continue with Email</Text>
         </TouchableOpacity>
 
         {/* Security Note */}
         <View style={styles.securityNote}>
           <Ionicons name="lock-closed-outline" size={14} color={colors.textMuted} />
           <Text style={styles.securityText}>
-            Secure WHOOP login — your data stays private
+            Your data stays private
           </Text>
         </View>
 
@@ -295,5 +318,37 @@ const styles = StyleSheet.create({
   pasteButtonText: {
     ...typography.small,
     color: colors.textMuted,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.surfaceMute,
+  },
+  dividerText: {
+    ...typography.small,
+    color: colors.textMuted,
+  },
+  emailButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+    paddingVertical: spacing.lg,
+    borderRadius: radii.lg,
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  emailButtonText: {
+    ...typography.title,
+    color: colors.accent,
+    fontSize: 17,
+    fontWeight: '600',
   },
 });

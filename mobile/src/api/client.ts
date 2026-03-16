@@ -87,17 +87,36 @@ export async function getAuthToken(): Promise<string | null> {
   }
 }
 
-/** Decode the JWT payload (no signature verification — for UI feature flags only). */
+/** Decode the JWT payload without signature verification (UI feature flags only). */
+function decodeJWTPayload(token: string): Record<string, any> | null {
+  try {
+    const part = token.split('.')[1];
+    if (!part) return null;
+    return JSON.parse(atob(part.replace(/-/g, '+').replace(/_/g, '/')));
+  } catch {
+    return null;
+  }
+}
+
 export async function getIsAdmin(): Promise<boolean> {
   try {
     const token = await getAuthToken();
     if (!token) return false;
-    const payload = token.split('.')[1];
-    if (!payload) return false;
-    const decoded = JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-    return decoded?.role === 'admin';
+    return decodeJWTPayload(token)?.role === 'admin';
   } catch {
     return false;
+  }
+}
+
+/** Returns "whoop" | "manual". Defaults to "whoop" for tokens without dataSource (backward compat). */
+export async function getDataSource(): Promise<'whoop' | 'manual'> {
+  try {
+    const token = await getAuthToken();
+    if (!token) return 'whoop';
+    const ds = decodeJWTPayload(token)?.dataSource;
+    return ds === 'manual' ? 'manual' : 'whoop';
+  } catch {
+    return 'whoop';
   }
 }
 

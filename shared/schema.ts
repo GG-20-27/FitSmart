@@ -2,13 +2,16 @@ import { pgTable, text, serial, integer, timestamp, boolean, real, jsonb } from 
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// WHOOP OAuth-based multi-user support with text user IDs
+// FitSmart internal user model — supports WHOOP and email auth
 export const users = pgTable("users", {
-  id: text("id").primaryKey(), // WHOOP user ID like "whoop_25283528"
+  id: text("id").primaryKey(), // "whoop_25283528" for WHOOP users, "user_<uuid>" for email users
   email: text("email").notNull().unique(),
-  whoopUserId: text("whoop_user_id").notNull(), // Original WHOOP numeric ID
-  displayName: text("display_name"), // Optional display name for admin to set
-  role: text("role").notNull().default("user"), // "user" or "admin"
+  whoopUserId: text("whoop_user_id"),           // Nullable — only set for WHOOP users
+  displayName: text("display_name"),
+  role: text("role").notNull().default("user"), // "user" | "admin"
+  authProvider: text("auth_provider").notNull().default("whoop"), // "whoop" | "email"
+  dataSource: text("data_source").notNull().default("whoop"),     // "whoop" | "manual"
+  passwordHash: text("password_hash"),          // Only set for email auth users
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
