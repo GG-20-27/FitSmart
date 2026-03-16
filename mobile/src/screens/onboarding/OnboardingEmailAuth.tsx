@@ -13,12 +13,16 @@ import {
   Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radii, typography } from '../../theme';
 import { API_BASE_URL, setAuthToken } from '../../api/client';
+import { OnboardingStackParamList } from '../../navigation/OnboardingNavigator';
+
+type NavigationProp = NativeStackNavigationProp<OnboardingStackParamList>;
 
 export default function OnboardingEmailAuth() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NavigationProp>();
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -123,14 +127,15 @@ export default function OnboardingEmailAuth() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoComplete="email"
+                textContentType="emailAddress"
               />
             </View>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Password</Text>
-              <View style={styles.passwordRow}>
+              <View style={styles.passwordWrapper}>
                 <TextInput
-                  style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  style={[styles.input, { paddingRight: 48 }]}
                   value={password}
                   onChangeText={setPassword}
                   placeholder={mode === 'register' ? 'At least 8 characters' : 'Your password'}
@@ -139,6 +144,7 @@ export default function OnboardingEmailAuth() {
                   autoCapitalize="none"
                   autoCorrect={false}
                   autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                  textContentType={mode === 'register' ? 'newPassword' : 'password'}
                 />
                 <TouchableOpacity
                   style={styles.showPasswordBtn}
@@ -168,6 +174,16 @@ export default function OnboardingEmailAuth() {
               )}
             </TouchableOpacity>
           </View>
+
+          {/* Forgot password — only in signin mode */}
+          {mode === 'signin' && (
+            <TouchableOpacity
+              style={styles.forgotRow}
+              onPress={() => navigation.navigate('ForgotPassword')}
+            >
+              <Text style={styles.forgotText}>Forgot password?</Text>
+            </TouchableOpacity>
+          )}
 
           {/* Toggle mode */}
           <View style={styles.toggleRow}>
@@ -247,13 +263,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 0,
   },
-  passwordRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+  passwordWrapper: {
+    position: 'relative',
   },
   showPasswordBtn: {
-    padding: spacing.sm,
+    position: 'absolute',
+    right: spacing.sm,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
   },
   submitBtn: {
     backgroundColor: colors.accent,
@@ -269,6 +288,16 @@ const styles = StyleSheet.create({
     ...typography.title,
     color: colors.bgPrimary,
     fontSize: 17,
+    fontWeight: '600',
+  },
+  forgotRow: {
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+  },
+  forgotText: {
+    ...typography.body,
+    color: colors.accent,
+    fontSize: 14,
     fontWeight: '600',
   },
   toggleRow: {

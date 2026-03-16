@@ -25,6 +25,7 @@ import { db } from './db';
 import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, whoopData as whoopDataTable, trainingData as trainingDataTable, meals as mealsTable, planHabits as planHabitsTable, habitCheckins as habitCheckinsTable, improvementPlans } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
 import { eq, desc, sql, and, gte, lt } from 'drizzle-orm';
+import { Resend } from 'resend';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -311,16 +312,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
   console.log('curl -X POST -H "Authorization: Bearer <jwt>" -H "Content-Type: application/json" -d \'{"messages":[{"role":"user","content":"Hello"}]}\' http://localhost:3001/api/chat');
   console.log('');
 
-  // Remove email/password authentication - redirect to WHOOP OAuth
-  console.log('[ROUTE] GET /api/auth/login');
-  app.get('/api/auth/login', (req, res) => {
-    res.redirect('/api/whoop/login');
-  });
-  
-  // Legacy POST login redirects to WHOOP OAuth
-  console.log('[ROUTE] POST /api/auth/login');
-  app.post('/api/auth/login', (req, res) => {
-    res.redirect('/api/whoop/login');
+  // Email auth endpoints (register/login/me) are registered later in the file
+
+  // GET /reset-password — web redirect page that opens the app via deep link
+  // Linked from password reset emails (HTTPS links work; direct fitsmart:// links don't in email clients)
+  app.get('/reset-password', (req, res) => {
+    const token = req.query.token as string;
+    if (!token) return res.status(400).send('Missing token');
+
+    const deepLink = `fitsmart://reset-password?token=${encodeURIComponent(token)}`;
+
+    res.send(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Reset your FitSmart password</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .card{background:#161b22;border-radius:16px;padding:40px 32px;max-width:420px;width:100%;text-align:center}
+    .icon{font-size:48px;margin-bottom:16px}
+    h1{font-size:22px;font-weight:700;margin-bottom:10px}
+    p{color:#8b949e;font-size:15px;line-height:1.5;margin-bottom:28px}
+    a.btn{display:block;background:#27e9b5;color:#0d1117;font-weight:700;font-size:17px;padding:16px 24px;border-radius:12px;text-decoration:none}
+    .note{margin-top:20px;font-size:13px;color:#555}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🔒</div>
+    <h1>Reset your password</h1>
+    <p>Tap below to open FitSmart and set a new password.</p>
+    <a href="${deepLink}" class="btn">Open FitSmart</a>
+    <p class="note">Link expires in 1 hour.</p>
+  </div>
+  <script>
+    // Auto-open the app after a short delay
+    setTimeout(function() { window.location.href = '${deepLink}'; }, 300);
+  </script>
+</body>
+</html>`);
   });
 
 
@@ -330,47 +362,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ message: 'Logout successful' });
   });
 
-  console.log('[ROUTE] GET /api/auth/me');
-  app.get('/api/auth/me', async (req, res) => {
-    try {
-      const whoopUserId = getCurrentUserId(req);
-      console.log(`[AUTH ME] Checking JWT authentication, userId: ${whoopUserId}`);
-      console.log(`[AUTH ME] Headers:`, req.headers.authorization ? 'Bearer token present' : 'No bearer token');
-      
-      if (!whoopUserId) {
-        console.log(`[AUTH ME] No userId found in JWT token - authentication required`);
-        return res.status(401).json({ 
-          error: 'Authentication required',
-          message: 'Please authenticate with WHOOP to access this resource'
-        });
-      }
-      
-      // Get user role from JWT token
-      const authHeader = req.headers.authorization;
-      let userRole = 'user'; // default role
-      
-      if (authHeader && authHeader.startsWith('Bearer ')) {
-        try {
-          const token = authHeader.split(' ')[1];
-          const { verifyJWT } = await import('./jwtAuth');
-          const payload = verifyJWT(token);
-
-          if (payload) {
-          userRole = payload.role || 'user';
-          }
-        } catch (jwtError) {
-          const message = jwtError instanceof Error ? jwtError.message : String(jwtError);
-          console.log(`[AUTH ME] JWT verification failed:`, message);
-        }
-      }
-      
-      console.log(`[AUTH ME] Authentication successful for user: ${whoopUserId} with role: ${userRole}`);
-      res.json({ userId: whoopUserId, role: userRole });
-    } catch (error) {
-      console.error('Get user error:', error);
-      res.status(500).json({ error: 'Failed to get user information' });
-    }
-  });
+  // GET /api/auth/me is registered later in the file (email auth section)
 
   // User profile endpoint
   console.log('[ROUTE] GET /api/users/me');
@@ -489,11 +481,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Remove registration - users are created via WHOOP OAuth only
-  console.log('[ROUTE] POST /api/auth/register');
-  app.post('/api/auth/register', (req, res) => {
-    res.redirect('/api/whoop/login');
-  });
+  // POST /api/auth/register — handled later in the email auth section
 
   // Admin routes for multi-user management (admin only)
   console.log('[ROUTE] POST /api/admin/users');
@@ -1901,6 +1889,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: 'Failed to fetch user', details: message });
+    }
+  });
+
+  // POST /api/auth/forgot-password — request a password reset email
+  app.post('/api/auth/forgot-password', async (req, res) => {
+    try {
+      const { email } = req.body ?? {};
+      if (!email || typeof email !== 'string') {
+        return res.status(400).json({ error: 'Email is required' });
+      }
+
+      const found = await db.select().from(users)
+        .where(eq(users.email, email.trim().toLowerCase()))
+        .limit(1);
+      const user = found[0];
+
+      // Always return ok — never leak whether the email exists
+      if (!user || user.authProvider !== 'email') {
+        return res.json({ ok: true });
+      }
+
+      // Generate a random token and store it with 1-hour expiry
+      const { randomBytes } = await import('crypto');
+      const rawToken = randomBytes(32).toString('hex');
+      const expiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+      await db.update(users)
+        .set({ resetToken: rawToken, resetTokenExpiry: expiry })
+        .where(eq(users.id, user.id));
+
+      // Send reset email via Resend
+      const resendKey = process.env.RESEND_API_KEY;
+      if (!resendKey) {
+        console.error('[FORGOT PW] RESEND_API_KEY not set — cannot send email');
+        return res.json({ ok: true });
+      }
+
+      const resendClient = new Resend(resendKey);
+      const serverUrl = process.env.SERVER_URL || 'https://fitsmart-production.up.railway.app';
+      const resetLink = `${serverUrl}/reset-password?token=${rawToken}`;
+      const fromAddress = process.env.RESEND_FROM_EMAIL || 'onboarding@resend.dev';
+
+      const { data: emailData, error: emailError } = await resendClient.emails.send({
+        from: fromAddress,
+        to: user.email,
+        subject: 'Reset your FitSmart password',
+        html: `
+          <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0d1117;color:#fff;border-radius:12px">
+            <h2 style="margin-top:0;color:#27e9b5">Reset your password</h2>
+            <p>You requested a password reset for your FitSmart account.</p>
+            <p>Tap the button below to set a new password. This link expires in <strong>1 hour</strong>.</p>
+            <a href="${resetLink}" style="display:inline-block;margin:16px 0;padding:14px 28px;background:#27e9b5;color:#0d1117;border-radius:8px;text-decoration:none;font-weight:600">
+              Reset Password
+            </a>
+            <p style="color:#888;font-size:13px;margin-top:24px">
+              If you didn't request this, ignore this email — your password won't change.
+            </p>
+          </div>
+        `,
+      });
+
+      if (emailError) {
+        console.error('[FORGOT PW] Resend error:', JSON.stringify(emailError));
+      } else {
+        console.log(`[FORGOT PW] Reset email sent to ${user.email}, id: ${emailData?.id}`);
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FORGOT PW] Error:', message);
+      res.status(500).json({ error: 'Failed to send reset email' });
+    }
+  });
+
+  // POST /api/auth/reset-password — set new password using reset token
+  app.post('/api/auth/reset-password', async (req, res) => {
+    try {
+      const { token, newPassword } = req.body ?? {};
+      if (!token || typeof token !== 'string') {
+        return res.status(400).json({ error: 'Reset token is required' });
+      }
+      if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 characters' });
+      }
+
+      const found = await db.select().from(users)
+        .where(eq(users.resetToken, token))
+        .limit(1);
+      const user = found[0];
+
+      if (!user || !user.resetTokenExpiry || user.resetTokenExpiry < new Date()) {
+        return res.status(400).json({ error: 'Reset link is invalid or has expired' });
+      }
+
+      const bcrypt = await import('bcrypt');
+      const passwordHash = await bcrypt.default.hash(newPassword, 12);
+
+      await db.update(users)
+        .set({ passwordHash, resetToken: null, resetTokenExpiry: null })
+        .where(eq(users.id, user.id));
+
+      console.log(`[RESET PW] Password updated for user ${user.id}`);
+      res.json({ ok: true });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[RESET PW] Error:', message);
+      res.status(500).json({ error: 'Failed to reset password' });
     }
   });
 

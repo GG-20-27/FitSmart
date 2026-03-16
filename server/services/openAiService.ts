@@ -1776,11 +1776,10 @@ IMPORTANT: Commit fully to the "${selectedTheme.name}" theme from the first word
 
   async generateFitCookMealPlan(params: {
     planHabits: string[];
-    timingMode: 'flexible' | 'fixed';
-    windows?: {
-      breakfast: { from: string; until: string };
-      lunch: { from: string; until: string };
-      dinner: { from: string; until: string };
+    times?: {
+      breakfast: string;
+      lunch: string;
+      dinner: string;
     };
     preferences?: string;
     allergies?: string;
@@ -1803,9 +1802,17 @@ IMPORTANT: Commit fully to the "${selectedTheme.name}" theme from the first word
     const dietPhase = userCtx?.dietPhase ?? 'Maintenance';
     const goal = userCtx?.tier1Goal ?? 'Balanced Performance';
 
-    const timingInstruction = params.timingMode === 'fixed' && params.windows
-      ? `Fixed: Breakfast ${params.windows.breakfast.from}, Lunch ${params.windows.lunch.from}, Snack if gap >5h, Dinner ${params.windows.dinner.from}.`
-      : 'Flexible: suggest times keeping all gaps ≤5h.';
+    const timingInstruction = (() => {
+      if (!params.times) return 'Flexible: suggest times keeping all gaps ≤5h.';
+      const { breakfast, lunch, dinner } = params.times;
+      const toMins = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
+      const toTime = (m: number) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+      const bm = toMins(breakfast), lm = toMins(lunch), dm = toMins(dinner);
+      const snackTime = (lm - bm >= dm - lm)
+        ? toTime(Math.round(bm + (lm - bm) / 2))
+        : toTime(Math.round(lm + (dm - lm) / 2));
+      return `Fixed: Breakfast ${breakfast}, Lunch ${lunch}, Snack ${snackTime} (biggest gap), Dinner ${dinner}.`;
+    })();
 
     const ctxBits: string[] = [`Diet: ${dietPhase}`, `Goal: ${goal}`];
     if (userCtx?.trainingPhase) ctxBits.push(`Training: ${userCtx.trainingPhase}`);
@@ -1849,7 +1856,7 @@ Completes today's plan habits:
 ✓ {habit}
 
 Breakfast {emoji} ({time})
-{one-line meal, household measures, no-cook or ≤5 min}
+{one-line meal, household measures}
 Prep: {N} min
 Swap → {one alternative}
 
@@ -1883,7 +1890,7 @@ RULES — never break:
 1. 200 words MAX.
 2. NO markdown — no ##, no **, no *.
 3. Lunch + dinner share base ingredients (cook once, eat twice).
-4. Breakfast: no-cook or ≤5 min only.
+4. Prep times must be realistic: Breakfast 10–15 min, Lunch 20–30 min, Snack 0–5 min, Dinner 5–10 min (reheating leftovers).
 5. Snack: grab-and-go, no cooking.
 6. Exactly 1 emoji per meal header (use 🥣🍳🥚🍲🥗🍛🌮🍱🥙🍎🥤). Only 💧 and 🛒 for their sections.
 7. No gram weights — household measures only.
@@ -1969,7 +1976,7 @@ ${params.mealType} {emoji} (${params.timing})
 {one-line meal, household measures}
 Prep: {N} min${params.mealType === 'Lunch' ? '\nPrep tip → Make 2 portions for dinner' : ''}
 Swap → {one alternative}
-- NO markdown. 1 emoji only. Household measures, no gram weights.${params.mealType === 'Breakfast' ? ' No-cook or ≤5 min.' : ''}${params.mealType === 'Snack' ? ' Grab-and-go, no cooking.' : ''}
+- NO markdown. 1 emoji only. Household measures, no gram weights. Realistic prep time: Breakfast 10–15 min, Lunch 20–30 min, Snack 0–5 min, Dinner 5–10 min.${params.mealType === 'Snack' ? ' Grab-and-go, no cooking.' : ''}
 - Use a DIFFERENT protein, carb, and format from the current meal.${params.proteinTarget ? `\n- Target ~${Math.round(params.proteinTarget / 4)}g protein for this meal.` : ''}${params.preferences ? `\n- Preferences: ${params.preferences}` : ''}${params.allergies ? `\n- Allergies: ${params.allergies}` : ''}`;
 
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1983,9 +1990,280 @@ Swap → {one alternative}
   }
 
   /**
+   * Generate a recovery routine (morning or wind-down) based on the user's sleep window.
+   * Returns a formatted routine string with minute-by-minute timeline.
+   */
+  async generateRecoveryRoutine(params: {
+    type: 'morning' | 'winddown';
+    bedtime: string;   // e.g. "22:30"
+    wakeTime: string;  // e.g. "07:00"
+    variant?: string;  // 'A' | 'B' | 'C' | 'D'
+  }): Promise<string> {
+    if (!this.apiKey) throw new Error('OpenAI API key not configured');
+
+    const MORNING_VARIANTS: Record<string, string> = {
+      A: `Template: Light Activation
+Steps (in order): Wake → Hydrate → Sunlight → Mobility → Walk
+Coaching cues: Wake: "Sit up and open your eyes slowly." / Hydrate: "Drink a full glass of water." / Sunlight: "Open curtains or step outside." / Mobility: "Neck rolls, shoulder circles, bodyweight squats." / Walk: "Short relaxed walk outside."
+Emojis: 🌅 🌊 ☀️ 🤸 🚶`,
+      B: `Template: Movement Start
+Steps (in order): Wake → Hydrate → Mobility → Walk → Breakfast
+Coaching cues: Wake: "Sit up and take 3 deep breaths." / Hydrate: "Drink a full glass of water." / Mobility: "Hip circles, bodyweight squats, arm swings." / Walk: "Brisk walk to get blood moving." / Breakfast: "Prepare and eat a light breakfast."
+Emojis: 🌅 💧 🤸 🚶 🍳`,
+      C: `Template: Calm Start
+Steps (in order): Wake → Hydrate → Sunlight → Breathing → Stretching
+Coaching cues: Wake: "Sit up slowly, relax shoulders." / Hydrate: "Drink a full glass of water." / Sunlight: "Sit by a window or step outside." / Breathing: "Inhale 4s, exhale 6s — repeat 5 times." / Stretching: "Gentle full-body stretches on the floor."
+Emojis: 🌅 💧 ☀️ 🌬️ 🧘`,
+      D: `Template: Energy Boost
+Steps (in order): Wake → Hydrate → Cold splash → Mobility → Walk
+Coaching cues: Wake: "Sit up and stretch arms overhead." / Hydrate: "Drink a full glass of water." / Cold splash: "Splash cold water on face and wrists." / Mobility: "Jumping jacks, squats, arm circles." / Walk: "Brisk outdoor walk."
+Emojis: 🌅 💧 💦 🤸 🚶`,
+    };
+
+    const WINDDOWN_VARIANTS: Record<string, string> = {
+      A: `Template: Classic Wind-Down (30 min total)
+Steps with durations: Screens off (5 min) → Hygiene (5 min) → Prep tomorrow (5 min) → Breathing (5 min) → Into bed (10 min)
+Coaching cues: Screens off: "Put your phone in another room." / Hygiene: "Brush teeth and wash face." / Prep tomorrow: "Set out clothes and check your morning plan." / Breathing: "Inhale 4s, exhale 6s — 5 slow cycles." / Into bed: "Get into bed and relax fully."
+Emojis: 📵 🪥 📋 🌬️ 🛏️`,
+      B: `Template: Reading Wind-Down (30 min total)
+Steps with durations: Screens off (5 min) → Hygiene (5 min) → Read (12 min) → Breathing (3 min) → Lights out (5 min)
+Coaching cues: Screens off: "Put your phone in another room." / Hygiene: "Brush teeth and wash face." / Read: "Read a physical book under soft light." / Breathing: "Inhale 4s, exhale 6s — 3 slow cycles." / Lights out: "Close the book, turn off the light, close your eyes."
+Emojis: 📵 🪥 📖 🌬️ 💡`,
+      C: `Template: Relaxation Wind-Down (30 min total)
+Steps with durations: Screens off (5 min) → Hygiene (5 min) → Stretching (8 min) → Body scan (7 min) → Into bed (5 min)
+Coaching cues: Screens off: "Put your phone in another room." / Hygiene: "Brush teeth and wash face." / Stretching: "Gentle standing or floor stretches." / Body scan: "Lie down, relax each muscle group from toes to head." / Into bed: "Get into bed and close your eyes."
+Emojis: 📵 🪥 🧘 🫁 🛏️`,
+      D: `Template: Minimal Reset (30 min total)
+Steps with durations: Screens off (5 min) → Hygiene (5 min) → Prep tomorrow (8 min) → Breathing (7 min) → Into bed (5 min)
+Coaching cues: Screens off: "Put your phone in another room." / Hygiene: "Brush teeth quickly." / Prep tomorrow: "Pack bag, set alarm, prepare anything for morning." / Breathing: "Inhale 4s, exhale 6s — 6 slow cycles." / Into bed: "Get straight into bed."
+Emojis: 📵 🪥 🎒 🌬️ 🛏️`,
+    };
+
+    const variantKey = (params.variant ?? 'A').toUpperCase();
+    const templateBlock = params.type === 'morning'
+      ? (MORNING_VARIANTS[variantKey] ?? MORNING_VARIANTS['A'])
+      : (WINDDOWN_VARIANTS[variantKey] ?? WINDDOWN_VARIANTS['A']);
+
+    const isMorning = params.type === 'morning';
+    const anchorTime = isMorning ? params.wakeTime : params.bedtime;
+    const toMinsLocal = (t: string) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
+    const toTimeLocal = (m: number) => `${String(Math.floor(((m % 1440) + 1440) % 1440 / 60)).padStart(2, '0')}:${String(((m % 1440) + 1440) % 1440 % 60).padStart(2, '0')}`;
+    const windDownStartTime = !isMorning ? toTimeLocal(toMinsLocal(params.bedtime) - 30) : '';
+
+    const sharedFormat = `
+REQUIRED FORMAT — output EXACTLY this structure:
+
+Total time: X min
+
+HH:MM | {emoji} {name} ({X} min)
+{one coaching instruction ≤8 words.}
+
+(repeat for each step, no blank line between action and instruction)
+
+Why this helps:
+- {short benefit ≤12 words}
+- {short benefit ≤12 words}
+- {short benefit ≤12 words}`;
+
+    const prompt = isMorning
+      ? `You are a recovery coach. Output a Morning Routine for someone waking at ${anchorTime}. Plain text only, no markdown.
+
+TEMPLATE TO FOLLOW:
+${templateBlock}
+${sharedFormat}
+
+RULES:
+- Start at ${anchorTime}. Calculate each HH:MM timestamp from the start time.
+- Follow the template steps in order. Use the coaching cues provided.
+- Exactly 4–5 steps. No more.
+- Total 15–22 minutes.
+- Do NOT add journaling, meditation apps, or phone use.`
+      : `You are a recovery coach. Output a Wind-Down Routine for someone sleeping at ${anchorTime}. Plain text only, no markdown.
+
+TEMPLATE TO FOLLOW:
+${templateBlock}
+${sharedFormat}
+
+RULES:
+- Start at ${windDownStartTime} (exactly 30 minutes before bedtime ${anchorTime}).
+- First step is always Screens Off starting at ${windDownStartTime}.
+- Last step ends exactly at ${anchorTime} (bedtime).
+- Calculate each HH:MM timestamp sequentially from ${windDownStartTime}.
+- Follow the template steps in order with the durations specified. Use the coaching cues provided.
+- Exactly 5 steps. Total exactly 30 minutes.`;
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: prompt }], max_completion_tokens: 500, temperature: 0.7 }),
+    });
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    const data = await res.json();
+    return (data.choices?.[0]?.message?.content ?? '').trim();
+  }
+
+  /**
    * Generate a categorized grocery list from a set of meal descriptions.
    * Returns lines in the format "Category: item1, item2, item3".
    */
+  /**
+   * Generate a single training session based on goal, today's direction, and user context.
+   * Returns formatted text with Warm-up / Main block / Finisher sections.
+   */
+  async generateTrainingSession(params: {
+    goal: string;
+    direction?: string;
+    variant?: string; // 'A' | 'B' | 'C' | 'D' — cycles exercise variety
+    injuryContext?: string;   // e.g. "knee injury, rehab stage: early"
+    sessionsPerWeek?: string; // e.g. "3-4" — used to infer experience level
+    sportSpecific?: string;   // e.g. "cycling" — for alignment plan context
+    tier2Phase?: string;      // e.g. "build" | "peak" | "maintenance"
+  }): Promise<string> {
+    if (!this.apiKey) throw new Error('OpenAI API key not configured');
+
+    // Variant modifiers — shift exercise emphasis for regeneration variety
+    // For Endurance variants cycle between interval, tempo, and zone 2 formats
+    // For Explosiveness variants cycle between upper/lower focus and different exercises
+    const isEndurance = params.goal === 'Endurance';
+    const isUpperExplosive = params.goal === 'Upper body explosiveness';
+    const isLowerExplosive = params.goal === 'Lower body explosiveness';
+    const isRecovery = params.goal === 'Recovery / Light Movement';
+
+    const v = params.variant ?? 'A';
+
+    // Goal-specific instructions injected into the prompt
+    let goalInstructions = '';
+
+    if (isEndurance) {
+      const enduranceFormats: Record<string, string> = {
+        A: `Format: INTERVAL SESSION
+Warm-up: 5 min easy cardio (run, bike, or row)
+Main block: 5 intervals — choose ONE modality (running, cycling, rowing, or ski erg)
+  • Each interval: 2 min hard effort, 90s easy between
+Finisher: 5 min easy cooldown walk or row
+Total time: ~30 min
+DO NOT use resistance exercises, strength movements, or circuits.`,
+        B: `Format: TEMPO BLOCK
+Warm-up: 5 min easy cardio
+Main block: One continuous 15 min tempo effort — choose ONE modality (running, cycling, rowing, or incline treadmill walk)
+Finisher: Light mobility — 2–3 stretches
+Total time: ~25 min
+DO NOT use resistance exercises or strength movements.`,
+        C: `Format: ZONE 2 SESSION
+Warm-up: 5 min easy movement
+Main block: 20–25 min steady Zone 2 effort (conversational pace) — choose ONE modality (running, cycling, rowing, brisk walking, or ski erg)
+Cooldown: Light stretch — hip flexors, calves, hamstrings
+Total time: ~35 min
+DO NOT use resistance exercises or strength movements.`,
+        D: `Format: INTERVAL SESSION (longer reps)
+Warm-up: 5 min easy cardio
+Main block: 4 intervals — choose ONE modality (running, cycling, rowing, or ski erg)
+  • Each interval: 3 min hard effort, 2 min easy between
+Finisher: 5 min easy cooldown
+Total time: ~35 min
+DO NOT use resistance exercises, strength movements, or circuits.`,
+      };
+      goalInstructions = enduranceFormats[v] ?? enduranceFormats.A;
+    } else if (isLowerExplosive) {
+      goalInstructions = `Focus: LOWER BODY EXPLOSIVENESS
+Use only lower-body explosive movements.
+Allowed exercises: box jumps, jump squats, broad jumps, kettlebell swings, banded jump squats, depth jumps, lunge jumps, single-leg bounds.
+Sets/reps: low reps (3–6), full rest 90s–2 min between sets.
+Main block: exactly 4 exercises from the list above.`;
+      if (v === 'B') goalInstructions += '\nVariant: use unilateral or single-leg variations where possible.';
+      if (v === 'C') goalInstructions += '\nVariant: use 5 exercises, reduce sets to 2 per exercise.';
+      if (v === 'D') goalInstructions += '\nVariant: contrast pairing — alternate each explosive movement with a 10s isometric hold.';
+    } else if (isUpperExplosive) {
+      goalInstructions = `Focus: UPPER BODY EXPLOSIVENESS
+Use only upper-body explosive movements.
+Allowed exercises: medicine ball chest throw, plyometric push-ups, clap push-ups, landmine push press, battle rope waves, medicine ball overhead slam, band pull-apart explosions, explosive dumbbell press.
+Sets/reps: low reps (3–5), full rest 90s–2 min between sets.
+Main block: exactly 4 exercises from the list above.`;
+      if (v === 'B') goalInstructions += '\nVariant: use alternating arms or asymmetric load variations where possible.';
+      if (v === 'C') goalInstructions += '\nVariant: use 5 exercises, reduce sets to 2 per exercise.';
+      if (v === 'D') goalInstructions += '\nVariant: contrast pairing — alternate each explosive movement with a 10s isometric hold.';
+    } else if (isRecovery) {
+      goalInstructions = `Focus: ACTIVE RECOVERY — gentle movement only, zero intensity.
+Warm-up: easy 5 min walk or light dynamic movement
+Main block: 15–20 min of ONE low-intensity continuous activity (Zone 1–2 walk, easy bike, easy row, or incline treadmill at slow pace)
+Finisher: hip mobility drills + breathing exercise (no strength, no jumps, no circuits)
+Total time: ~25–30 min
+DO NOT include any strength exercises, jumps, or high-effort movements.`;
+    } else {
+      // Strength / Core — standard variant modifiers
+      const variantInstructions: Record<string, string> = {
+        A: 'Use standard compound movements.',
+        B: 'Use alternative exercises — avoid the most common defaults (e.g. swap bench press for dips, squats for lunges).',
+        C: 'Use time-based sets (e.g. 3×45s) instead of rep-based sets where possible.',
+        D: 'Use a superset format — pair exercises into 2 supersets in the main block.',
+      };
+      goalInstructions = variantInstructions[v] ?? variantInstructions.A;
+    }
+
+    // Build context string from user data
+    const ctxParts: string[] = [];
+    if (params.injuryContext) ctxParts.push(`Injury/limitation: ${params.injuryContext}`);
+    if (params.sessionsPerWeek) {
+      const n = parseInt(params.sessionsPerWeek, 10);
+      const level = isNaN(n) ? '' : n <= 2 ? 'beginner' : n <= 4 ? 'intermediate' : 'advanced';
+      if (level) ctxParts.push(`Experience level: ${level} (trains ${params.sessionsPerWeek}×/week)`);
+    }
+    if (params.sportSpecific) ctxParts.push(`Sport/focus: ${params.sportSpecific}`);
+    if (params.tier2Phase) ctxParts.push(`Training phase: ${params.tier2Phase}`);
+    const ctxNote = ctxParts.length > 0 ? `\nUser context:\n${ctxParts.map(c => `- ${c}`).join('\n')}` : '';
+
+    const prompt = `You are a certified strength and conditioning coach. Generate ONE training session.
+
+Session goal: ${params.goal}${params.direction ? `\nToday's direction: ${params.direction}` : ''}${ctxNote}
+
+Goal-specific instructions (follow exactly):
+${goalInstructions}
+
+Output ONLY the session in this exact format — no intro, no markdown, no asterisks:
+
+Total time: ~{X} min
+
+Warm-up ({X} min)
+• {exercise} — {detail}
+• {exercise} — {detail}
+• {exercise} — {detail}
+
+Main block
+• {exercise} — {detail}
+• {exercise} — {detail}
+• {exercise} — {detail}
+• {exercise} — {detail}
+
+Finisher
+• {exercise} — {detail}
+
+Universal rules:
+- Total time 20–45 min
+- Warm-up: 3–5 min, exactly 3 items, simple activation
+- Main block: exactly 4 items following the goal-specific format above
+- Finisher: 1–2 items (omit section entirely if session is already 40+ min)
+- Use bullet points (•) for all lines
+- Each line: "• Name — detail" (em dash —)
+- No markdown, no bold, no extra headers
+- If injury context provided: avoid exercises that stress the injured area
+- If beginner: avoid technical barbell Olympic lifts
+- Keep each line very short — no extra coaching cues`;
+
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: this.textModel,
+        messages: [{ role: 'user', content: prompt }],
+        max_completion_tokens: 350,
+        temperature: 0.85,
+      }),
+    });
+    if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
+    const data = await res.json();
+    return (data.choices?.[0]?.message?.content ?? '').trim();
+  }
+
   async generateGroceriesFromMeals(meals: string[]): Promise<string[]> {
     if (!this.apiKey) throw new Error('OpenAI API key not configured');
 

@@ -12,6 +12,8 @@ export const users = pgTable("users", {
   authProvider: text("auth_provider").notNull().default("whoop"), // "whoop" | "email"
   dataSource: text("data_source").notNull().default("whoop"),     // "whoop" | "manual"
   passwordHash: text("password_hash"),          // Only set for email auth users
+  resetToken: text("reset_token"),              // Short-lived password reset token
+  resetTokenExpiry: timestamp("reset_token_expiry"), // Expiry for reset token (1 hour)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

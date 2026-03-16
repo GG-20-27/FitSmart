@@ -48,6 +48,13 @@ export function loadEnv(): void {
   } else {
     console.warn(`[loadEnv] Warning: DATABASE_URL is not set in .env file`);
   }
+
+  // Verify RESEND_API_KEY is loaded
+  if (process.env.RESEND_API_KEY) {
+    console.log(`[loadEnv] RESEND_API_KEY is set (${process.env.RESEND_API_KEY.substring(0, 6)}...)`);
+  } else {
+    console.warn(`[loadEnv] Warning: RESEND_API_KEY is not set — forgot password emails will not send`);
+  }
 }
 
 // Automatically load environment variables when this module is imported

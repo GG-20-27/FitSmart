@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Alert, ActivityIndicator, Image } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
-import * as Clipboard from 'expo-clipboard';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
@@ -92,36 +91,6 @@ export default function OnboardingWelcome() {
     }
   };
 
-  // For Expo Go development - paste token from clipboard
-  const handlePasteToken = async () => {
-    try {
-      const clipboardContent = await Clipboard.getStringAsync();
-
-      if (!clipboardContent) {
-        Alert.alert('No Token', 'Clipboard is empty. Copy the token from the success page first.');
-        return;
-      }
-
-      // Basic JWT validation (should have 3 parts separated by dots)
-      if (!clipboardContent.includes('.') || clipboardContent.split('.').length !== 3) {
-        Alert.alert('Invalid Token', 'The clipboard content does not appear to be a valid token.');
-        return;
-      }
-
-      // Store the token
-      await setAuthToken(clipboardContent.trim());
-      console.log('[WELCOME] Token pasted and stored successfully');
-
-      // Refresh app state
-      if (global.refreshOnboardingStatus) {
-        global.refreshOnboardingStatus();
-      }
-    } catch (error) {
-      console.error('[WELCOME] Failed to paste token:', error);
-      Alert.alert('Error', 'Failed to paste token');
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -170,7 +139,7 @@ export default function OnboardingWelcome() {
           {isLoading ? (
             <ActivityIndicator color={colors.bgPrimary} />
           ) : (
-            <Ionicons name="heart-outline" size={24} color={colors.bgPrimary} />
+            <Ionicons name="heart-outline" size={22} color={colors.bgPrimary} />
           )}
           <Text style={styles.connectButtonText}>
             {isLoading ? 'Connecting...' : 'Continue with WHOOP'}
@@ -190,7 +159,7 @@ export default function OnboardingWelcome() {
           onPress={() => navigation.navigate('OnboardingEmailAuth')}
           activeOpacity={0.85}
         >
-          <Ionicons name="mail-outline" size={22} color={colors.accent} />
+          <Ionicons name="mail-outline" size={20} color={colors.accent} />
           <Text style={styles.emailButtonText}>Continue with Email</Text>
         </TouchableOpacity>
 
@@ -201,12 +170,6 @@ export default function OnboardingWelcome() {
             Your data stays private
           </Text>
         </View>
-
-        {/* Dev: Paste Token (for Expo Go) */}
-        <TouchableOpacity style={styles.pasteButton} onPress={handlePasteToken}>
-          <Ionicons name="clipboard-outline" size={16} color={colors.textMuted} />
-          <Text style={styles.pasteButtonText}>Paste Token (Expo Go)</Text>
-        </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
   );
@@ -224,38 +187,38 @@ const styles = StyleSheet.create({
   },
   logoContainer: {
     alignItems: 'center',
-    marginBottom: spacing.xxl,
+    marginBottom: spacing.xl,
   },
   logoImage: {
-    width: 120,
-    height: 120,
+    width: 100,
+    height: 100,
   },
   title: {
     ...typography.h1,
-    fontSize: 36,
+    fontSize: 34,
     fontWeight: '800',
     textAlign: 'center',
-    marginBottom: spacing.md,
-    lineHeight: 44,
+    marginBottom: spacing.sm,
+    lineHeight: 42,
   },
   subtitle: {
     ...typography.body,
     color: colors.textMuted,
     textAlign: 'center',
-    marginBottom: spacing.xxl,
-    lineHeight: 24,
+    marginBottom: spacing.xl,
+    lineHeight: 22,
   },
   featuresContainer: {
-    gap: spacing.lg,
+    gap: spacing.md,
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   featureIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(39, 233, 181, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -266,27 +229,27 @@ const styles = StyleSheet.create({
   },
   featureTitle: {
     ...typography.title,
-    fontSize: 16,
-    marginBottom: 2,
+    fontSize: 15,
+    marginBottom: 1,
   },
   featureDescription: {
     ...typography.bodyMuted,
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 17,
   },
   spacer: {
     flex: 1,
-    minHeight: spacing.xxl,
+    minHeight: spacing.xl,
   },
   connectButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.accent,
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.md,
     borderRadius: radii.lg,
     gap: spacing.sm,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   connectButtonDisabled: {
     opacity: 0.7,
@@ -294,35 +257,12 @@ const styles = StyleSheet.create({
   connectButtonText: {
     ...typography.title,
     color: colors.bgPrimary,
-    fontSize: 18,
-  },
-  securityNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    marginBottom: spacing.md,
-  },
-  securityText: {
-    ...typography.small,
-    color: colors.textMuted,
-  },
-  pasteButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    paddingVertical: spacing.md,
-    marginTop: spacing.sm,
-  },
-  pasteButtonText: {
-    ...typography.small,
-    color: colors.textMuted,
+    fontSize: 17,
   },
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: spacing.md,
+    marginVertical: spacing.sm,
     gap: spacing.sm,
   },
   dividerLine: {
@@ -340,7 +280,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1.5,
     borderColor: colors.accent,
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.md,
     borderRadius: radii.lg,
     gap: spacing.sm,
     marginBottom: spacing.md,
@@ -350,5 +290,15 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 17,
     fontWeight: '600',
+  },
+  securityNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  securityText: {
+    ...typography.small,
+    color: colors.textMuted,
   },
 });

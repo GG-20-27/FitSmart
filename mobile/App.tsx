@@ -126,13 +126,26 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [pendingResetToken, setPendingResetToken] = useState<string | null>(null);
 
-  // Handle deep links for OAuth callback
+  // Handle deep links for OAuth callback and password reset
   const handleDeepLink = async (url: string) => {
     console.log('[APP] Received deep link:', url);
 
-    // Parse the URL to extract token
-    // Expected format: fitsmart://auth?token=xxx
+    // fitsmart://reset-password?token=xxx — password reset link from email
+    if (url.includes('reset-password') && url.includes('token=')) {
+      const tokenMatch = url.match(/token=([^&]+)/);
+      if (tokenMatch && tokenMatch[1]) {
+        const token = decodeURIComponent(tokenMatch[1]);
+        console.log('[APP] Password reset deep link received');
+        setPendingResetToken(token);
+        setOnboardingComplete(false);
+        setLoading(false);
+        return;
+      }
+    }
+
+    // fitsmart://auth?token=xxx — WHOOP OAuth callback
     if (url.includes('auth') && url.includes('token=')) {
       const tokenMatch = url.match(/token=([^&]+)/);
       if (tokenMatch && tokenMatch[1]) {
@@ -232,7 +245,9 @@ export default function App() {
   return (
     <ErrorBoundary>
       <NavigationContainer theme={navigationTheme}>
-        {onboardingComplete ? <MainTabs /> : <OnboardingNavigator />}
+        {onboardingComplete
+          ? <MainTabs />
+          : <OnboardingNavigator resetToken={pendingResetToken} onResetTokenConsumed={() => setPendingResetToken(null)} />}
       </NavigationContainer>
     </ErrorBoundary>
   );
