@@ -43,11 +43,22 @@ export default function OnboardingEmailAuth() {
       const endpoint = mode === 'register' ? '/api/auth/register' : '/api/auth/login';
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
+        },
         body: JSON.stringify({ email: trimmedEmail, password: trimmedPassword }),
       });
 
-      const data = await response.json();
+      // Parse response safely — server may return HTML if route doesn't exist yet
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch {
+        console.error('[EMAIL AUTH] Non-JSON response — is the server running with latest code?');
+        Alert.alert('Server error', 'The server returned an unexpected response. Make sure the server is up to date and running.');
+        return;
+      }
 
       if (!response.ok) {
         Alert.alert('Error', data.error || 'Something went wrong. Please try again.');
