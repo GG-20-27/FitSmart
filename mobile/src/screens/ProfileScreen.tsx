@@ -10,6 +10,8 @@ import {
   Alert,
   SafeAreaView,
   StatusBar,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -157,6 +159,7 @@ export default function ProfileScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
         <Text style={styles.header}>Profile</Text>
 
@@ -268,6 +271,7 @@ export default function ProfileScreen() {
 
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

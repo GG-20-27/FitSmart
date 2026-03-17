@@ -18,12 +18,12 @@ const features: FeatureItem[] = [
   {
     icon: 'moon-outline',
     title: 'Recovery Insights',
-    description: 'Real-time recovery tracking powered by WHOOP',
+    description: 'Daily recovery tracking',
   },
   {
     icon: 'flash-outline',
     title: 'Training Analysis',
-    description: 'Personalized effort and strain recommendations',
+    description: 'Personalized training guidance',
   },
   {
     icon: 'restaurant-outline',
@@ -109,7 +109,7 @@ export default function OnboardingWelcome() {
         {/* Title */}
         <Text style={styles.title}>Welcome to{'\n'}FitSmart</Text>
         <Text style={styles.subtitle}>
-          Your AI-powered fitness coach{'\n'}powered by WHOOP data
+          Your AI-powered fitness coach
         </Text>
 
         {/* Features */}

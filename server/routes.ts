@@ -22,7 +22,7 @@ import axios from "axios";
 import { getCurrentUserId, requireAdmin } from './authMiddleware';
 import { requireJWTAuth, jwtAuthMiddleware } from './jwtAuth';
 import { db } from './db';
-import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, whoopData as whoopDataTable, trainingData as trainingDataTable, meals as mealsTable, planHabits as planHabitsTable, habitCheckins as habitCheckinsTable, improvementPlans } from '@shared/schema';
+import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, whoopData as whoopDataTable, trainingData as trainingDataTable, meals as mealsTable, planHabits as planHabitsTable, habitCheckins as habitCheckinsTable, improvementPlans, manualCheckins } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
 import { eq, desc, sql, and, gte, lt } from 'drizzle-orm';
 import { Resend } from 'resend';
@@ -314,13 +314,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Email auth endpoints (register/login/me) are registered later in the file
 
-  // GET /reset-password — web redirect page that opens the app via deep link
-  // Linked from password reset emails (HTTPS links work; direct fitsmart:// links don't in email clients)
+  // GET /reset-password — web form to set a new password (replaces unreliable deep-link approach)
   app.get('/reset-password', (req, res) => {
     const token = req.query.token as string;
-    if (!token) return res.status(400).send('Missing token');
-
-    const deepLink = `fitsmart://reset-password?token=${encodeURIComponent(token)}`;
+    if (!token) {
+      return res.status(400).send(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Invalid link</title><style>body{font-family:-apple-system,sans-serif;background:#051824;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:24px;text-align:center}</style></head><body><p>This reset link is invalid or has already been used.</p></body></html>`);
+    }
 
     res.send(`<!DOCTYPE html>
 <html>
@@ -329,27 +328,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Reset your FitSmart password</title>
   <style>
-    *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
-    .card{background:#161b22;border-radius:16px;padding:40px 32px;max-width:420px;width:100%;text-align:center}
-    .icon{font-size:48px;margin-bottom:16px}
-    h1{font-size:22px;font-weight:700;margin-bottom:10px}
-    p{color:#8b949e;font-size:15px;line-height:1.5;margin-bottom:28px}
-    a.btn{display:block;background:#27e9b5;color:#0d1117;font-weight:700;font-size:17px;padding:16px 24px;border-radius:12px;text-decoration:none}
-    .note{margin-top:20px;font-size:13px;color:#555}
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0 }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #051824;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: #162936;
+      border-radius: 20px;
+      padding: 40px 32px;
+      max-width: 420px;
+      width: 100%;
+      text-align: center;
+    }
+    .icon { font-size: 44px; margin-bottom: 16px }
+    h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px }
+    .subtitle { color: #b0c2cc; font-size: 15px; line-height: 1.5; margin-bottom: 28px }
+    .field { text-align: left; margin-bottom: 16px }
+    label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #b0c2cc }
+    input[type=password] {
+      width: 100%;
+      padding: 14px 16px;
+      background: #051824;
+      border: 1px solid #3b5265;
+      border-radius: 12px;
+      color: #fff;
+      font-size: 16px;
+      outline: none;
+      -webkit-appearance: none;
+    }
+    input[type=password]:focus { border-color: #27e9b5 }
+    button {
+      width: 100%;
+      padding: 16px;
+      background: #27e9b5;
+      color: #051824;
+      font-weight: 700;
+      font-size: 17px;
+      border: none;
+      border-radius: 14px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    button:disabled { opacity: 0.5; cursor: default }
+    .error { color: #ef4444; font-size: 14px; margin-top: 12px }
+    .success { display: none }
+    .success .icon { font-size: 52px }
+    .success h1 { margin-bottom: 10px }
+    .success p { color: #b0c2cc; font-size: 15px; line-height: 1.5 }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="icon">🔒</div>
-    <h1>Reset your password</h1>
-    <p>Tap below to open FitSmart and set a new password.</p>
-    <a href="${deepLink}" class="btn">Open FitSmart</a>
-    <p class="note">Link expires in 1 hour.</p>
+    <div id="form-view">
+      <div class="icon">🔑</div>
+      <h1>Set a new password</h1>
+      <p class="subtitle">Choose a strong password for your FitSmart account.</p>
+      <div class="field">
+        <label for="pw">New password</label>
+        <input id="pw" type="password" placeholder="At least 8 characters" autocomplete="new-password">
+      </div>
+      <div class="field">
+        <label for="pw2">Confirm password</label>
+        <input id="pw2" type="password" placeholder="Repeat your password" autocomplete="new-password">
+      </div>
+      <button id="btn" onclick="submit()">Update password</button>
+      <p id="err" class="error"></p>
+    </div>
+    <div class="success" id="success-view">
+      <div class="icon">✅</div>
+      <h1>Password updated!</h1>
+      <p>Open FitSmart and sign in with your new password.</p>
+    </div>
   </div>
   <script>
-    // Auto-open the app after a short delay
-    setTimeout(function() { window.location.href = '${deepLink}'; }, 300);
+    var TOKEN = ${JSON.stringify(token)};
+    function setError(msg) {
+      document.getElementById('err').textContent = msg;
+      document.getElementById('btn').disabled = false;
+    }
+    function submit() {
+      var pw = document.getElementById('pw').value;
+      var pw2 = document.getElementById('pw2').value;
+      if (pw.length < 8) return setError('Password must be at least 8 characters.');
+      if (pw !== pw2) return setError('Passwords do not match.');
+      document.getElementById('btn').disabled = true;
+      document.getElementById('err').textContent = '';
+      fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: TOKEN, newPassword: pw })
+      }).then(function(r) {
+        return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+      }).then(function(res) {
+        if (!res.ok) return setError(res.data.error || 'Something went wrong. The link may have expired.');
+        document.getElementById('form-view').style.display = 'none';
+        document.getElementById('success-view').style.display = 'block';
+      }).catch(function() {
+        setError('Network error. Please try again.');
+        document.getElementById('btn').disabled = false;
+      });
+    }
+    // Allow Enter key to submit
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') submit();
+    });
   </script>
 </body>
 </html>`);
@@ -2000,6 +2089,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ─── End Email Auth ─────────────────────────────────────────────────────────
+
+  // ─── Manual Check-In ────────────────────────────────────────────────────────
+
+  // GET /api/checkin/today — returns today's manual check-in (or null if not done)
+  app.get('/api/checkin/today', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Auth required' });
+      const today = new Date().toISOString().split('T')[0];
+      const checkin = await storage.getManualCheckin(userId, today);
+      res.json(checkin || null);
+    } catch (e) {
+      console.error('[CHECKIN] GET today error:', e);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
+  // POST /api/checkin — submit today's manual check-in
+  app.post('/api/checkin', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Auth required' });
+
+      const { recovery, energy, sleepHours, sleepQuality } = req.body ?? {};
+      if (recovery == null || energy == null || sleepHours == null || !sleepQuality) {
+        return res.status(400).json({ error: 'Missing required fields: recovery, energy, sleepHours, sleepQuality' });
+      }
+
+      // Sleep score mapping: <5h→3, 5–6h→5.5, 6–7h→7, 7–8h→8.5, 8h+→10
+      let sleepScore: number;
+      const sh = Number(sleepHours);
+      if (sh < 5) sleepScore = 3;
+      else if (sh < 6) sleepScore = 5.5;
+      else if (sh < 7) sleepScore = 7;
+      else if (sh < 8) sleepScore = 8.5;
+      else sleepScore = 10;
+
+      // Recovery formula: 0.5 × recovery + 0.3 × energy + 0.2 × sleepScore
+      const recoveryScore = Math.round((0.5 * Number(recovery) + 0.3 * Number(energy) + 0.2 * sleepScore) * 10) / 10;
+
+      const today = new Date().toISOString().split('T')[0];
+      const checkin = await storage.createManualCheckin({
+        userId,
+        date: today,
+        recovery: Number(recovery),
+        energy: Number(energy),
+        sleepHours: sh,
+        sleepQuality: String(sleepQuality),
+        recoveryScore,
+      });
+      res.json(checkin);
+    } catch (e: any) {
+      if (e?.code === '23505') {
+        return res.status(409).json({ error: 'Check-in already submitted for today' });
+      }
+      console.error('[CHECKIN] POST error:', e);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
+  // ─── End Manual Check-In ────────────────────────────────────────────────────
 
   // WHOOP raw data debug endpoint (JWT-authenticated)
   app.get('/api/whoop/raw', requireJWTAuth, async (req, res) => {

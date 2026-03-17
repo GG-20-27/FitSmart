@@ -196,6 +196,18 @@ export const habitCheckins = pgTable("habit_checkins", {
   source: text("source").default('plan'),
 });
 
+export const manualCheckins = pgTable("manual_checkins", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  date: text("date").notNull(),                      // YYYY-MM-DD
+  recovery: integer("recovery").notNull(),           // 1-10
+  energy: integer("energy").notNull(),               // 1-10
+  sleepHours: real("sleep_hours").notNull(),         // e.g. 7.5
+  sleepQuality: text("sleep_quality").notNull(),     // 'poor' | 'ok' | 'great'
+  recoveryScore: real("recovery_score").notNull(),   // 0.5*recovery + 0.3*energy + 0.2*sleepScore
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export const userContext = pgTable("user_context", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
@@ -319,6 +331,11 @@ export const insertDailyCheckinSchema = createInsertSchema(dailyCheckins).omit({
   createdAt: true,
 });
 
+export const insertManualCheckinSchema = createInsertSchema(manualCheckins).omit({
+  id: true,
+  createdAt: true,
+});
+
 export const insertUserContextSchema = createInsertSchema(userContext).omit({
   id: true,
   updatedAt: true,
@@ -354,6 +371,8 @@ export type InsertFitlookDaily = z.infer<typeof insertFitlookDailySchema>;
 export type FitlookDaily = typeof fitlookDaily.$inferSelect;
 export type InsertDailyCheckin = z.infer<typeof insertDailyCheckinSchema>;
 export type DailyCheckin = typeof dailyCheckins.$inferSelect;
+export type InsertManualCheckin = z.infer<typeof insertManualCheckinSchema>;
+export type ManualCheckin = typeof manualCheckins.$inferSelect;
 export type InsertFitroastWeekly = z.infer<typeof insertFitroastWeeklySchema>;
 export type FitroastWeekly = typeof fitroastWeekly.$inferSelect;
 

@@ -1,9 +1,18 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
-import { apiRequest } from '../api/client';
+import { apiRequest, getDataSource } from '../api/client';
 import { colors, spacing, radii, typography } from '../theme';
 import { Card } from '../ui/components';
+
+type ManualCheckin = {
+  recovery: number;
+  energy: number;
+  sleepHours: number;
+  sleepQuality: string;
+  recoveryScore: number;
+  date: string;
+};
 
 type WhoopTodayResponse = {
   sleep_score?: number | null;
@@ -51,6 +60,8 @@ export default function HomeScreen() {
   const [today, setToday] = useState<WhoopTodayResponse | null>(null);
   const [yesterday, setYesterday] = useState<WhoopYesterdayResponse | null>(null);
   const [weekly, setWeekly] = useState<WhoopWeeklyResponse | null>(null);
+  const [manualCheckin, setManualCheckin] = useState<ManualCheckin | null>(null);
+  const [dataSource, setDataSource] = useState<'whoop' | 'manual'>('whoop');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,17 +70,21 @@ export default function HomeScreen() {
       setLoading(true);
       setError(null);
 
+      const ds = await getDataSource();
+      setDataSource(ds);
+
+      if (ds === 'manual') {
+        const checkin = await apiRequest<ManualCheckin | null>('/api/checkin/today');
+        setManualCheckin(checkin);
+        return;
+      }
+
       const [todayRes, yesterdayRes, weeklyRes] = await Promise.all([
         apiRequest<WhoopTodayResponse>('/api/whoop/today'),
         apiRequest<WhoopYesterdayResponse>('/api/whoop/yesterday'),
         apiRequest<WhoopWeeklyResponse>('/api/whoop/weekly'),
       ]);
-    
 
-      console.log('[HomeScreen] Weekly response:', weeklyRes);
-      console.log('[HomeScreen] Weekly comparison:', weeklyRes?.comparison);
-      console.log('[HomeScreen] Yesterday response:', yesterdayRes);
-      console.log('[HomeScreen] Yesterday comparison:', yesterdayRes?.comparison);
       setToday(todayRes);
       setYesterday(yesterdayRes);
       setWeekly(weeklyRes);
@@ -90,6 +105,54 @@ export default function HomeScreen() {
       load();
     }, [load])
   );
+
+  if (dataSource === 'manual') {
+    return (
+      <ScrollView style={styles.container} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
+        <Text style={styles.header}>Good morning</Text>
+
+        {error && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        <Text style={styles.sectionTitle}>Today's Readiness</Text>
+
+        {manualCheckin ? (
+          <>
+            <View style={styles.readinessScoreRow}>
+              <View style={[styles.readinessScoreCard, { borderColor: recoveryColor(manualCheckin.recoveryScore) }]}>
+                <Text style={styles.readinessScoreLabel}>Recovery Score</Text>
+                <Text style={[styles.readinessScoreValue, { color: recoveryColor(manualCheckin.recoveryScore) }]}>
+                  {manualCheckin.recoveryScore.toFixed(1)}
+                </Text>
+                <Text style={styles.readinessScoreMax}>/ 10</Text>
+              </View>
+            </View>
+
+            <View style={styles.cardRow}>
+              <MetricCard label="Recovery" value={`${manualCheckin.recovery} / 10`} />
+              <MetricCard label="Energy" value={`${manualCheckin.energy} / 10`} />
+            </View>
+            <View style={styles.cardRow}>
+              <MetricCard label="Sleep" value={`${manualCheckin.sleepHours} hrs`} />
+              <MetricCard
+                label="Sleep Quality"
+                value={manualCheckin.sleepQuality.charAt(0).toUpperCase() + manualCheckin.sleepQuality.slice(1)}
+              />
+            </View>
+          </>
+        ) : (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>No check-in found for today. Please complete your morning check-in.</Text>
+          </View>
+        )}
+
+        <Text style={styles.footerNote}>Pull to refresh</Text>
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} refreshControl={<RefreshControl refreshing={loading} onRefresh={load} />}>
@@ -171,6 +234,12 @@ export default function HomeScreen() {
       <Text style={styles.footerNote}>Pull to refresh</Text>
     </ScrollView>
   );
+}
+
+function recoveryColor(score: number): string {
+  if (score >= 7) return colors.success;
+  if (score >= 5) return colors.warning;
+  return colors.danger;
 }
 
 function percentOrNA(v?: number | null) {
@@ -297,5 +366,30 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
     marginBottom: spacing.xl,
+  },
+  readinessScoreRow: {
+    marginBottom: spacing.md,
+  },
+  readinessScoreCard: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.lg,
+    borderWidth: 2,
+    padding: spacing.xl,
+    alignItems: 'center',
+  },
+  readinessScoreLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginBottom: spacing.xs,
+  },
+  readinessScoreValue: {
+    ...typography.h1,
+    fontSize: 52,
+    fontWeight: '700',
+  },
+  readinessScoreMax: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontSize: 16,
   },
 });

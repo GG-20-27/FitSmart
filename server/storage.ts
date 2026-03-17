@@ -1,4 +1,4 @@
-import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, improvementPlans, planHabits, habitCheckins, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext, type ImprovementPlan, type PlanHabit, type HabitCheckin } from "@shared/schema";
+import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, improvementPlans, planHabits, habitCheckins, manualCheckins, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext, type ImprovementPlan, type PlanHabit, type HabitCheckin, type ManualCheckin, type InsertManualCheckin } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne } from "drizzle-orm";
 
@@ -67,6 +67,10 @@ export interface IStorage {
   // Habit checkin operations
   upsertHabitCheckin(userId: string, habitKey: string, date: string, checked: boolean): Promise<void>;
   getHabitCheckinsByDate(userId: string, date: string): Promise<HabitCheckin[]>;
+
+  // Manual checkin operations
+  getManualCheckin(userId: string, date: string): Promise<ManualCheckin | undefined>;
+  createManualCheckin(data: InsertManualCheckin): Promise<ManualCheckin>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -358,6 +362,18 @@ export class DatabaseStorage implements IStorage {
   async getHabitCheckinsByDate(userId: string, date: string): Promise<HabitCheckin[]> {
     return await db.select().from(habitCheckins)
       .where(and(eq(habitCheckins.userId, userId), eq(habitCheckins.date, date)));
+  }
+
+  // Manual checkin operations
+  async getManualCheckin(userId: string, date: string): Promise<ManualCheckin | undefined> {
+    const [row] = await db.select().from(manualCheckins)
+      .where(and(eq(manualCheckins.userId, userId), eq(manualCheckins.date, date)));
+    return row || undefined;
+  }
+
+  async createManualCheckin(data: InsertManualCheckin): Promise<ManualCheckin> {
+    const [row] = await db.insert(manualCheckins).values(data).returning();
+    return row;
   }
 }
 

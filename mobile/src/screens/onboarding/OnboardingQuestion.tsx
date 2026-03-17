@@ -10,7 +10,9 @@ import {
   ActivityIndicator,
   Alert,
   Keyboard,
-  TouchableWithoutFeedback
+  TouchableWithoutFeedback,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -297,6 +299,7 @@ export default function OnboardingQuestionScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
@@ -360,6 +363,7 @@ export default function OnboardingQuestionScreen() {
           )}
         </TouchableOpacity>
       </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

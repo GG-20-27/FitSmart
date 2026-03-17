@@ -10,8 +10,8 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import GoalsScreen from './src/screens/GoalsScreen';
 import OnboardingNavigator from './src/navigation/OnboardingNavigator';
 import InsightsNavigator from './src/navigation/InsightsNavigator';
-import { getDetailedStatus } from './src/api/onboarding';
-import { API_BASE_URL, setAuthToken, hasUserToken, clearAuthToken } from './src/api/client';
+import MorningCheckInScreen from './src/screens/MorningCheckInScreen';
+import { API_BASE_URL, setAuthToken, hasUserToken, getDataSource, apiRequest } from './src/api/client';
 import { navigationTheme } from './src/ui/navigationTheme';
 import { colors, spacing, radii, typography } from './src/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -125,25 +125,12 @@ function MainTabs() {
 export default function App() {
   const [loading, setLoading] = useState(false);
   const [onboardingComplete, setOnboardingComplete] = useState(false);
+  const [showCheckin, setShowCheckin] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [pendingResetToken, setPendingResetToken] = useState<string | null>(null);
 
-  // Handle deep links for OAuth callback and password reset
+  // Handle deep links (WHOOP OAuth callback only — password reset is now web-based)
   const handleDeepLink = async (url: string) => {
     console.log('[APP] Received deep link:', url);
-
-    // fitsmart://reset-password?token=xxx — password reset link from email
-    if (url.includes('reset-password') && url.includes('token=')) {
-      const tokenMatch = url.match(/token=([^&]+)/);
-      if (tokenMatch && tokenMatch[1]) {
-        const token = decodeURIComponent(tokenMatch[1]);
-        console.log('[APP] Password reset deep link received');
-        setPendingResetToken(token);
-        setOnboardingComplete(false);
-        setLoading(false);
-        return;
-      }
-    }
 
     // fitsmart://auth?token=xxx — WHOOP OAuth callback
     if (url.includes('auth') && url.includes('token=')) {
@@ -151,12 +138,8 @@ export default function App() {
       if (tokenMatch && tokenMatch[1]) {
         const token = tokenMatch[1];
         console.log('[APP] Extracted token from deep link');
-
-        // Store the token
         await setAuthToken(token);
         console.log('[APP] Token stored successfully');
-
-        // Refresh to show main app
         setOnboardingComplete(true);
         setLoading(false);
         return;
@@ -204,20 +187,39 @@ export default function App() {
       // Check if user has manually authenticated (not dev fallback)
       const hasToken = await hasUserToken();
       if (hasToken) {
-        console.log('[APP] Found stored auth token, showing main app');
+        console.log('[APP] Found stored auth token, checking data source');
+        const ds = await getDataSource();
+        if (ds === 'manual') {
+          // Manual users: check if they've done today's morning check-in
+          try {
+            const checkin = await apiRequest<any>('/api/checkin/today');
+            if (!checkin) {
+              console.log('[APP] Manual user — no check-in today, showing check-in screen');
+              setOnboardingComplete(true);
+              setShowCheckin(true);
+              setLoading(false);
+              return;
+            }
+          } catch (e) {
+            console.warn('[APP] Could not fetch check-in status, proceeding to main app', e);
+          }
+        }
         setOnboardingComplete(true);
+        setShowCheckin(false);
         setLoading(false);
         return;
       }
 
       console.log('[APP] No stored token, showing welcome screen');
       setOnboardingComplete(false);
+      setShowCheckin(false);
     } catch (error) {
       console.error('[APP] Failed to check auth status:', error);
       console.log('[APP] Error details:', error instanceof Error ? error.message : 'Unknown error');
 
       // On error, default to showing welcome (need to authenticate)
       setOnboardingComplete(false);
+      setShowCheckin(false);
     } finally {
       setLoading(false);
     }
@@ -242,12 +244,21 @@ export default function App() {
     );
   }
 
+  // Manual user who hasn't done morning check-in yet
+  if (onboardingComplete && showCheckin) {
+    return (
+      <ErrorBoundary>
+        <MorningCheckInScreen onComplete={() => setShowCheckin(false)} />
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <NavigationContainer theme={navigationTheme}>
         {onboardingComplete
           ? <MainTabs />
-          : <OnboardingNavigator resetToken={pendingResetToken} onResetTokenConsumed={() => setPendingResetToken(null)} />}
+          : <OnboardingNavigator />}
       </NavigationContainer>
     </ErrorBoundary>
   );
