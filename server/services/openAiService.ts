@@ -116,6 +116,8 @@ Provide a scannable 3-block analysis using ONLY:
 2. How the training aligns with the user's fitness goal or recovery phase
 3. Any injury/recovery concerns if relevant
 
+MANUAL MODE OVERRIDE (when flagged in context): If the context contains "Manual tracking mode", this user has NO WHOOP device. NEVER mention WHOOP, biometric strain values, HRV, or recovery percentages. Base analysis on reported readiness (0–10), effort level, session type, duration, and fitness goal only. Replace the strain-based analysis block with a readiness + effort interpretation instead.
+
 OUTPUT FORMAT (strict — ⚠️ Gap is OPTIONAL, omit if no meaningful concern):
 ✅ Strength: <1 sentence — the main positive signal from this session>
 ⚠️ Gap: <1 sentence — only if there is a real concern; omit entirely if session looks solid>
@@ -497,7 +499,9 @@ export interface FitRoastGenerationInput {
   bestDay?: string;
   worstDay?: string;
   recoveryTrend?: string; // improving | steady | declining
-  avgRecovery?: number;
+  avgRecovery?: number;   // WHOOP scale 0-100
+  dataSource?: 'whoop' | 'manual';
+  avgReadiness?: number;  // 0-10 scale for manual users
   trainingCount?: number;
   missedSessions?: number;
   nutritionLogDays?: number;
@@ -508,11 +512,18 @@ export interface FitRoastGenerationInput {
   userContextSummary?: string; // pre-built from user_context table
   intensity?: 'Light' | 'Spicy' | 'Savage';
   lastTheme?: string; // theme_id used last week — will be skipped
+  weeklyGoalReview?: {
+    completedSubGoalsCount: number;
+    completedSubGoals: string[];
+    remainingSubGoals: string[];
+  };
 }
 
 export interface FitLookGenerationInput {
   dateLocal: string;
   feeling: string; // energized | steady | tired | stressed
+  dataSource?: 'whoop' | 'manual';    // manual = no WHOOP device
+  manualReadinessScore?: number;       // 0-10 composite from morning check-in (manual only)
   recoveryPercent?: number;
   sleepHours?: number;
   hrv?: number;
@@ -908,6 +919,8 @@ Return valid JSON only — no score.`;
     sleepScore?: number;
     recoveryZone: 'green' | 'yellow' | 'red';
     userGoal?: string;
+    dataSource?: 'whoop' | 'manual'; // manual = no WHOOP device
+    manualRecoveryScore?: number;    // 0-10 composite from morning check-in (manual mode only)
     whoopDataMissing?: boolean;  // when true: WHOOP had no data — do not reference strain/recovery/zones
     // Rehab context
     rehabActive?: boolean;       // user is in a rehab or post-surgery phase
@@ -929,8 +942,17 @@ Return valid JSON only — no score.`;
       // Training details
       contextParts.push(`Training: ${params.trainingType}, ${params.duration} min, ${params.intensity || 'unspecified'} intensity`);
 
-      // WHOOP data — only include if actually available
-      if (params.whoopDataMissing) {
+      // Readiness / biometric data — branch by data source
+      if (params.dataSource === 'manual') {
+        // Manual mode: self-reported readiness from morning check-in
+        if (params.manualRecoveryScore !== undefined) {
+          const zone = params.manualRecoveryScore >= 7 ? 'green' : params.manualRecoveryScore >= 5 ? 'yellow' : 'red';
+          contextParts.push(`Reported readiness: ${params.manualRecoveryScore.toFixed(1)}/10 (${zone} zone, self-reported this morning)`);
+        } else {
+          contextParts.push(`Reported readiness: not logged today`);
+        }
+        contextParts.push(`⚠️ Manual tracking mode: no WHOOP device. Do NOT mention WHOOP, HRV, biometric strain, or recovery %. Reference reported readiness and effort level only.`);
+      } else if (params.whoopDataMissing) {
         contextParts.push(`WHOOP biometric data: not available for this date. Do not reference strain, recovery %, or body readiness zones in your analysis.`);
       } else {
         if (params.strainScore) {
@@ -962,8 +984,8 @@ Return valid JSON only — no score.`;
         contextParts.push(rehabParts.join(', '));
       }
 
-      // Strain alignment quality — hard constraint for over-positive language
-      if (!params.whoopDataMissing && params.breakdown.strainAppropriatenessScore < 2.5) {
+      // Strain alignment quality — hard constraint for over-positive language (WHOOP only)
+      if (params.dataSource !== 'manual' && !params.whoopDataMissing && params.breakdown.strainAppropriatenessScore < 2.5) {
         contextParts.push(`Alignment note: strain is below the expected band for this context — do NOT say the session was "perfectly aligned" or "ideal".`);
       }
 
@@ -1030,7 +1052,7 @@ Return valid JSON only — no score.`;
       console.error('[OpenAI Service] Failed to analyze training:', error);
 
       // Return fallback response with basic context (no hallucinated WHOOP values)
-      const zoneRef = params.whoopDataMissing ? '' : ` in the ${params.recoveryZone} zone`;
+      const zoneRef = (params.dataSource === 'manual' || params.whoopDataMissing) ? '' : ` in the ${params.recoveryZone} zone`;
       const basicAnalysis = `This ${params.trainingType} session scored ${params.score.toFixed(1)}/10${zoneRef}. Keep listening to your body!`;
 
       return {
@@ -1099,6 +1121,8 @@ Return valid JSON only — no score.`;
       proteinTarget?: number | null;
     };
     recentTrainingHistory?: string;
+    dataSource?: 'whoop' | 'manual';
+    manualReadinessScore?: number; // 0-10, from morning check-in (manual mode only)
   }): Promise<DailySummaryResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -1115,6 +1139,11 @@ Return valid JSON only — no score.`;
         contextParts.push(`⚠️ This FitScore is for ${params.dateLabel} (NOT today). Use past tense throughout. Reference "${params.dateLabel}" explicitly in your summary, not "today".`);
       }
 
+      // Manual mode override — injected early so AI knows before any metric lines
+      if (params.dataSource === 'manual') {
+        contextParts.push(`⚠️ MANUAL TRACKING MODE: This user has no WHOOP device. NEVER mention HRV, WHOOP recovery %, or strain values in any slide or preview. In the Recovery slide (slide 2), reference reported readiness and sleep only. Preview sentence 1 must use "reported readiness X/10" instead of "recovery %".`);
+      }
+
       contextParts.push(`FitScore: ${params.fitScore}/10 (zone: ${params.fitScoreZone})`);
 
       // Breakdown scores (these are the /10 scores shown on the triangle)
@@ -1122,16 +1151,23 @@ Return valid JSON only — no score.`;
       if (params.trainingBreakdownScore != null) contextParts.push(`Training breakdown score: ${params.trainingBreakdownScore}/10`);
       if (params.nutritionBreakdownScore != null) contextParts.push(`Nutrition breakdown score: ${params.nutritionBreakdownScore}/10`);
 
-      // Recovery metrics
-      if (params.recoveryScore != null) contextParts.push(`Recovery: ${params.recoveryScore}%`);
-      contextParts.push(`Recovery zone: ${params.recoveryZone}`);
+      // Recovery metrics — branch by data source
+      if (params.dataSource === 'manual') {
+        if (params.manualReadinessScore != null) {
+          contextParts.push(`Reported readiness: ${params.manualReadinessScore.toFixed(1)}/10 (self-reported)`);
+        }
+        contextParts.push(`Recovery zone: ${params.recoveryZone}`);
+      } else {
+        if (params.recoveryScore != null) contextParts.push(`Recovery: ${params.recoveryScore}%`);
+        contextParts.push(`Recovery zone: ${params.recoveryZone}`);
+      }
 
       // Sleep metrics
       if (params.sleepHours != null) contextParts.push(`Sleep: ${params.sleepHours} hours`);
-      if (params.sleepScore != null) contextParts.push(`Sleep quality: ${params.sleepScore}%`);
+      if (params.sleepScore != null && params.dataSource !== 'manual') contextParts.push(`Sleep quality: ${params.sleepScore}%`);
 
-      // HRV
-      if (params.hrv != null) {
+      // HRV (WHOOP only)
+      if (params.dataSource !== 'manual' && params.hrv != null) {
         contextParts.push(`HRV: ${params.hrv}ms`);
         if (params.hrvBaseline != null) {
           const trend = params.hrv >= params.hrvBaseline * 1.1 ? 'above baseline' :
@@ -1143,7 +1179,7 @@ Return valid JSON only — no score.`;
       // Training
       if (params.hadTraining) {
         contextParts.push(`Training: ${params.sessionsCount || 1} session(s), zone: ${params.trainingZone}`);
-        if (params.strainScore != null) contextParts.push(`Strain: ${params.strainScore}`);
+        if (params.dataSource !== 'manual' && params.strainScore != null) contextParts.push(`Strain: ${params.strainScore}`);
       } else {
         contextParts.push('Training: Rest day (no sessions logged)');
       }
@@ -1413,15 +1449,26 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       parts.push(`Date: ${input.dateLocal}`);
       parts.push(`Self-assessment feeling: ${input.feeling}`);
 
-      if (input.recoveryPercent != null) {
-        const tag = input.recoveryPercent >= 67 ? 'Green' : input.recoveryPercent >= 34 ? 'Yellow' : 'Red';
-        parts.push(`Today's WHOOP recovery: ${input.recoveryPercent}% (${tag})`);
+      if (input.dataSource === 'manual') {
+        // Manual mode: self-reported readiness
+        if (input.manualReadinessScore != null) {
+          const zone = input.manualReadinessScore >= 7 ? 'Green' : input.manualReadinessScore >= 5 ? 'Yellow' : 'Red';
+          parts.push(`Reported readiness: ${input.manualReadinessScore.toFixed(1)}/10 (${zone}, self-reported this morning)`);
+        } else {
+          parts.push(`Reported readiness: not logged today`);
+        }
+        parts.push(`⚠️ Manual tracking mode: no WHOOP device. Never mention WHOOP recovery %, HRV, or strain. Use "Readiness X/10" in snapshot_chips instead of "Recovery X%".`);
       } else {
-        parts.push("Today's recovery data: not available yet");
+        if (input.recoveryPercent != null) {
+          const tag = input.recoveryPercent >= 67 ? 'Green' : input.recoveryPercent >= 34 ? 'Yellow' : 'Red';
+          parts.push(`Today's WHOOP recovery: ${input.recoveryPercent}% (${tag})`);
+        } else {
+          parts.push("Today's recovery data: not available yet");
+        }
+        if (input.hrv != null) parts.push(`HRV: ${input.hrv}ms`);
+        if (input.strainScore != null) parts.push(`Current strain: ${input.strainScore}`);
       }
       if (input.sleepHours != null) parts.push(`Sleep last night: ${input.sleepHours}h`);
-      if (input.hrv != null) parts.push(`HRV: ${input.hrv}ms`);
-      if (input.strainScore != null) parts.push(`Current strain: ${input.strainScore}`);
 
       if (input.yesterdayFitScore != null) {
         parts.push(`Yesterday's FitScore: ${input.yesterdayFitScore}/10`);
@@ -1549,11 +1596,15 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       console.error('[OpenAI Service] FitLook generation failed:', error);
 
       // Sensible fallback in v2 format
-      const recoveryChip = input.recoveryPercent != null ? `Recovery ${input.recoveryPercent}%` : null;
+      const recoveryChip = input.dataSource === 'manual'
+        ? (input.manualReadinessScore != null ? `Readiness ${input.manualReadinessScore.toFixed(1)}/10` : null)
+        : (input.recoveryPercent != null ? `Recovery ${input.recoveryPercent}%` : null);
       const sleepChip = input.sleepHours != null ? `Sleep ${input.sleepHours}h` : null;
       const chips = [recoveryChip, sleepChip, `Feeling: ${input.feeling}`].filter(Boolean) as string[];
 
-      const isLow = input.recoveryPercent != null && input.recoveryPercent < 34;
+      const isLow = input.dataSource === 'manual'
+        ? (input.manualReadinessScore != null && input.manualReadinessScore < 4)
+        : (input.recoveryPercent != null && input.recoveryPercent < 34);
       const feeling = input.feeling;
 
       return {
@@ -1587,8 +1638,13 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       if (input.bestDayScore != null && input.bestDay) parts.push(`Best day: ${input.bestDay} (${input.bestDayScore}/10)`);
       if (input.worstDayScore != null && input.worstDay) parts.push(`Worst day: ${input.worstDay} (${input.worstDayScore}/10)`);
 
-      if (input.avgRecovery != null) parts.push(`Average recovery: ${input.avgRecovery}%`);
-      if (input.recoveryTrend) parts.push(`Recovery trend: ${input.recoveryTrend}`);
+      if (input.dataSource === 'manual') {
+        if (input.avgReadiness != null) parts.push(`Average reported readiness this week: ${input.avgReadiness.toFixed(1)}/10 (self-reported, 0-10 scale)`);
+        parts.push(`⚠️ Manual tracking mode: no WHOOP device. In the Recovery segment, NEVER mention recovery %, HRV, or WHOOP metrics. Reference "reported readiness" instead.`);
+      } else {
+        if (input.avgRecovery != null) parts.push(`Average recovery: ${input.avgRecovery}%`);
+        if (input.recoveryTrend) parts.push(`Recovery trend: ${input.recoveryTrend}`);
+      }
 
       if (input.trainingCount != null) parts.push(`Training sessions completed: ${input.trainingCount}`);
       if (input.missedSessions != null && input.missedSessions > 0) parts.push(`Estimated missed sessions: ${input.missedSessions}`);
@@ -1609,6 +1665,17 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       if (input.userGoal) parts.push(`User goal: ${input.userGoal}`);
       if (input.injuryNotes) parts.push(`Injury/caution notes: ${input.injuryNotes}`);
       if (input.userContextSummary) parts.push(input.userContextSummary);
+
+      // Weekly sub-goal review context (from goal-check screen)
+      if (input.weeklyGoalReview) {
+        const { completedSubGoalsCount, completedSubGoals, remainingSubGoals } = input.weeklyGoalReview;
+        if (completedSubGoalsCount > 0) {
+          parts.push(`Sub-goals completed this week (${completedSubGoalsCount}): ${completedSubGoals.join(', ')}`);
+        }
+        if (remainingSubGoals.length > 0) {
+          parts.push(`Sub-goals still in progress: ${remainingSubGoals.join(', ')}`);
+        }
+      }
 
       // ── Narrative theme selection ───────────────────────────────────────────
       // 10 distinct storytelling frames. One is chosen per week via a deterministic

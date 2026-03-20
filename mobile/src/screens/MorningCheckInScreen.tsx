@@ -82,7 +82,7 @@ export default function MorningCheckInScreen({ onComplete }: Props) {
           {/* Recovery */}
           <View style={styles.section}>
             <Text style={styles.label}>Recovery</Text>
-            <Text style={styles.labelHint}>How recovered do you feel physically?</Text>
+            <Text style={styles.labelHint}>How recovered do you feel today?</Text>
             <View style={styles.stepper}>
               <TouchableOpacity
                 style={styles.stepBtn}
@@ -121,7 +121,7 @@ export default function MorningCheckInScreen({ onComplete }: Props) {
           {/* Energy */}
           <View style={styles.section}>
             <Text style={styles.label}>Energy</Text>
-            <Text style={styles.labelHint}>How energised do you feel mentally?</Text>
+            <Text style={styles.labelHint}>How much energy do you have today?</Text>
             <View style={styles.stepper}>
               <TouchableOpacity
                 style={styles.stepBtn}
@@ -196,7 +196,7 @@ export default function MorningCheckInScreen({ onComplete }: Props) {
                   activeOpacity={0.8}
                 >
                   <Text style={[styles.qualityBtnText, sleepQuality === q && styles.qualityBtnTextActive]}>
-                    {q === 'poor' ? 'Poor' : q === 'ok' ? 'OK' : 'Great'}
+                    {q === 'poor' ? 'Poor' : q === 'ok' ? 'Decent' : 'Great'}
                   </Text>
                 </TouchableOpacity>
               ))}

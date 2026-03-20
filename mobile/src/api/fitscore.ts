@@ -140,6 +140,13 @@ export interface FitScoreResponse {
     hrv?: number;
     hrvBaseline?: number;
   };
+  manualCheckinData?: {
+    recoveryScore: number;
+    recovery: number;
+    energy: number;
+    sleepHours: number;
+  };
+  dataSource?: 'whoop' | 'manual';
   yesterdayData?: {
     recoveryScore?: number | null;
     sleepScore?: number | null;

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import { apiRequest } from '../api/client';
+import { apiRequest, getDataSource } from '../api/client';
+import { getUserContext } from '../api/context';
 import * as Clipboard from 'expo-clipboard';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Image, Modal, Alert, ActivityIndicator, Platform, Dimensions, FlatList, Animated, PanResponder, KeyboardAvoidingView, Keyboard, Switch } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -664,7 +665,7 @@ function getWorstMealFactor(mealList: MealData[]): string | null {
   return labels[top[0]] ?? null;
 }
 
-function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[], waterBand?: WaterIntakeBand | null): WeakLinkResult {
+function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[], waterBand?: WaterIntakeBand | null, macroTargets?: { calorieTarget: number | null; proteinTarget: number | null }): WeakLinkResult {
   const nutRaw = result.breakdown.nutrition.score;
   const traRaw = result.breakdown.training.score;
   const recRaw = result.breakdown.recovery.score;
@@ -831,6 +832,20 @@ function computeWeakLink(result: FitScoreResponse, mealList: MealData[], session
       ].filter(Boolean).join(', ');
       msgParts.push(`Nutrition day context: ${ctxParts}.`);
     }
+    // Kcal + protein actual vs goal
+    if (macroTargets) {
+      const totalKcal = mealList.reduce((s, m) => s + (m.estimatedCalories ?? 0), 0);
+      const totalProt = mealList.reduce((s, m) => s + (m.estimatedProtein ?? 0), 0);
+      if (totalKcal > 0 || totalProt > 0) {
+        const kcalStr = macroTargets.calorieTarget
+          ? `${totalKcal} kcal / goal ${macroTargets.calorieTarget} kcal (${Math.round(totalKcal / macroTargets.calorieTarget * 100)}%)`
+          : `${totalKcal} kcal`;
+        const protStr = macroTargets.proteinTarget
+          ? `${totalProt}g / goal ${macroTargets.proteinTarget}g (${Math.round(totalProt / macroTargets.proteinTarget * 100)}%)`
+          : `${totalProt}g protein`;
+        msgParts.push(`Intake so far: ${kcalStr}, protein ${protStr}.`);
+      }
+    }
   }
 
   if (waterBand === '<1L') {
@@ -887,7 +902,9 @@ function RoutineBody({ routine }: { routine: string }) {
 
 export default function FitScoreScreen() {
   const navigation = useNavigation();
+  const [dataSource, setDataSource] = useState<'whoop' | 'manual'>('whoop');
   const [weakLink, setWeakLink] = useState<WeakLinkResult | null>(null);
+  const [macroTargets, setMacroTargets] = useState<{ calorieTarget: number | null; proteinTarget: number | null }>({ calorieTarget: null, proteinTarget: null });
 
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [meals, setMeals] = useState<MealData[]>([]);
@@ -1088,6 +1105,8 @@ export default function FitScoreScreen() {
 
   // Load persisted FitScore cache + training history from AsyncStorage on mount
   useEffect(() => {
+    // Load dataSource from JWT on mount
+    getDataSource().then(setDataSource).catch(() => {});
     (async () => {
       try {
         const keys = await AsyncStorage.getAllKeys();
@@ -1155,6 +1174,13 @@ export default function FitScoreScreen() {
         .catch(() => {}); // non-fatal
     }, [])
   );
+
+  // Load macro targets once on mount (used for nutrition pre-filled prompt)
+  useEffect(() => {
+    getUserContext()
+      .then(ctx => setMacroTargets({ calorieTarget: ctx.calorieTarget, proteinTarget: ctx.proteinTarget }))
+      .catch(() => {});
+  }, []);
 
   // Load plan habits for today when active plan is known
   useEffect(() => {
@@ -1317,7 +1343,7 @@ export default function FitScoreScreen() {
   // Compute weak link whenever FitScore result, meals, training sessions, or water intake change
   useEffect(() => {
     if (fitScoreResult) {
-      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions, waterIntakeBand));
+      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions, waterIntakeBand, macroTargets));
     } else {
       setWeakLink(null);
     }
@@ -2420,7 +2446,7 @@ export default function FitScoreScreen() {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Training</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {(isToday || isYesterday) && !showFitScoreResult && !trainingEditing && (
+              {dataSource === 'whoop' && (isToday || isYesterday) && !showFitScoreResult && !trainingEditing && (
                 <TouchableOpacity
                   onPress={handleOpenWhoopImport}
                   style={[styles.editButton, { borderWidth: 1, borderColor: colors.surfaceMute, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }]}
@@ -2754,92 +2780,143 @@ export default function FitScoreScreen() {
       {/* FitScore Result - Recovery Analysis FIRST, then Triangle */}
       {showFitScoreResult && fitScoreResult && (
         <Animated.View style={[styles.fitScoreResultSection, { opacity: fitScoreFadeAnim }]}>
-          {/* 1. Recovery Analysis Card - FIRST */}
-          <View style={styles.recoveryAnalysisCard}>
+          {/* 1. Recovery Analysis Card - FIRST (WHOOP only) */}
+          {!(fitScoreResult.dataSource === 'manual' || dataSource === 'manual') && <View style={styles.recoveryAnalysisCard}>
             <Text style={styles.recoveryAnalysisTitle}>Recovery Analysis</Text>
 
-            {/* Recovery Metrics Grid - 2x2 Layout */}
-            {/* Row 1: Recovery % and Sleep Hours */}
-            <View style={styles.recoveryMetricsRow}>
-              <View style={styles.recoveryMetricItem}>
-                <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
-                  <Ionicons name="heart" size={20} color={colors.accent} />
+            {/* Recovery Metrics Grid - branches on dataSource */}
+            {(fitScoreResult.dataSource === 'manual' || dataSource === 'manual') && fitScoreResult.manualCheckinData ? (
+              /* Manual mode: show morning check-in data in a 2x2 grid */
+              <>
+                <View style={styles.recoveryMetricsRow}>
+                  <View style={styles.recoveryMetricItem}>
+                    <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                      <Ionicons name="heart" size={20} color={colors.accent} />
+                    </View>
+                    <Text style={styles.recoveryMetricLabel}>Recovery</Text>
+                    <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                      {fitScoreResult.manualCheckinData.recovery}/10
+                    </Text>
+                  </View>
+                  <View style={styles.recoveryMetricItem}>
+                    <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                      <Ionicons name="flash" size={20} color={colors.accent} />
+                    </View>
+                    <Text style={styles.recoveryMetricLabel}>Energy</Text>
+                    <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                      {fitScoreResult.manualCheckinData.energy}/10
+                    </Text>
+                  </View>
                 </View>
-                <Text style={styles.recoveryMetricLabel}>Recovery</Text>
-                <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
-                  {fitScoreResult.whoopData.recoveryScore ?? 'N/A'}%
-                </Text>
-                {fitScoreResult.yesterdayData?.recoveryScore != null && fitScoreResult.whoopData.recoveryScore != null && (
-                  <Text style={[
-                    styles.recoveryMetricDelta,
-                    { color: fitScoreResult.whoopData.recoveryScore >= fitScoreResult.yesterdayData.recoveryScore ? colors.success : colors.danger }
-                  ]}>
-                    {fitScoreResult.whoopData.recoveryScore >= fitScoreResult.yesterdayData.recoveryScore ? '↑' : '↓'}
-                    {Math.abs(fitScoreResult.whoopData.recoveryScore - fitScoreResult.yesterdayData.recoveryScore).toFixed(0)}% {comparisonLabel}
-                  </Text>
-                )}
-              </View>
-
-              <View style={styles.recoveryMetricItem}>
-                <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
-                  <Ionicons name="bed" size={20} color={colors.accent} />
+                <View style={styles.recoveryMetricsRow}>
+                  <View style={styles.recoveryMetricItem}>
+                    <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                      <Ionicons name="bed" size={20} color={colors.accent} />
+                    </View>
+                    <Text style={styles.recoveryMetricLabel}>Sleep Hours</Text>
+                    <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                      {fitScoreResult.manualCheckinData.sleepHours.toFixed(1)}h
+                    </Text>
+                  </View>
+                  <View style={styles.recoveryMetricItem}>
+                    <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                      <Ionicons name="sparkles" size={20} color={colors.accent} />
+                    </View>
+                    <Text style={styles.recoveryMetricLabel}>Readiness</Text>
+                    <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                      {fitScoreResult.manualCheckinData.recoveryScore.toFixed(1)}/10
+                    </Text>
+                  </View>
                 </View>
-                <Text style={styles.recoveryMetricLabel}>Sleep Hours</Text>
-                <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
-                  {fitScoreResult.whoopData.sleepHours ? `${fitScoreResult.whoopData.sleepHours.toFixed(1)}h` : 'N/A'}
-                </Text>
-                {fitScoreResult.yesterdayData?.sleepHours != null && fitScoreResult.whoopData.sleepHours != null && (
-                  <Text style={[
-                    styles.recoveryMetricDelta,
-                    { color: fitScoreResult.whoopData.sleepHours >= fitScoreResult.yesterdayData.sleepHours ? colors.success : colors.danger }
-                  ]}>
-                    {fitScoreResult.whoopData.sleepHours >= fitScoreResult.yesterdayData.sleepHours ? '↑' : '↓'}
-                    {Math.abs(fitScoreResult.whoopData.sleepHours - fitScoreResult.yesterdayData.sleepHours).toFixed(1)}h {comparisonLabel}
-                  </Text>
-                )}
+              </>
+            ) : (fitScoreResult.dataSource === 'manual' || dataSource === 'manual') ? (
+              /* Manual mode but no check-in logged */
+              <View style={{ paddingVertical: spacing.md, alignItems: 'center' as const }}>
+                <Text style={{ color: colors.textMuted, fontSize: 13 }}>No morning check-in logged today</Text>
               </View>
-            </View>
-
-            {/* Row 2: Sleep Quality and HRV */}
-            <View style={styles.recoveryMetricsRow}>
-              <View style={styles.recoveryMetricItem}>
-                <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
-                  <Ionicons name="moon" size={20} color={colors.accent} />
+            ) : (
+              /* WHOOP mode: show WHOOP metrics */
+              <>
+                {/* Row 1: Recovery % and Sleep Hours */}
+                <View style={styles.recoveryMetricsRow}>
+                  <View style={styles.recoveryMetricItem}>
+                    <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                      <Ionicons name="heart" size={20} color={colors.accent} />
+                    </View>
+                    <Text style={styles.recoveryMetricLabel}>Recovery</Text>
+                    <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                      {fitScoreResult.whoopData.recoveryScore ?? 'N/A'}%
+                    </Text>
+                    {fitScoreResult.yesterdayData?.recoveryScore != null && fitScoreResult.whoopData.recoveryScore != null && (
+                      <Text style={[
+                        styles.recoveryMetricDelta,
+                        { color: fitScoreResult.whoopData.recoveryScore >= fitScoreResult.yesterdayData.recoveryScore ? colors.success : colors.danger }
+                      ]}>
+                        {fitScoreResult.whoopData.recoveryScore >= fitScoreResult.yesterdayData.recoveryScore ? '↑' : '↓'}
+                        {Math.abs(fitScoreResult.whoopData.recoveryScore - fitScoreResult.yesterdayData.recoveryScore).toFixed(0)}% {comparisonLabel}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.recoveryMetricItem}>
+                    <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                      <Ionicons name="bed" size={20} color={colors.accent} />
+                    </View>
+                    <Text style={styles.recoveryMetricLabel}>Sleep Hours</Text>
+                    <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                      {fitScoreResult.whoopData.sleepHours ? `${fitScoreResult.whoopData.sleepHours.toFixed(1)}h` : 'N/A'}
+                    </Text>
+                    {fitScoreResult.yesterdayData?.sleepHours != null && fitScoreResult.whoopData.sleepHours != null && (
+                      <Text style={[
+                        styles.recoveryMetricDelta,
+                        { color: fitScoreResult.whoopData.sleepHours >= fitScoreResult.yesterdayData.sleepHours ? colors.success : colors.danger }
+                      ]}>
+                        {fitScoreResult.whoopData.sleepHours >= fitScoreResult.yesterdayData.sleepHours ? '↑' : '↓'}
+                        {Math.abs(fitScoreResult.whoopData.sleepHours - fitScoreResult.yesterdayData.sleepHours).toFixed(1)}h {comparisonLabel}
+                      </Text>
+                    )}
+                  </View>
                 </View>
-                <Text style={styles.recoveryMetricLabel}>Sleep Quality</Text>
-                <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
-                  {fitScoreResult.whoopData.sleepScore ?? 'N/A'}%
-                </Text>
-                {fitScoreResult.yesterdayData?.sleepScore != null && fitScoreResult.whoopData.sleepScore != null && (
-                  <Text style={[
-                    styles.recoveryMetricDelta,
-                    { color: fitScoreResult.whoopData.sleepScore >= fitScoreResult.yesterdayData.sleepScore ? colors.success : colors.danger }
-                  ]}>
-                    {fitScoreResult.whoopData.sleepScore >= fitScoreResult.yesterdayData.sleepScore ? '↑' : '↓'}
-                    {Math.abs(fitScoreResult.whoopData.sleepScore - fitScoreResult.yesterdayData.sleepScore).toFixed(0)}% {comparisonLabel}
-                  </Text>
-                )}
-              </View>
-
-              <View style={styles.recoveryMetricItem}>
-                <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
-                  <Ionicons name="pulse" size={20} color={colors.accent} />
+                {/* Row 2: Sleep Quality and HRV */}
+                <View style={styles.recoveryMetricsRow}>
+                  <View style={styles.recoveryMetricItem}>
+                    <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                      <Ionicons name="moon" size={20} color={colors.accent} />
+                    </View>
+                    <Text style={styles.recoveryMetricLabel}>Sleep Quality</Text>
+                    <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                      {fitScoreResult.whoopData.sleepScore ?? 'N/A'}%
+                    </Text>
+                    {fitScoreResult.yesterdayData?.sleepScore != null && fitScoreResult.whoopData.sleepScore != null && (
+                      <Text style={[
+                        styles.recoveryMetricDelta,
+                        { color: fitScoreResult.whoopData.sleepScore >= fitScoreResult.yesterdayData.sleepScore ? colors.success : colors.danger }
+                      ]}>
+                        {fitScoreResult.whoopData.sleepScore >= fitScoreResult.yesterdayData.sleepScore ? '↑' : '↓'}
+                        {Math.abs(fitScoreResult.whoopData.sleepScore - fitScoreResult.yesterdayData.sleepScore).toFixed(0)}% {comparisonLabel}
+                      </Text>
+                    )}
+                  </View>
+                  <View style={styles.recoveryMetricItem}>
+                    <View style={[styles.recoveryMetricIcon, { backgroundColor: colors.accent + '20' }]}>
+                      <Ionicons name="pulse" size={20} color={colors.accent} />
+                    </View>
+                    <Text style={styles.recoveryMetricLabel}>HRV</Text>
+                    <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
+                      {fitScoreResult.whoopData.hrv ? Math.round(fitScoreResult.whoopData.hrv) : 'N/A'} ms
+                    </Text>
+                    {fitScoreResult.yesterdayData?.hrv != null && fitScoreResult.whoopData.hrv != null && (
+                      <Text style={[
+                        styles.recoveryMetricDelta,
+                        { color: fitScoreResult.whoopData.hrv >= fitScoreResult.yesterdayData.hrv ? colors.success : colors.danger }
+                      ]}>
+                        {fitScoreResult.whoopData.hrv >= fitScoreResult.yesterdayData.hrv ? '↑' : '↓'}
+                        {Math.abs(fitScoreResult.whoopData.hrv - fitScoreResult.yesterdayData.hrv).toFixed(0)} ms {comparisonLabel}
+                      </Text>
+                    )}
+                  </View>
                 </View>
-                <Text style={styles.recoveryMetricLabel}>HRV</Text>
-                <Text style={[styles.recoveryMetricValue, { color: colors.accent }]}>
-                  {fitScoreResult.whoopData.hrv ? Math.round(fitScoreResult.whoopData.hrv) : 'N/A'} ms
-                </Text>
-                {fitScoreResult.yesterdayData?.hrv != null && fitScoreResult.whoopData.hrv != null && (
-                  <Text style={[
-                    styles.recoveryMetricDelta,
-                    { color: fitScoreResult.whoopData.hrv >= fitScoreResult.yesterdayData.hrv ? colors.success : colors.danger }
-                  ]}>
-                    {fitScoreResult.whoopData.hrv >= fitScoreResult.yesterdayData.hrv ? '↑' : '↓'}
-                    {Math.abs(fitScoreResult.whoopData.hrv - fitScoreResult.yesterdayData.hrv).toFixed(0)} ms {comparisonLabel}
-                  </Text>
-                )}
-              </View>
-            </View>
+              </>
+            )}
 
             {/* Analysis - Tap to View */}
             {fitScoreResult.breakdown.recovery.analysis && !showRecoveryAnalysis && (
@@ -2862,7 +2939,7 @@ export default function FitScoreScreen() {
                 </View>
               </TouchableOpacity>
             )}
-          </View>
+          </View>}
 
           {/* 2. FitScore Breakdown Title */}
           <Text style={styles.sectionTitleLarge}>FitScore Breakdown</Text>
@@ -4500,7 +4577,7 @@ export default function FitScoreScreen() {
                       {showTrainingBreakdown && (
                         <View style={styles.trainingMetricsTable}>
                           <View style={styles.trainingMetricRow}>
-                            <Text style={styles.trainingMetricLabel}>Strain Appropriateness</Text>
+                            <Text style={styles.trainingMetricLabel}>{dataSource === 'manual' ? 'Effort Fit' : 'Strain Appropriateness'}</Text>
                             <Text style={styles.trainingMetricValue}>
                               {selectedTraining.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0
                             </Text>

@@ -258,7 +258,8 @@ export async function buildContextPack(userId: string): Promise<ContextPack> {
           : ctx.tier2Emphasis;
         const parts = [
           `Training profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}`,
-          `Phase: ${ctx.tier2Phase}, emphasis=${emphasisStr}`,
+          `Training phase: ${ctx.tier2Phase}, emphasis=${emphasisStr}`,
+          `Diet phase: ${ctx.tier2DietPhase}`,
           `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
         ];
         if (ctx.injuryType && ctx.injuryType !== 'None') {

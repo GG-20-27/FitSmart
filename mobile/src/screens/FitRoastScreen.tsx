@@ -1,18 +1,19 @@
 import React, { useState, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Animated,
-  ActivityIndicator, Dimensions,
+  ActivityIndicator, Dimensions, ScrollView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, spacing, typography, radii } from '../theme';
-import { getFitRoastCurrent, generateFitRoast, type FitRoastResponse, type FitRoastSegment } from '../api/fitroast';
+import { getFitRoastCurrent, generateFitRoast, type FitRoastResponse, type FitRoastSegment, type WeeklyGoalReview } from '../api/fitroast';
 import FitRoastShareModal from '../components/FitRoastShareModal';
+import { apiRequest } from '../api/client';
 
 const { width: W, height: H } = Dimensions.get('window');
 
-type ScreenState = 'loading' | 'off' | 'locked' | 'empty' | 'generating' | 'intro' | 'roast' | 'error';
+type ScreenState = 'loading' | 'off' | 'locked' | 'empty' | 'goal-check' | 'generating' | 'intro' | 'roast' | 'error';
 
 export default function FitRoastScreen() {
   const [screenState, setScreenState] = useState<ScreenState>('loading');
@@ -23,7 +24,9 @@ export default function FitRoastScreen() {
   const [roastIntensity, setRoastIntensity] = useState<'Light' | 'Spicy' | 'Savage'>('Spicy');
   const [activeDays, setActiveDays] = useState(0);
   const [isSunday, setIsSunday] = useState(false);
-
+  const [weeklySubgoals, setWeeklySubgoals] = useState<Array<{
+    goalId: string; goalTitle: string; subIndex: number; text: string; checked: boolean;
+  }>>([]);
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
@@ -60,7 +63,9 @@ export default function FitRoastScreen() {
         setActiveDays(e?.active_days ?? 0);
         setIsSunday(e?.is_sunday ?? false);
         if (e?.eligible) {
-          setScreenState('empty'); // Sunday + ≥5 days → show "Roast Me"
+          // Sunday + eligible → load subgoals then show weekly goal check
+          await loadWeeklySubgoals();
+          setScreenState('goal-check');
         } else {
           setScreenState('locked'); // Not eligible yet → show lock screen
         }
@@ -68,6 +73,77 @@ export default function FitRoastScreen() {
         setError(e instanceof Error ? e.message : 'Failed to load FitRoast');
         setScreenState('error');
       }
+    }
+  }
+
+  async function loadWeeklySubgoals() {
+    try {
+      const goals = await apiRequest<any[]>('/api/goals');
+      const items: typeof weeklySubgoals = [];
+      for (const g of goals) {
+        if (g.completedAt) continue; // skip archived goals
+        const raw = g.microhabits;
+        const allItems: any[] = Array.isArray(raw)
+          ? raw
+          : typeof raw === 'string'
+            ? JSON.parse(raw)
+            : [];
+        allItems.forEach((h: any, i: number) => {
+          if (h.isSubgoal && !h.done) {
+            items.push({ goalId: g.id, goalTitle: g.title, subIndex: i, text: h.text, checked: false });
+          }
+        });
+      }
+      setWeeklySubgoals(items);
+    } catch (e) { console.warn('[FitRoast] loadWeeklySubgoals failed:', e); }
+  }
+
+  async function submitGoalCheck() {
+    // Group checked subgoals by goalId
+    const byGoal: Record<string, number[]> = {};
+    weeklySubgoals.filter(s => s.checked).forEach(s => {
+      (byGoal[s.goalId] = byGoal[s.goalId] ?? []).push(s.subIndex);
+    });
+
+    // Update each affected goal on server
+    try {
+      const allGoals = await apiRequest<any[]>('/api/goals');
+      for (const [goalId, indices] of Object.entries(byGoal)) {
+        const g = allGoals.find((x: any) => x.id === goalId);
+        if (!g) continue;
+        const microhabits = [...(g.microhabits ?? [])];
+        indices.forEach(i => { if (microhabits[i]) microhabits[i] = { ...microhabits[i], done: true }; });
+        const subgoals = microhabits.filter((h: any) => h.isSubgoal);
+        const progress = subgoals.length > 0
+          ? Math.round(subgoals.filter((h: any) => h.done).length / subgoals.length * 100)
+          : g.progress;
+        await apiRequest(`/api/goals/${goalId}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ microhabits, progress }),
+        });
+      }
+    } catch { /* non-fatal */ }
+
+    // Build review context
+    const completed = weeklySubgoals.filter(s => s.checked).map(s => s.text);
+    const remaining = weeklySubgoals.filter(s => !s.checked).map(s => s.text);
+    const review: WeeklyGoalReview = {
+      completedSubGoalsCount: completed.length,
+      completedSubGoals: completed,
+      remainingSubGoals: remaining,
+    };
+
+    // Trigger FitRoast generation with context
+    setScreenState('generating');
+    try {
+      const data = await generateFitRoast(roastIntensity, review);
+      setRoast(data);
+      setSegmentIndex(-1);
+      setScreenState('intro');
+      animateIn();
+    } catch (e: any) {
+      setError(e instanceof Error ? e.message : 'Failed to generate FitRoast');
+      setScreenState('error');
     }
   }
 
@@ -166,6 +242,50 @@ export default function FitRoastScreen() {
         <Text style={styles.lockedSubtitle}>
           Every Sunday your week gets roasted.{'\n'}Come back in {daysUntilSunday} day{daysUntilSunday !== 1 ? 's' : ''}.
         </Text>
+      </Animated.View>
+    );
+  }
+
+  // ── Weekly Goal Check — review sub-goals before FitRoast ──
+  if (screenState === 'goal-check') {
+    const checkedCount = weeklySubgoals.filter(s => s.checked).length;
+    return (
+      <Animated.View style={[{ flex: 1, backgroundColor: colors.bgPrimary }, { opacity: screenFade }]}>
+        <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingTop: 60, gap: spacing.lg }}>
+          <Text style={styles.goalCheckTitle}>Weekly Goal Check</Text>
+          <Text style={styles.goalCheckSubtitle}>
+            Before your FitRoast, review which sub-goals you completed this week.
+          </Text>
+
+          {weeklySubgoals.length === 0 ? (
+            <Text style={styles.goalCheckEmpty}>No pending sub-goals to review.</Text>
+          ) : (
+            weeklySubgoals.map((item, i) => (
+              <TouchableOpacity
+                key={i}
+                style={styles.goalCheckItem}
+                onPress={() => setWeeklySubgoals(prev => prev.map((s, j) => j === i ? { ...s, checked: !s.checked } : s))}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.goalCheckBox, item.checked && styles.goalCheckBoxDone]}>
+                  {item.checked && <Ionicons name="checkmark" size={14} color="#fff" />}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.goalCheckItemText}>{item.text}</Text>
+                  <Text style={styles.goalCheckGoalLabel}>{item.goalTitle}</Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
+
+          <TouchableOpacity
+            style={[styles.ctaButton, { marginTop: spacing.md }]}
+            onPress={submitGoalCheck}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.ctaButtonText}>Continue to FitRoast</Text>
+          </TouchableOpacity>
+        </ScrollView>
       </Animated.View>
     );
   }
@@ -559,5 +679,52 @@ const styles = StyleSheet.create({
   errorDetail: {
     ...typography.bodyMuted,
     textAlign: 'center',
+  },
+
+  // Weekly Goal Check screen
+  goalCheckTitle: {
+    fontSize: 26,
+    fontWeight: '800' as const,
+    color: colors.textPrimary,
+  },
+  goalCheckSubtitle: {
+    ...typography.body,
+    color: colors.textMuted,
+    lineHeight: 22,
+  },
+  goalCheckEmpty: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontStyle: 'italic' as const,
+  },
+  goalCheckItem: {
+    flexDirection: 'row' as const,
+    gap: 12,
+    padding: 14,
+    backgroundColor: colors.surfaceMute + '15',
+    borderRadius: 10,
+    alignItems: 'center' as const,
+  },
+  goalCheckBox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: colors.surfaceMute,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  goalCheckBoxDone: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  goalCheckItemText: {
+    ...typography.body,
+    color: colors.textPrimary,
+  },
+  goalCheckGoalLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: 2,
   },
 });

@@ -1,6 +1,6 @@
 import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, improvementPlans, planHabits, habitCheckins, manualCheckins, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext, type ImprovementPlan, type PlanHabit, type HabitCheckin, type ManualCheckin, type InsertManualCheckin } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, ne } from "drizzle-orm";
+import { eq, and, desc, ne, sql } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -70,6 +70,7 @@ export interface IStorage {
 
   // Manual checkin operations
   getManualCheckin(userId: string, date: string): Promise<ManualCheckin | undefined>;
+  getManualCheckins(userId: string, fromDate: string, toDate: string): Promise<ManualCheckin[]>;
   createManualCheckin(data: InsertManualCheckin): Promise<ManualCheckin>;
 }
 
@@ -369,6 +370,15 @@ export class DatabaseStorage implements IStorage {
     const [row] = await db.select().from(manualCheckins)
       .where(and(eq(manualCheckins.userId, userId), eq(manualCheckins.date, date)));
     return row || undefined;
+  }
+
+  async getManualCheckins(userId: string, fromDate: string, toDate: string): Promise<ManualCheckin[]> {
+    return db.select().from(manualCheckins)
+      .where(and(
+        eq(manualCheckins.userId, userId),
+        sql`${manualCheckins.date} >= ${fromDate} AND ${manualCheckins.date} <= ${toDate}`,
+      ))
+      .orderBy(desc(manualCheckins.date));
   }
 
   async createManualCheckin(data: InsertManualCheckin): Promise<ManualCheckin> {

@@ -72,6 +72,7 @@ type Goal = {
   microhabits: Microhabit[]; // daily habits — streak & progress tracked
   subgoals: Subgoal[];       // milestone to-dos — checked off, not streak-based
   createdAt: string;
+  completedAt?: string | null; // non-null = archived/completed
 };
 
 const STORAGE_KEY = '@fitsmart_goals';
@@ -468,6 +469,7 @@ export default function GoalsScreen() {
   const navigation = useNavigation();
   const scrollViewRef = useRef<ScrollView>(null);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [activeGoalsTab, setActiveGoalsTab] = useState<'Active' | 'Completed'>('Active');
   const [expandedGoalId, setExpandedGoalId] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [totalStreak, setTotalStreak] = useState(0);
@@ -649,6 +651,7 @@ export default function GoalsScreen() {
             microhabits: allItems.filter(h => !h.isSubgoal),
             subgoals: allItems.filter(h => h.isSubgoal).map(h => ({ text: h.text, done: h.done })),
             createdAt: g.createdAt || new Date().toISOString(),
+            completedAt: g.completedAt ?? null,
           };
         });
         setGoals(mapped);
@@ -726,6 +729,7 @@ export default function GoalsScreen() {
           progress: goal.progress,
           streak: goal.streak,
           microhabits: buildServerMicrohabits(goal),
+          completedAt: goal.completedAt ?? null,
         }),
       });
       console.log(`[GOALS] Updated goal on server: ${goal.id}`);
@@ -869,6 +873,23 @@ export default function GoalsScreen() {
     );
   };
 
+  // Mark goal as complete (archive it)
+  const completeGoal = (goalId: string) => {
+    const now = new Date().toISOString();
+    const updated = goals.map(g => g.id === goalId ? { ...g, completedAt: now } : g);
+    saveGoalsLocal(updated);
+    const goal = updated.find(g => g.id === goalId);
+    if (goal) updateGoalOnServer(goal);
+  };
+
+  // Restore a completed goal back to active
+  const restoreGoal = (goalId: string) => {
+    const updated = goals.map(g => g.id === goalId ? { ...g, completedAt: null } : g);
+    saveGoalsLocal(updated);
+    const goal = updated.find(g => g.id === goalId);
+    if (goal) updateGoalOnServer(goal);
+  };
+
   // Navigate to FitCoach with context
   const reviewWithCoach = () => {
     navigation.navigate('FitCoach', {
@@ -939,11 +960,12 @@ Identify:
                 Alert.alert('No Goals', 'Create a goal first before editing.');
                 return;
               }
+              const activeGoals = goals.filter(g => !g.completedAt);
               Alert.alert(
                 'Edit Goals',
                 'Select a goal to edit:',
                 [
-                  ...goals.map(goal => ({
+                  ...activeGoals.map(goal => ({
                     text: `${goal.emoji} ${goal.title}`,
                     onPress: () => editGoal(goal),
                   })),
@@ -958,37 +980,82 @@ Identify:
           </TouchableOpacity>
         </View>
 
-        {/* Goals List */}
-        {goals.length === 0 ? (
-          <Card style={styles.emptyState}>
-            <Text style={styles.emptyEmoji}>🎯</Text>
-            <Text style={styles.emptyTitle}>No goals yet</Text>
-            <Text style={styles.emptyText}>
-              Set your first goal to start tracking progress with FitSmart.
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyButton}
-              onPress={() => setShowAddModal(true)}
-            >
-              <Text style={styles.emptyButtonText}>Create Goal</Text>
-            </TouchableOpacity>
-          </Card>
-        ) : (
-          goals.map((goal) => (
-            <GoalCard
-              key={goal.id}
-              goal={goal}
-              expanded={expandedGoalId === goal.id}
-              onToggle={() =>
-                setExpandedGoalId(expandedGoalId === goal.id ? null : goal.id)
-              }
-              onToggleMicrohabit={toggleMicrohabit}
-              onToggleSubgoal={toggleSubgoal}
-              onDelete={deleteGoal}
-              scrollViewRef={scrollViewRef}
-            />
-          ))
-        )}
+        {/* Goals List — Active / Completed tabs */}
+        {(() => {
+          const activeGoals = goals.filter(g => !g.completedAt);
+          const completedGoals = goals.filter(g => !!g.completedAt);
+          return (
+            <>
+              {/* Segmented control */}
+              <View style={styles.goalsTabRow}>
+                {(['Active', 'Completed'] as const).map(tab => (
+                  <TouchableOpacity
+                    key={tab}
+                    style={[styles.goalsTab, activeGoalsTab === tab && styles.goalsTabActive]}
+                    onPress={() => setActiveGoalsTab(tab)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.goalsTabText, activeGoalsTab === tab && styles.goalsTabTextActive]}>
+                      {tab === 'Active' ? `Active (${activeGoals.length})` : `Completed (${completedGoals.length})`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {activeGoalsTab === 'Active' ? (
+                activeGoals.length === 0 ? (
+                  <Card style={styles.emptyState}>
+                    <Text style={styles.emptyEmoji}>🎯</Text>
+                    <Text style={styles.emptyTitle}>No goals yet</Text>
+                    <Text style={styles.emptyText}>
+                      Set your first goal to start tracking progress with FitSmart.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.emptyButton}
+                      onPress={() => setShowAddModal(true)}
+                    >
+                      <Text style={styles.emptyButtonText}>Create Goal</Text>
+                    </TouchableOpacity>
+                  </Card>
+                ) : (
+                  activeGoals.map(goal => (
+                    <GoalCard
+                      key={goal.id}
+                      goal={goal}
+                      expanded={expandedGoalId === goal.id}
+                      onToggle={() => setExpandedGoalId(expandedGoalId === goal.id ? null : goal.id)}
+                      onToggleMicrohabit={toggleMicrohabit}
+                      onToggleSubgoal={toggleSubgoal}
+                      onDelete={deleteGoal}
+                      onComplete={completeGoal}
+                      scrollViewRef={scrollViewRef}
+                    />
+                  ))
+                )
+              ) : (
+                completedGoals.length === 0 ? (
+                  <View style={styles.completedEmptyState}>
+                    <Text style={styles.completedEmptyText}>No completed goals yet.</Text>
+                  </View>
+                ) : (
+                  completedGoals.map(goal => (
+                    <GoalCard
+                      key={goal.id}
+                      goal={goal}
+                      expanded={expandedGoalId === goal.id}
+                      onToggle={() => setExpandedGoalId(expandedGoalId === goal.id ? null : goal.id)}
+                      onToggleMicrohabit={toggleMicrohabit}
+                      onToggleSubgoal={toggleSubgoal}
+                      onDelete={deleteGoal}
+                      onRestore={restoreGoal}
+                      scrollViewRef={scrollViewRef}
+                    />
+                  ))
+                )
+              )}
+            </>
+          );
+        })()}
 
         {/* Plan Completion Celebration Modal */}
         <Modal visible={showCompletionModal} transparent animationType="fade" onRequestClose={() => setShowCompletionModal(false)}>
@@ -2078,6 +2145,8 @@ function GoalCard({
   onToggleMicrohabit,
   onToggleSubgoal,
   onDelete,
+  onComplete,
+  onRestore,
   scrollViewRef,
 }: {
   goal: Goal;
@@ -2086,7 +2155,9 @@ function GoalCard({
   onToggleMicrohabit: (goalId: string, habitIndex: number) => void;
   onToggleSubgoal: (goalId: string, subgoalIndex: number) => void;
   onDelete: (goalId: string) => void;
-  scrollViewRef?: React.RefObject<ScrollView>;
+  onComplete?: (goalId: string) => void;
+  onRestore?: (goalId: string) => void;
+  scrollViewRef?: React.RefObject<ScrollView | null>;
 }) {
   const [animation] = useState(new Animated.Value(0));
   const cardYRef = useRef(0);
@@ -2208,6 +2279,18 @@ function GoalCard({
           )}
 
           <View style={styles.goalActions}>
+            {onComplete && (
+              <TouchableOpacity style={styles.completeGoalButton} onPress={() => onComplete(goal.id)}>
+                <Ionicons name="checkmark-circle-outline" size={18} color={colors.success} />
+                <Text style={styles.completeGoalButtonText}>Complete</Text>
+              </TouchableOpacity>
+            )}
+            {onRestore && (
+              <TouchableOpacity style={styles.restoreGoalButton} onPress={() => onRestore(goal.id)}>
+                <Ionicons name="refresh-outline" size={18} color={colors.textMuted} />
+                <Text style={styles.restoreGoalButtonText}>Restore</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.deleteButton} onPress={() => onDelete(goal.id)}>
               <Ionicons name="trash-outline" size={18} color="#FF5F56" />
               <Text style={styles.deleteButtonText}>Delete</Text>
@@ -2697,7 +2780,7 @@ function ContextPanel({
 
       {/* Tier 2 — Phase + Constraints */}
       <ContextTier
-        label="Phase & Constraints"
+        label="Phase"
         badge="Tier 2"
         summary={context.tier2Phase}
         expanded={expandedTier === 2}
@@ -4570,5 +4653,69 @@ const styles = StyleSheet.create({
     color: colors.bgPrimary,
     fontWeight: '700' as const,
     fontSize: 14,
+  },
+
+  // Goals Active/Completed tab toggle
+  goalsTabRow: {
+    flexDirection: 'row' as const,
+    gap: 8,
+    marginBottom: 12,
+  },
+  goalsTab: {
+    flex: 1,
+    paddingVertical: 9,
+    alignItems: 'center' as const,
+    borderRadius: 8,
+    backgroundColor: colors.surfaceMute + '15',
+  },
+  goalsTabActive: {
+    backgroundColor: colors.accent + '20',
+  },
+  goalsTabText: {
+    ...typography.small,
+    color: colors.textMuted,
+  },
+  goalsTabTextActive: {
+    color: colors.accent,
+    fontWeight: '600' as const,
+  },
+  completedEmptyState: {
+    alignItems: 'center' as const,
+    paddingVertical: 32,
+  },
+  completedEmptyText: {
+    ...typography.body,
+    color: colors.textMuted,
+  },
+  completeGoalButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.success + '60',
+    backgroundColor: colors.success + '10',
+  },
+  completeGoalButtonText: {
+    color: colors.success,
+    fontSize: 13,
+    fontWeight: '500' as const,
+  },
+  restoreGoalButton: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+  },
+  restoreGoalButtonText: {
+    color: colors.textMuted,
+    fontSize: 13,
+    fontWeight: '500' as const,
   },
 });

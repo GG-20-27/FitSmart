@@ -33,10 +33,10 @@ const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10
 
 // Suggested prompts for quick start
 const SUGGESTED_PROMPTS = [
-  "Create an image for my presentation",
-  "Give me ideas for what to do with my workout data",
-  "Analyze my recovery trends",
-  "Plan my training week",
+  "How can I improve my sleep quality?",
+  "Plan my training week based on my readiness",
+  "What should I eat to hit my protein target today?",
+  "Help me set a realistic fitness goal",
 ];
 
 async function postCoachMessage(message: string, jwt: string, imageUris?: string[]): Promise<string> {

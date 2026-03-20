@@ -113,6 +113,7 @@ export const userGoals = pgTable("user_goals", {
   emoji: text("emoji").notNull().default('🎯'),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  completedAt: timestamp("completed_at"),
 });
 
 export const fitScores = pgTable("fit_scores", {

@@ -352,9 +352,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     .subtitle { color: #b0c2cc; font-size: 15px; line-height: 1.5; margin-bottom: 28px }
     .field { text-align: left; margin-bottom: 16px }
     label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 6px; color: #b0c2cc }
-    input[type=password] {
+    .pw-wrap { position: relative }
+    .pw-wrap input {
       width: 100%;
-      padding: 14px 16px;
+      padding: 14px 48px 14px 16px;
       background: #051824;
       border: 1px solid #3b5265;
       border-radius: 12px;
@@ -363,7 +364,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       outline: none;
       -webkit-appearance: none;
     }
-    input[type=password]:focus { border-color: #27e9b5 }
+    .pw-wrap input:focus { border-color: #27e9b5 }
+    .eye-btn {
+      position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; cursor: pointer; padding: 4px;
+      color: #b0c2cc; font-size: 18px; line-height: 1; margin: 0; width: auto;
+    }
+    .eye-btn:hover { color: #fff }
     button {
       width: 100%;
       padding: 16px;
@@ -392,11 +399,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       <p class="subtitle">Choose a strong password for your FitSmart account.</p>
       <div class="field">
         <label for="pw">New password</label>
-        <input id="pw" type="password" placeholder="At least 8 characters" autocomplete="new-password">
+        <div class="pw-wrap">
+          <input id="pw" type="password" placeholder="At least 8 characters" autocomplete="new-password">
+          <button type="button" class="eye-btn" onclick="toggleEye('pw','eye1')" id="eye1">👁</button>
+        </div>
       </div>
       <div class="field">
         <label for="pw2">Confirm password</label>
-        <input id="pw2" type="password" placeholder="Repeat your password" autocomplete="new-password">
+        <div class="pw-wrap">
+          <input id="pw2" type="password" placeholder="Repeat your password" autocomplete="new-password">
+          <button type="button" class="eye-btn" onclick="toggleEye('pw2','eye2')" id="eye2">👁</button>
+        </div>
       </div>
       <button id="btn" onclick="submit()">Update password</button>
       <p id="err" class="error"></p>
@@ -409,6 +422,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   </div>
   <script>
     var TOKEN = ${JSON.stringify(token)};
+    function toggleEye(inputId, btnId) {
+      var input = document.getElementById(inputId);
+      var isHidden = input.type === 'password';
+      input.type = isHidden ? 'text' : 'password';
+      document.getElementById(btnId).textContent = isHidden ? '🙈' : '👁';
+    }
     function setError(msg) {
       document.getElementById('err').textContent = msg;
       document.getElementById('btn').disabled = false;
@@ -898,7 +917,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         message: message || 'Analyze these images',
         image,
         images,
-        goalsContext
+        goalsContext,
+        dataSource: (req as any).dataSource || 'whoop',
       });
       
       console.log(`[CHAT] Successfully processed chat request for user ${userId}`);
@@ -2106,6 +2126,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/checkin/recent?days=N — returns last N days of manual check-ins (default 7)
+  app.get('/api/checkin/recent', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Auth required' });
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? '7'), 10) || 7, 1), 30);
+      const toDate = new Date().toISOString().split('T')[0];
+      const fromDate = new Date(Date.now() - (days - 1) * 86400000).toISOString().split('T')[0];
+      const checkins = await storage.getManualCheckins(userId, fromDate, toDate);
+      res.json(checkins);
+    } catch (e) {
+      console.error('[CHECKIN] GET recent error:', e);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
   // POST /api/checkin — submit today's manual check-in
   app.post('/api/checkin', requireJWTAuth, async (req, res) => {
     try {
@@ -2117,14 +2153,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: 'Missing required fields: recovery, energy, sleepHours, sleepQuality' });
       }
 
-      // Sleep score mapping: <5h→3, 5–6h→5.5, 6–7h→7, 7–8h→8.5, 8h+→10
+      // Sleep score mapping: <5h→3, 5–6h→5, 6–7h→7, 7–8h→8, 8h+→9 (capped at 9 — sleep alone can't produce a perfect score)
       let sleepScore: number;
       const sh = Number(sleepHours);
       if (sh < 5) sleepScore = 3;
-      else if (sh < 6) sleepScore = 5.5;
+      else if (sh < 6) sleepScore = 5;
       else if (sh < 7) sleepScore = 7;
-      else if (sh < 8) sleepScore = 8.5;
-      else sleepScore = 10;
+      else if (sh < 8) sleepScore = 8;
+      else sleepScore = 9;
 
       // Recovery formula: 0.5 × recovery + 0.3 × energy + 0.2 × sleepScore
       const recoveryScore = Math.round((0.5 * Number(recovery) + 0.3 * Number(energy) + 0.2 * sleepScore) * 10) / 10;
@@ -4431,19 +4467,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         const sessionHour = parseInt(sessionLocalHour, 10); // 0-23
 
-        // Get WHOOP data and user context in parallel
-        const [whoopData, userCtxRows, goals] = await Promise.all([
-          whoopApiService.getDataForDate(userId, trainingDate),
+        const trainingDataSource = (req as any).dataSource || 'whoop';
+
+        // Get user context (same for both data sources)
+        const [userCtxRows, goals] = await Promise.all([
           db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1),
           db.select().from(userGoals).where(eq(userGoals.userId, userId)).orderBy(desc(userGoals.createdAt)),
         ]);
         const userCtx = userCtxRows[0] ?? null;
-
-        console.log(`[TRAINING] WHOOP data retrieved for ${trainingDate}:`, JSON.stringify(whoopData, null, 2));
-        console.log(`[TRAINING] - Recovery: ${whoopData?.recoveryScore}%`);
-        console.log(`[TRAINING] - Strain: ${whoopData?.strainScore}`);
-        console.log(`[TRAINING] - Sleep: ${whoopData?.sleepScore}%`);
-        console.log(`[TRAINING] - HRV: ${whoopData?.hrv}ms`);
 
         const fitnessGoal = goals.find(g =>
           g.category && ['fitness', 'training', 'health', 'strength', 'endurance'].some(
@@ -4454,18 +4485,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[TRAINING] User fitness goal: ${fitnessGoal || 'none'}`);
         console.log(`[TRAINING] User context: rehabStage=${userCtx?.rehabStage || 'none'}, primaryGoal=${userCtx?.tier1Goal || 'none'}, weeklyLoad=${userCtx?.tier3WeekLoad || 'none'}, injuryType=${userCtx?.injuryType || 'none'}`);
         console.log(`[TRAINING] Session local hour (Zurich): ${sessionHour}`);
+        console.log(`[TRAINING] Data source: ${trainingDataSource}`);
 
-        // Extract strain and recovery values explicitly
-        const strainValue = whoopData?.strainScore !== undefined && whoopData?.strainScore !== null
-          ? whoopData.strainScore
-          : undefined;
-        const recoveryValue = whoopData?.recoveryScore !== undefined && whoopData?.recoveryScore !== null
-          ? whoopData.recoveryScore
-          : undefined;
+        let strainValue: number | undefined;
+        let recoveryValue: number | undefined;
+        let sleepValue: number | undefined;
+        let manualRecoveryScore: number | undefined;
+        let hasSourceData = false;
 
-        console.log(`[TRAINING] Extracted values for score calculation:`);
-        console.log(`[TRAINING] - strainValue: ${strainValue} (raw: ${whoopData?.strainScore})`);
-        console.log(`[TRAINING] - recoveryValue: ${recoveryValue} (raw: ${whoopData?.recoveryScore})`);
+        if (trainingDataSource === 'manual') {
+          // Manual users: get today's check-in for recovery context
+          const checkin = await storage.getManualCheckin(userId, trainingDate);
+          if (checkin) {
+            manualRecoveryScore = checkin.recoveryScore;
+            hasSourceData = true;
+            console.log(`[TRAINING] Manual check-in: recoveryScore=${manualRecoveryScore}/10`);
+          } else {
+            console.log(`[TRAINING] No manual check-in found for ${trainingDate}`);
+          }
+        } else {
+          // WHOOP users: existing path
+          const whoopData = await whoopApiService.getDataForDate(userId, trainingDate);
+          console.log(`[TRAINING] WHOOP data retrieved for ${trainingDate}:`, JSON.stringify(whoopData, null, 2));
+          strainValue = whoopData?.strainScore !== undefined && whoopData?.strainScore !== null
+            ? whoopData.strainScore
+            : undefined;
+          recoveryValue = whoopData?.recoveryScore !== undefined && whoopData?.recoveryScore !== null
+            ? whoopData.recoveryScore
+            : undefined;
+          sleepValue = whoopData?.sleepScore !== undefined && whoopData?.sleepScore !== null
+            ? whoopData.sleepScore
+            : undefined;
+          hasSourceData = !!whoopData;
+          console.log(`[TRAINING] - strainValue: ${strainValue}, recoveryValue: ${recoveryValue}`);
+        }
 
         // Calculate training score
         const scoreResult = trainingScoreService.calculateTrainingScore({
@@ -4475,8 +4528,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           goal: goal || undefined,
           comment: comment || undefined,
           skipped: skipped || false,
+          dataSource: trainingDataSource,
           recoveryScore: recoveryValue,
           strainScore: strainValue,
+          manualRecoveryScore,
           fitnessGoal: fitnessGoal || undefined,
           rehabStage:  userCtx?.rehabStage  || undefined,
           primaryGoal: userCtx?.tier1Goal   || undefined,
@@ -4487,17 +4542,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         console.log(`[TRAINING] Score calculated: ${scoreResult.score}/10`);
         console.log(`[TRAINING] Score breakdown:`);
-        console.log(`[TRAINING] - Strain Appropriateness: ${scoreResult.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0 (strain=${strainValue}, recovery=${recoveryValue})`);
+        console.log(`[TRAINING] - ${trainingDataSource === 'manual' ? 'Effort Fit' : 'Strain Appropriateness'}: ${scoreResult.breakdown.strainAppropriatenessScore.toFixed(1)}/4.0`);
         console.log(`[TRAINING] - Session Quality: ${scoreResult.breakdown.sessionQualityScore.toFixed(1)}/3.0`);
         console.log(`[TRAINING] - Goal Alignment: ${scoreResult.breakdown.goalAlignmentScore.toFixed(1)}/2.0`);
         console.log(`[TRAINING] - Injury Safety: ${scoreResult.breakdown.injurySafetyModifier.toFixed(1)}/1.0`);
-        console.log(`[TRAINING] - rehabActive: ${scoreResult.rehabActive}`);
-        console.log(`[TRAINING] - strainGuardApplied: ${scoreResult.strainGuardApplied}`);
-
-        // Get GPT analysis - use same extracted values
-        const sleepValue = whoopData?.sleepScore !== undefined && whoopData?.sleepScore !== null
-          ? whoopData.sleepScore
-          : undefined;
 
         const gptAnalysis = await openAIService.analyzeTrainingSession({
           trainingType: type,
@@ -4512,7 +4560,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           sleepScore: sleepValue,
           recoveryZone: scoreResult.recoveryZone,
           userGoal: fitnessGoal || undefined,
-          whoopDataMissing: !whoopData,
+          dataSource: trainingDataSource,
+          manualRecoveryScore: trainingDataSource === 'manual' ? manualRecoveryScore : undefined,
+          whoopDataMissing: trainingDataSource !== 'manual' && !hasSourceData,
           rehabActive: scoreResult.rehabActive,
           rehabStage: userCtx?.rehabStage || undefined,
           injuryType: (userCtx?.injuryType && userCtx.injuryType !== 'None') ? userCtx.injuryType : undefined,
@@ -4523,17 +4573,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[TRAINING] GPT analysis complete`);
         console.log(`[TRAINING] GPT analysis text: ${gptAnalysis.training_analysis.substring(0, 100)}...`);
 
-        // When WHOOP data is absent, report zone as 'unknown' — internal scoring still used
-        // 'yellow' as a conservative band default, but we don't expose that as a real zone.
-        const reportedZone = whoopData ? scoreResult.recoveryZone : 'unknown';
+        // Manual users always have a known zone; WHOOP without data reports 'unknown'
+        const reportedZone = trainingDataSource === 'manual'
+          ? scoreResult.recoveryZone
+          : (hasSourceData ? scoreResult.recoveryZone : 'unknown');
 
-        // Store analysis result with extracted values
+        // Store analysis result
         const analysisData = {
           score: scoreResult.score,
           breakdown: scoreResult.breakdown,
           analysis: gptAnalysis.training_analysis,
           recoveryZone: reportedZone,
-          whoopDataMissing: !whoopData,
+          whoopDataMissing: !hasSourceData,
+          safetyFlag: scoreResult.safetyFlag ?? null,
           whoopData: {
             recoveryScore: recoveryValue,
             strainScore: strainValue,
@@ -4786,6 +4838,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { date, waterIntakeBand } = req.body;
       const tz = process.env.USER_TZ || 'Europe/Zurich';
       const targetDate = date || todayKey(tz);
+      const fitscoreDataSource = (req as any).dataSource || 'whoop';
 
       if (!userId) {
         return res.status(401).json({
@@ -4794,10 +4847,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      console.log(`[FITSCORE] Calculating FitScore for user: ${userId}, date: ${targetDate}`);
+      console.log(`[FITSCORE] Calculating FitScore for user: ${userId}, date: ${targetDate}, dataSource: ${fitscoreDataSource}`);
 
       // Import the recovery score service
       const { recoveryScoreService } = await import('./services/recoveryScoreService');
+
+      // For manual users: fetch today's check-in upfront
+      let manualCheckinForFitScore: any = null;
+      if (fitscoreDataSource === 'manual') {
+        try {
+          manualCheckinForFitScore = await storage.getManualCheckin(userId, targetDate);
+          console.log(`[FITSCORE] Manual check-in: recoveryScore=${manualCheckinForFitScore?.recoveryScore ?? 'none'}/10`);
+        } catch {
+          console.log('[FITSCORE] Failed to get manual check-in — using default recovery');
+        }
+      }
 
       // 1. Get WHOOP data for the target date
       // For today: use getTodaysData (has reliable sleep_hours from live API)
@@ -4920,13 +4984,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         : undefined;
 
       // 3. Calculate Recovery Score
-      const recoveryResult = recoveryScoreService.calculateRecoveryScore({
-        recoveryPercent: whoopData?.recoveryScore ?? undefined,
-        sleepHours: whoopData?.sleepHours ?? undefined,
-        sleepScorePercent: whoopData?.sleepScore ?? undefined,
-        hrv: whoopData?.hrv ?? undefined,
-        hrvBaseline: hrvBaseline ?? undefined,
-      });
+      let recoveryResult: Awaited<ReturnType<typeof recoveryScoreService.calculateRecoveryScore>>;
+      if (fitscoreDataSource === 'manual' && manualCheckinForFitScore) {
+        // Manual users: build recovery result from morning check-in composite score
+        const rs = Math.max(1, Math.min(10, manualCheckinForFitScore.recoveryScore));
+        const rz: 'green' | 'yellow' | 'red' = rs >= 7 ? 'green' : rs >= 5 ? 'yellow' : 'red';
+        recoveryResult = {
+          score: rs,
+          breakdown: {
+            recoveryScaled: manualCheckinForFitScore.recovery,
+            sleepQuality: manualCheckinForFitScore.energy,
+            hrvScaled: 0,
+          },
+          analysis: `Recovery ${manualCheckinForFitScore.recovery}/10, Energy ${manualCheckinForFitScore.energy}/10, Sleep ${manualCheckinForFitScore.sleepHours}h (${manualCheckinForFitScore.sleepQuality}).`,
+          recoveryZone: rz,
+        };
+      } else {
+        recoveryResult = recoveryScoreService.calculateRecoveryScore({
+          recoveryPercent: whoopData?.recoveryScore ?? undefined,
+          sleepHours: whoopData?.sleepHours ?? undefined,
+          sleepScorePercent: whoopData?.sleepScore ?? undefined,
+          hrv: whoopData?.hrv ?? undefined,
+          hrvBaseline: hrvBaseline ?? undefined,
+        });
+      }
 
       console.log(`[FITSCORE] Recovery score: ${recoveryResult.score}/10`);
 
@@ -4953,8 +5034,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             goal: session.goal,
             comment: session.comment,
             skipped: session.skipped,
-            recoveryScore: whoopData?.recoveryScore,
-            strainScore: whoopData?.strainScore,
+            dataSource: fitscoreDataSource,
+            recoveryScore: fitscoreDataSource === 'manual' ? undefined : whoopData?.recoveryScore,
+            strainScore: fitscoreDataSource === 'manual' ? undefined : whoopData?.strainScore,
+            manualRecoveryScore: fitscoreDataSource === 'manual' ? manualCheckinForFitScore?.recoveryScore : undefined,
             fitnessGoal,
             rehabStage,
             primaryGoal,
@@ -5171,6 +5254,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           hrv: whoopData?.hrv,
           hrvBaseline,
         },
+        manualCheckinData: fitscoreDataSource === 'manual' && manualCheckinForFitScore ? {
+          recoveryScore: manualCheckinForFitScore.recoveryScore,
+          recovery: manualCheckinForFitScore.recovery,
+          energy: manualCheckinForFitScore.energy,
+          sleepHours: manualCheckinForFitScore.sleepHours,
+        } : undefined,
+        dataSource: fitscoreDataSource,
         advancedRecoverySignals,
         sleepDebtMinutes,
         yesterdayData: {
@@ -5267,7 +5357,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sleepDebtMinutes,
       } = req.body;
 
-      console.log(`[COACH SUMMARY] Generating summary for user: ${userId}, fitScore: ${fitScore}`);
+      // Determine data source for this user
+      const fitscoreDataSource = (req as any).dataSource || 'whoop';
+
+      // Fetch today's manual check-in if needed
+      let manualCheckinForFitScore: { recoveryScore: number } | null = null;
+      if (fitscoreDataSource === 'manual') {
+        try {
+          const todayForCheckin = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+          manualCheckinForFitScore = await storage.getManualCheckin(userId, todayForCheckin);
+        } catch { /* graceful */ }
+      }
+
+      console.log(`[COACH SUMMARY] Generating summary for user: ${userId}, fitScore: ${fitScore}, dataSource: ${fitscoreDataSource}`);
 
       // Get user's fitness goal
       const [userGoal] = await db
@@ -5290,7 +5392,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ctx = await storage.getUserContext(userId);
         if (ctx) {
           const parts = [
-            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, phase=${ctx.tier2Phase}, emphasis=${ctx.tier2Emphasis}`,
+            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, training phase=${ctx.tier2Phase}, diet phase=${ctx.tier2DietPhase}, emphasis=${ctx.tier2Emphasis}`,
             `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
           ];
           if (ctx.workHoursPerWeek) parts.push(`Work hours/week: ${ctx.workHoursPerWeek}`);
@@ -5408,6 +5510,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         sleepDebtMinutes: sleepDebtMinutes ?? undefined,
         mealMacros,
         recentTrainingHistory,
+        dataSource: fitscoreDataSource,
+        manualReadinessScore: fitscoreDataSource === 'manual' ? (manualCheckinForFitScore?.recoveryScore ?? undefined) : undefined,
       });
 
       console.log(`[COACH SUMMARY] Summary generated successfully`);
@@ -5518,6 +5622,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       console.log(`[FITLOOK] Generating FitLook for user=${userId} date=${todayLocal} feeling=${checkin.feeling}`);
+
+      const fitlookDataSource = (req as any).dataSource || 'whoop';
+
+      // For manual users: get today's readiness from morning check-in
+      let fitlookManualReadiness: number | undefined;
+      let fitlookManualSleepHours: number | undefined;
+      if (fitlookDataSource === 'manual') {
+        try {
+          const mc = await storage.getManualCheckin(userId, todayLocal);
+          if (mc) {
+            fitlookManualReadiness = mc.recoveryScore;
+            fitlookManualSleepHours = mc.sleepHours;
+          }
+        } catch { /* graceful */ }
+      }
 
       // Gather inputs (all gracefully optional)
       let recoveryPercent: number | undefined;
@@ -5656,7 +5775,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ctx = await storage.getUserContext(userId);
         if (ctx) {
           const parts = [
-            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, phase=${ctx.tier2Phase}, emphasis=${ctx.tier2Emphasis}`,
+            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, training phase=${ctx.tier2Phase}, diet phase=${ctx.tier2DietPhase}, emphasis=${ctx.tier2Emphasis}`,
             `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
           ];
           if (ctx.workHoursPerWeek) parts.push(`Work hours/week: ${ctx.workHoursPerWeek}`);
@@ -5672,10 +5791,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payload = await openAIService.generateFitLook({
         dateLocal: todayLocal,
         feeling: checkin.feeling,
-        recoveryPercent,
-        sleepHours,
-        hrv,
-        strainScore,
+        dataSource: fitlookDataSource,
+        manualReadinessScore: fitlookDataSource === 'manual' ? fitlookManualReadiness : undefined,
+        recoveryPercent: fitlookDataSource !== 'manual' ? recoveryPercent : undefined,
+        sleepHours: fitlookDataSource === 'manual' ? (fitlookManualSleepHours ?? sleepHours) : sleepHours,
+        hrv: fitlookDataSource !== 'manual' ? hrv : undefined,
+        strainScore: fitlookDataSource !== 'manual' ? strainScore : undefined,
         yesterdayFitScore,
         yesterdayBreakdown,
         fitScoreTrend3d,
@@ -5683,8 +5804,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userGoalTitle,
         injuryNotes,
         userContextSummary: fitlookContextSummary,
-        advancedRecoverySignals: fitlookAdvancedSignals,
-        sleepDebtMinutes: fitlookSleepDebtMinutes,
+        advancedRecoverySignals: fitlookDataSource !== 'manual' ? fitlookAdvancedSignals : undefined,
+        sleepDebtMinutes: fitlookDataSource !== 'manual' ? fitlookSleepDebtMinutes : undefined,
       });
 
       // Store immutably
@@ -5839,14 +5960,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch { /* graceful */ }
 
-      // Recovery trend from WHOOP
+      const roastDataSource = (req as any).dataSource || 'whoop';
+
+      // Recovery trend / readiness — branch by data source
       let recoveryTrend: string | undefined;
-      try {
-        const whoopToday = await whoopApiService.getTodaysData(userId);
-        if (whoopToday?.recovery_score) {
-          avgRecovery = whoopToday.recovery_score;
-        }
-      } catch { /* graceful */ }
+      let avgReadiness: number | undefined;
+      if (roastDataSource === 'manual') {
+        // Average manual readiness across the week
+        try {
+          const days: string[] = [];
+          for (let i = 0; i < 7; i++) days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+          const scores: number[] = [];
+          for (const day of days) {
+            const mc = await storage.getManualCheckin(userId, day);
+            if (mc) scores.push(mc.recoveryScore);
+          }
+          if (scores.length > 0) {
+            avgReadiness = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
+          }
+        } catch { /* graceful */ }
+      } else {
+        try {
+          const whoopToday = await whoopApiService.getTodaysData(userId);
+          if (whoopToday?.recovery_score) {
+            avgRecovery = whoopToday.recovery_score;
+          }
+        } catch { /* graceful */ }
+      }
 
       // Training count this week
       let trainingCount: number | undefined;
@@ -5925,7 +6065,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const ctx = await storage.getUserContext(userId);
         if (ctx) {
           const parts = [
-            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, phase=${ctx.tier2Phase}, emphasis=${ctx.tier2Emphasis}`,
+            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, training phase=${ctx.tier2Phase}, diet phase=${ctx.tier2DietPhase}, emphasis=${ctx.tier2Emphasis}`,
             `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
           ];
           if (ctx.injuryType && ctx.injuryType !== 'None') {
@@ -5948,6 +6088,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Generate
       const roastIntensity = req.body?.intensity as 'Light' | 'Spicy' | 'Savage' | undefined;
+      const weeklyGoalReview = req.body?.weeklyGoalReview as {
+        completedSubGoalsCount: number;
+        completedSubGoals: string[];
+        remainingSubGoals: string[];
+      } | undefined;
       const payload = await openAIService.generateFitRoast({
         weekStart,
         weekEnd,
@@ -5957,7 +6102,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         bestDay,
         worstDay,
         recoveryTrend,
-        avgRecovery,
+        avgRecovery: roastDataSource !== 'manual' ? avgRecovery : undefined,
+        dataSource: roastDataSource,
+        avgReadiness: roastDataSource === 'manual' ? avgReadiness : undefined,
         trainingCount,
         nutritionLogDays,
         totalDays: 7,
@@ -5967,6 +6114,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userContextSummary: roastContextSummary,
         intensity: roastIntensity,
         lastTheme: lastRoastTheme,
+        weeklyGoalReview,
       });
 
       // Store
@@ -6049,6 +6197,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...(body.tier1Goal !== undefined && { tier1Goal: body.tier1Goal }),
         ...(body.tier1Priority !== undefined && { tier1Priority: body.tier1Priority }),
         ...(body.tier2Phase !== undefined && { tier2Phase: body.tier2Phase }),
+        ...(body.tier2DietPhase !== undefined && { tier2DietPhase: body.tier2DietPhase }),
         ...(tier2Emphasis !== undefined && { tier2Emphasis }),
         sportSpecific,
         injuryType,

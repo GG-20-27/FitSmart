@@ -44,6 +44,7 @@ interface SendChatOptions {
   image?: string; // Base64 encoded image (deprecated)
   images?: string[]; // Base64 encoded images (supports multiple)
   goalsContext?: string; // User's goals and habits context
+  dataSource?: 'whoop' | 'manual'; // manual = no WHOOP device
 }
 
 const SYSTEM_PROMPT = `You are FitScore AI Coach - a warm, engaging health assistant.
@@ -295,7 +296,7 @@ export class ChatService {
     }
   }
 
-  public async sendChat({ userId, message, image, images, goalsContext }: SendChatOptions): Promise<ChatResponse> {
+  public async sendChat({ userId, message, image, images, goalsContext, dataSource }: SendChatOptions): Promise<ChatResponse> {
     if (!this.isConfigured()) {
       throw new ChatServiceError({
         type: ChatErrorType.CONFIGURATION_ERROR,
@@ -315,9 +316,33 @@ export class ChatService {
     try {
       // === PERSONA PIPELINE STEP 1: Build Context Pack ===
       const t0 = Date.now();
-      console.log('[CHAT] 🔄 Starting persona pipeline...');
+      console.log(`[CHAT] 🔄 Starting persona pipeline... dataSource=${dataSource || 'whoop'}`);
       const contextPack = await buildContextPack(userId);
       console.log(`[CHAT] ⏱ Context pack: ${Date.now() - t0}ms`);
+
+      // For manual users: fetch today's check-in for readiness context
+      let manualCheckinData: { readinessScore: number; recovery: number; energy: number; sleepHours: number } | undefined;
+      if (dataSource === 'manual') {
+        try {
+          const { storage } = await import('./storage');
+          const { DateTime } = await import('luxon');
+          const todayLocal = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+          const checkin = await storage.getManualCheckin(userId, todayLocal);
+          if (checkin) {
+            manualCheckinData = {
+              readinessScore: checkin.recoveryScore,
+              recovery: checkin.recovery,
+              energy: checkin.energy,
+              sleepHours: checkin.sleepHours,
+            };
+            console.log(`[CHAT] Manual check-in found: readiness=${manualCheckinData.readinessScore.toFixed(1)}, recovery=${manualCheckinData.recovery}, energy=${manualCheckinData.energy}, sleep=${manualCheckinData.sleepHours}h`);
+          } else {
+            console.log('[CHAT] Manual mode but no check-in found for today');
+          }
+        } catch (e) {
+          console.error('[CHAT] Failed to fetch manual check-in:', e);
+        }
+      }
 
       // Fetch chat history for context continuity
       console.log('[CHAT SERVICE] Fetching recent chat history...');
@@ -944,7 +969,9 @@ export class ChatService {
           (this as any).fitScoreTableForPersona,
           trainingEvent,
           recentMessages,
-          finalGoalsContext
+          finalGoalsContext ?? undefined,
+          dataSource,
+          manualCheckinData
         );
 
         systemPrompt = promptResult.systemPrompt;
@@ -960,7 +987,9 @@ export class ChatService {
           contextPack,
           userProfile,
           recentMessages,
-          finalGoalsContext
+          finalGoalsContext ?? undefined,
+          dataSource,
+          manualCheckinData
         );
 
         systemPrompt = promptResult.systemPrompt;

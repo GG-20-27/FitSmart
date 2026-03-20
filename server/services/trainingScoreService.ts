@@ -17,9 +17,15 @@ export interface TrainingScoreInput {
   comment?: string; // User comment
   skipped: boolean;
 
-  // WHOOP data for the date
+  // Data source — determines which recovery signal is used
+  dataSource?: 'whoop' | 'manual'; // defaults to 'whoop'
+
+  // WHOOP data for the date (used when dataSource === 'whoop')
   recoveryScore?: number; // 0-100
   strainScore?: number; // WHOOP strain (typically 0-21)
+
+  // Manual check-in data (used when dataSource === 'manual')
+  manualRecoveryScore?: number; // 0-10 (composite from morning check-in)
 
   // User's fitness goal from user_goals table
   fitnessGoal?: string;
@@ -44,6 +50,7 @@ export interface TrainingScoreResult {
   recoveryZone: 'green' | 'yellow' | 'red';
   rehabActive?: boolean;       // true when user is in any rehab/post-surgery context
   strainGuardApplied?: boolean; // true when early-day strain guard was applied
+  safetyFlag?: string;         // human-readable safety concern when a penalty was applied (for FitCoach / FitLook)
 }
 
 export class TrainingScoreService {
@@ -65,8 +72,10 @@ export class TrainingScoreService {
       };
     }
 
-    // Determine recovery zone
-    const recoveryZone = this.getRecoveryZone(input.recoveryScore);
+    // Determine recovery zone — manual users use 0-10 scale, WHOOP users use 0-100
+    const recoveryZone = input.dataSource === 'manual'
+      ? this.getManualRecoveryZone(input.manualRecoveryScore)
+      : this.getRecoveryZone(input.recoveryScore);
 
     // Determine rehabActive for result exposure (same logic as getExpectedStrainBand)
     const rehab = (input.rehabStage  || '').toLowerCase();
@@ -88,12 +97,10 @@ export class TrainingScoreService {
       inj.includes('post-op');
 
     // Calculate each component
-    const strainAppropriatenessScore = this.calculateStrainAppropriateness(
-      input.strainScore,
-      recoveryZone,
-      input.recoveryScore,
-      input
-    );
+    // For manual users: use effort fit (recovery zone × intensity) instead of strain appropriateness
+    const strainAppropriatenessScore = input.dataSource === 'manual'
+      ? this.calculateManualEffortFit(recoveryZone, input.intensity, input.manualRecoveryScore === undefined)
+      : this.calculateStrainAppropriateness(input.strainScore, recoveryZone, input.recoveryScore, input);
 
     const sessionQualityScore = this.calculateSessionQuality(
       input.duration,
@@ -107,13 +114,19 @@ export class TrainingScoreService {
       input.fitnessGoal
     );
 
-    const injurySafetyModifier = this.calculateInjurySafety(
-      input.recoveryScore,
+    // Normalise recovery to 0-100 scale for injury safety check
+    const recoveryForInjury = input.dataSource === 'manual' && input.manualRecoveryScore !== undefined
+      ? input.manualRecoveryScore * 10
+      : input.recoveryScore;
+    const injuryResult = this.calculateInjurySafety(
+      recoveryForInjury,
       input.intensity,
       input.comment,
       rehabActive,
       input.type
     );
+    const injurySafetyModifier = injuryResult.score;
+    const safetyFlag = injuryResult.flag;
 
     // Total score (0-10 scale)
     let totalScore =
@@ -123,7 +136,8 @@ export class TrainingScoreService {
       injurySafetyModifier;
 
     // Cap at 7.0 when WHOOP strain is missing — can't fully validate appropriateness
-    if (!input.strainScore) {
+    // Skip this cap for manual users: effort fit replaces strain, so the cap doesn't apply
+    if (input.dataSource !== 'manual' && !input.strainScore) {
       totalScore = Math.min(totalScore, 7.0);
     }
 
@@ -160,7 +174,8 @@ export class TrainingScoreService {
         sessionQualityScore,
         goalAlignmentScore,
         injurySafetyModifier,
-      }
+      },
+      safetyFlag
     );
 
     return {
@@ -175,11 +190,12 @@ export class TrainingScoreService {
       recoveryZone,
       rehabActive,
       strainGuardApplied,
+      safetyFlag,
     };
   }
 
   /**
-   * Determine recovery zone based on recovery score
+   * Determine recovery zone based on WHOOP recovery score (0-100)
    */
   private getRecoveryZone(recoveryScore?: number): 'green' | 'yellow' | 'red' {
     if (!recoveryScore) return 'yellow'; // Default to caution
@@ -187,6 +203,36 @@ export class TrainingScoreService {
     if (recoveryScore >= 70) return 'green';   // 70-100%: Ready
     if (recoveryScore >= 40) return 'yellow';  // 40-69%: Monitor
     return 'red';                               // 0-39%: Rest
+  }
+
+  /**
+   * Determine recovery zone for manual users (0-10 scale)
+   */
+  private getManualRecoveryZone(score?: number): 'green' | 'yellow' | 'red' {
+    if (score === undefined) return 'yellow';
+    if (score >= 7) return 'green';  // 7-10: Ready
+    if (score >= 5) return 'yellow'; // 5-6.9: Monitor
+    return 'red';                    // 0-4.9: Rest
+  }
+
+  /**
+   * Calculate effort fit for manual users (replaces strain appropriateness, 0-4 points).
+   * Rewards effort that matches recovery zone.
+   * When noCheckin is true (no morning check-in logged), cap at 3.0 — readiness is unknown.
+   */
+  private calculateManualEffortFit(
+    recoveryZone: 'green' | 'yellow' | 'red',
+    intensity?: string,
+    noCheckin = false
+  ): number {
+    const int = intensity?.toLowerCase();
+    const matrix: Record<string, Record<string, number>> = {
+      green:  { high: 4.0, moderate: 3.5, low: 2.0 },
+      yellow: { moderate: 4.0, low: 2.5, high: 2.5 },
+      red:    { low: 3.5, moderate: 2.5, high: 1.5 },
+    };
+    const raw = (int && matrix[recoveryZone][int] !== undefined) ? matrix[recoveryZone][int] : 2.5;
+    return noCheckin ? Math.min(raw, 3.0) : raw;
   }
 
   /**
@@ -359,12 +405,13 @@ export class TrainingScoreService {
       score += 0.6; // No intensity specified
     }
 
-    // Comment sentiment (0-0.8 points)
+    // Comment sentiment (0-1.0 points when present, 0.4 neutral when absent)
+    // Comments are a high-value modifier — they improve accuracy when present but are not required.
     if (comment) {
       const sentiment = this.analyzeCommentSentiment(comment);
-      score += sentiment * 0.8;
+      score += sentiment * 1.0; // Range 0.0–1.0: positive → boost, negative → meaningful reduction
     } else {
-      score += 0.4; // No comment = neutral
+      score += 0.4; // No comment = neutral baseline — not a penalty
     }
 
     // Short-session inflation guard: token sessions can't score highly
@@ -472,8 +519,9 @@ export class TrainingScoreService {
   ];
 
   /**
-   * Calculate injury safety modifier (10% of total score = 0-1 points)
-   * Penalizes high intensity training when recovery is poor
+   * Calculate injury safety modifier (10% of total score = 0-1 points).
+   * Returns both the numeric score and an optional safetyFlag string when a concern is detected.
+   * Penalizes high intensity training when recovery is poor.
    */
   private calculateInjurySafety(
     recoveryScore?: number,
@@ -481,7 +529,7 @@ export class TrainingScoreService {
     comment?: string,
     rehabActive?: boolean,
     type?: string
-  ): number {
+  ): { score: number; flag?: string } {
     const HIGH_IMPACT = ['sprint', 'plyometric', 'hiit', 'max effort', 'jump', 'explosive', 'box jump'];
 
     if (comment) {
@@ -489,24 +537,22 @@ export class TrainingScoreService {
       const hasSeverePain = TrainingScoreService.SEVERE_PAIN_KEYWORDS.some(k => commentLower.includes(k));
 
       // ── Universal severe pain: floor injurySafety regardless of rehab context ──
-      // If a user reports severe/acute pain, the session is a safety concern no matter what.
       if (hasSeverePain) {
-        // Additionally escalate to full 0.0 when combined with rehab context + high-impact type
         if (rehabActive && type) {
-          const typeLower   = type.toLowerCase();
+          const typeLower    = type.toLowerCase();
           const isHighImpact = HIGH_IMPACT.some(t => typeLower.includes(t));
           if (isHighImpact) {
             console.log('[TRAINING] injuryOverrideApplied: rehab + high-impact + severe pain → injurySafety = 0.0');
-            return 0.0;
+            return { score: 0.0, flag: 'Acute pain reported during high-impact activity in a rehab context — session intensity was inappropriate for your current stage.' };
           }
         }
-        // Severe pain alone (no rehab / no high-impact): still floor to 0.0
         console.log('[TRAINING] severePainDetected: universal override → injurySafety = 0.0');
-        return 0.0;
+        return { score: 0.0, flag: 'Acute or severe pain reported — this session may have caused harm. Prioritise recovery and consider consulting a professional.' };
       }
     }
 
     let score = 1.0; // Start with full points
+    let flag: string | undefined;
 
     // Check for moderate red flags in comment
     if (comment) {
@@ -514,8 +560,9 @@ export class TrainingScoreService {
                         'strained', 'aching', 'tender', 'bruised', 'swollen'];
       const commentLower = comment.toLowerCase();
 
-      if (redFlags.some(flag => commentLower.includes(flag))) {
-        score -= 0.4; // Penalty for pain/injury mentions
+      if (redFlags.some(f => commentLower.includes(f))) {
+        score -= 0.5; // Increased from 0.4 — discomfort/pain is a meaningful signal
+        flag = 'Discomfort or pain reported — take care to allow adequate recovery before the next session.';
       }
     }
 
@@ -524,13 +571,15 @@ export class TrainingScoreService {
       const intensityLower = intensity.toLowerCase();
 
       if (recoveryScore < 40 && intensityLower === 'high') {
-        score -= 0.4; // High intensity in red zone
+        score -= 0.6; // Increased from 0.4 — high intensity in red zone is a clear safety concern
+        flag = 'You pushed hard despite low recovery — training intensity did not match your readiness and reduced your score.';
       } else if (recoveryScore < 55 && intensityLower === 'high') {
-        score -= 0.2; // High intensity in lower yellow zone
+        score -= 0.3; // Increased from 0.2 — high intensity in lower yellow zone
+        flag = flag ?? 'High intensity with moderate recovery — consider matching effort to your readiness level.';
       }
     }
 
-    return Math.max(0, Math.min(1, score));
+    return { score: Math.max(0, Math.min(1, score)), flag };
   }
 
   /**
@@ -574,7 +623,8 @@ export class TrainingScoreService {
       sessionQualityScore: number;
       goalAlignmentScore: number;
       injurySafetyModifier: number;
-    }
+    },
+    safetyFlag?: string
   ): string {
     const rehab   = (input.rehabStage  || '').toLowerCase();
     const goal    = (input.primaryGoal || '').toLowerCase();
@@ -675,8 +725,10 @@ export class TrainingScoreService {
       parts.push(`This session aligns well with your ${input.fitnessGoal} goal`);
     }
 
-    // Injury safety
-    if (breakdown.injurySafetyModifier < 0.8) {
+    // Injury safety — use specific flag message when available, fall back to generic
+    if (safetyFlag) {
+      parts.push(safetyFlag);
+    } else if (breakdown.injurySafetyModifier < 0.8) {
       parts.push('Take care to avoid overtraining and allow adequate recovery');
     }
 

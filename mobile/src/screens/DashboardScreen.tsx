@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiRequest } from '../api/client';
+import { apiRequest, getDataSource } from '../api/client';
 import { colors, spacing, radii, typography, state } from '../theme';
 import { Card } from '../ui/components';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,7 +23,7 @@ import Svg, { Circle, LinearGradient, Stop, Defs } from 'react-native-svg';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// ─── Dynamic forecast copy — rotates daily, never the same two days running ──
+// ─── WHOOP: Dynamic forecast copy — rotates daily ─────────────────────────────
 
 const FORECAST_COPY: Record<'high' | 'mid' | 'low', Array<{ line1: string; line2: string }>> = {
   high: [
@@ -59,6 +59,46 @@ function getDynamicForecastLines(score: number): { line1: string; line2: string 
   const s = score.toFixed(1);
   return { line1: line1.replace('{s}', s), line2: line2.replace('{s}', s) };
 }
+
+// ─── Manual: Input-based direction copy ───────────────────────────────────────
+
+const MANUAL_COPY: Record<'high' | 'mid' | 'low', Array<{ line1: string; line2: string }>> = {
+  high: [
+    { line1: 'Your inputs point to a strong day.', line2: 'Good recovery and energy — lean into it.' },
+    { line1: 'High readiness based on your check-in.', line2: 'Make the most of it.' },
+    { line1: 'Recovery, energy, and sleep are aligned.', line2: 'Push where it counts today.' },
+  ],
+  mid: [
+    { line1: 'Moderate readiness today.', line2: 'Smart effort beats hard effort.' },
+    { line1: 'Your inputs suggest a steady day.', line2: 'Consistency over intensity.' },
+    { line1: 'Work with your current state.', line2: 'Nail the basics and build on them.' },
+  ],
+  low: [
+    { line1: 'Lower readiness today — your inputs say recover.', line2: 'Rest is part of the plan, not a detour.' },
+    { line1: 'Your inputs suggest a lighter day.', line2: 'Focus on sleep and restoration tonight.' },
+    { line1: 'Low energy logged today — dial it back.', line2: 'Conservation now is performance tomorrow.' },
+  ],
+};
+
+function getManualDirectionLines(score: number): { line1: string; line2: string } {
+  const zone = score >= 7 ? 'high' : score >= 5 ? 'mid' : 'low';
+  const variants = MANUAL_COPY[zone];
+  const dayOfYear = Math.floor(
+    (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86400000
+  );
+  return variants[dayOfYear % variants.length];
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type ManualCheckin = {
+  date: string;
+  recovery: number;
+  energy: number;
+  sleepHours: number;
+  sleepQuality: string;
+  recoveryScore: number;
+};
 
 type FitScoreForecast = {
   forecast: number;
@@ -115,68 +155,70 @@ type LastWeekMetrics = {
   hrv?: number;
 };
 
-type CalendarEvent = {
-  title: string;
-  start: string;
-  location?: string;
-};
+// ─── Color helpers ────────────────────────────────────────────────────────────
 
-// Color threshold helpers based on WHOOP spec
 const getRecoveryColor = (value: number): string => {
-  if (value >= 67) return state.ready; // Green
-  if (value >= 34) return '#F5A623'; // Yellow
-  return state.rest; // Red
+  if (value >= 67) return state.ready;
+  if (value >= 34) return '#F5A623';
+  return state.rest;
 };
 
 const getSleepColor = (value: number): string => {
-  if (value >= 80) return state.ready; // Green
-  if (value >= 50) return '#F5A623'; // Yellow
-  return state.rest; // Red
+  if (value >= 80) return state.ready;
+  if (value >= 50) return '#F5A623';
+  return state.rest;
 };
 
 const getStrainColor = (strain: number, recoveryScore?: number): string => {
-  // Strain color depends on recovery zone
   if (!recoveryScore || recoveryScore >= 67) {
-    // High recovery - can handle higher strain
     if (strain <= 14) return state.ready;
     if (strain <= 18) return '#F5A623';
     return state.rest;
   } else if (recoveryScore >= 34) {
-    // Medium recovery
     if (strain <= 10) return state.ready;
     if (strain <= 15) return '#F5A623';
     return state.rest;
   } else {
-    // Low recovery
     if (strain <= 7) return state.ready;
     if (strain <= 12) return '#F5A623';
     return state.rest;
   }
 };
 
-// Pulse ring animation component
+const getReadinessColor = (score: number): string => {
+  if (score >= 7) return state.ready;
+  if (score >= 5) return '#F5A623';
+  return state.rest;
+};
+
+const getSleepQualityColor = (quality: string): string => {
+  if (quality === 'great') return state.ready;
+  if (quality === 'ok') return '#F5A623';
+  return state.rest;
+};
+
+const sleepQualityLabel = (quality: string): string => {
+  if (quality === 'great') return 'Great';
+  if (quality === 'ok') return 'Decent';
+  return 'Poor';
+};
+
+// ─── Shared components ────────────────────────────────────────────────────────
+
 function FitScorePulseRing({ score }: { score: number }) {
   const [pulseAnim] = useState(new Animated.Value(1));
 
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.05,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
+        Animated.timing(pulseAnim, { toValue: 1.05, duration: 2000, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 2000, useNativeDriver: true }),
       ])
     ).start();
   }, []);
 
   const circumference = 2 * Math.PI * 70;
-  const strokeDashoffset = circumference - (score / 10) * circumference; // v3.0: score is 1-10 scale
+  const strokeDashoffset = circumference - (score / 10) * circumference;
 
   return (
     <Animated.View style={[styles.pulseRingContainer, { transform: [{ scale: pulseAnim }] }]}>
@@ -187,23 +229,10 @@ function FitScorePulseRing({ score }: { score: number }) {
             <Stop offset="100%" stopColor="#46F0D2" stopOpacity="1" />
           </LinearGradient>
         </Defs>
-        {/* Background circle */}
+        <Circle cx="90" cy="90" r="70" stroke={colors.surfaceMute} strokeWidth="8" fill="none" />
         <Circle
-          cx="90"
-          cy="90"
-          r="70"
-          stroke={colors.surfaceMute}
-          strokeWidth="8"
-          fill="none"
-        />
-        {/* Progress circle */}
-        <Circle
-          cx="90"
-          cy="90"
-          r="70"
-          stroke="url(#gradient)"
-          strokeWidth="8"
-          fill="none"
+          cx="90" cy="90" r="70"
+          stroke="url(#gradient)" strokeWidth="8" fill="none"
           strokeDasharray={circumference}
           strokeDashoffset={strokeDashoffset}
           strokeLinecap="round"
@@ -211,36 +240,23 @@ function FitScorePulseRing({ score }: { score: number }) {
         />
       </Svg>
       <View style={styles.scoreInRing}>
-        <Text style={styles.scoreNumber}>≈ {score}</Text>
+        <Text style={styles.scoreNumber}>{score}</Text>
       </View>
     </Animated.View>
   );
 }
 
-// Metric Card with colored border and trend indicator
 function MetricCard({
-  icon,
-  label,
-  value,
-  delta,
-  deltaLabel = 'vs. yesterday',
-  borderColor,
-  valueColor,
-  neutralDelta = false,
-  onPress,
+  icon, label, value, delta, deltaLabel = 'vs. yesterday',
+  borderColor, valueColor, neutralDelta = false, onPress,
 }: {
-  icon: string;
-  label: string;
-  value: string;
-  delta?: number;
-  deltaLabel?: string;
-  borderColor?: string;
-  valueColor?: string;
-  neutralDelta?: boolean;
-  onPress?: () => void;
+  icon: string; label: string; value: string; delta?: number;
+  deltaLabel?: string; borderColor?: string; valueColor?: string;
+  neutralDelta?: boolean; onPress?: () => void;
 }) {
-  // If neutralDelta is true, always use grey for delta (for strain/HRV where higher isn't necessarily better)
-  const deltaColor = neutralDelta ? colors.textMuted : (delta && delta > 0 ? state.ready : delta && delta < 0 ? state.rest : colors.textMuted);
+  const deltaColor = neutralDelta
+    ? colors.textMuted
+    : (delta && delta > 0 ? state.ready : delta && delta < 0 ? state.rest : colors.textMuted);
   const deltaIcon = delta && delta > 0 ? 'arrow-up' : delta && delta < 0 ? 'arrow-down' : 'remove';
 
   return (
@@ -264,8 +280,27 @@ function MetricCard({
   );
 }
 
+function InputRow({
+  icon, label, value, valueColor, noBorder = false,
+}: { icon: string; label: string; value: string; valueColor?: string; noBorder?: boolean }) {
+  return (
+    <View style={[styles.inputRow, !noBorder && styles.inputRowBorder]}>
+      <View style={styles.inputRowLeft}>
+        <Ionicons name={icon as any} size={16} color={colors.accent} />
+        <Text style={styles.inputRowLabel}>{label}</Text>
+      </View>
+      <Text style={[styles.inputRowValue, valueColor ? { color: valueColor } : undefined]}>{value}</Text>
+    </View>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
 export default function DashboardScreen() {
   const navigation = useNavigation();
+  const [dataSource, setDataSource] = useState<'whoop' | 'manual'>('whoop');
+  const [manualCheckin, setManualCheckin] = useState<ManualCheckin | null>(null);
+  const [recentCheckins, setRecentCheckins] = useState<ManualCheckin[]>([]);
   const [forecast, setForecast] = useState<FitScoreForecast | null>(null);
   const [todayMetrics, setTodayMetrics] = useState<DailyMetrics | null>(null);
   const [yesterdayMetrics, setYesterdayMetrics] = useState<YesterdayMetrics | null>(null);
@@ -276,13 +311,13 @@ export default function DashboardScreen() {
   const [daysOfData, setDaysOfData] = useState<number | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
 
-  // Trigger backfill once per day — fills last 34 days of missing WHOOP history silently in background
   const triggerBackfill = useCallback(async () => {
     try {
-      const THROTTLE_MS = 24 * 60 * 60 * 1000; // once per day
+      const ds = await getDataSource();
+      if (ds === 'manual') return; // no backfill for manual users
+      const THROTTLE_MS = 24 * 60 * 60 * 1000;
       const lastRun = await AsyncStorage.getItem('lastBackfillRun_v2');
       if (lastRun && Date.now() - parseInt(lastRun) < THROTTLE_MS) {
-        // Use cached coverage count from last run
         const cached = await AsyncStorage.getItem('whoopDaysOfData_v2');
         if (cached !== null) setDaysOfData(parseInt(cached));
         return;
@@ -291,9 +326,7 @@ export default function DashboardScreen() {
       setDaysOfData(result.daysWithData);
       await AsyncStorage.setItem('lastBackfillRun_v2', String(Date.now()));
       await AsyncStorage.setItem('whoopDaysOfData_v2', String(result.daysWithData));
-    } catch {
-      // Silently fail — non-critical background task
-    }
+    } catch { /* non-critical */ }
   }, []);
 
   const CACHE_KEY = 'dashboard_cache_v3';
@@ -301,13 +334,26 @@ export default function DashboardScreen() {
 
   const loadData = useCallback(async (isRefresh = false) => {
     try {
-      // ── 1. Show cached data instantly — but only if it's from today ──────────
+      const ds = await getDataSource();
+      setDataSource(ds);
+
+      // ── Manual mode: fetch today + last 7 days ────────────────────────────
+      if (ds === 'manual') {
+        const [checkin, recent] = await Promise.all([
+          apiRequest<ManualCheckin | null>('/api/checkin/today').catch(() => null),
+          apiRequest<ManualCheckin[]>('/api/checkin/recent?days=7').catch(() => []),
+        ]);
+        setManualCheckin(checkin);
+        setRecentCheckins(recent ?? []);
+        return;
+      }
+
+      // ── WHOOP mode: existing cache + parallel fetch logic ─────────────────
       if (!isRefresh) {
         const raw = await AsyncStorage.getItem(CACHE_KEY);
         if (raw) {
           try {
             const cached = JSON.parse(raw);
-            // Invalidate cache if it's from a different day
             if (cached.fetchDate === todayDateStr()) {
               setForecast(cached.forecast ?? null);
               setTodayMetrics(cached.today ?? null);
@@ -315,17 +361,15 @@ export default function DashboardScreen() {
               setWeeklyMetrics(cached.weekly ?? null);
               setLastWeekMetrics(cached.lastWeek ?? null);
             } else {
-              // Stale cache from previous day — clear it and show spinner
               await AsyncStorage.removeItem(CACHE_KEY);
               setLoading(true);
             }
           } catch { /* ignore corrupt cache */ }
         } else {
-          setLoading(true); // only show spinner on very first ever load
+          setLoading(true);
         }
       }
 
-      // ── 2. Fetch all 5 in parallel ──────────────────────────────────────────
       const [forecastData, todayData, yesterdayData, weeklyData, lastWeekData] = await Promise.all([
         apiRequest<FitScoreForecast>('/api/fitscore/forecast').catch(() => null),
         apiRequest<DailyMetrics>('/api/whoop/today').catch(() => null),
@@ -340,7 +384,6 @@ export default function DashboardScreen() {
       setWeeklyMetrics(weeklyData);
       setLastWeekMetrics(lastWeekData);
 
-      // ── 3. Persist fresh data for next launch (with today's date) ───────────
       AsyncStorage.setItem(CACHE_KEY, JSON.stringify({
         fetchDate: todayDateStr(),
         forecast: forecastData,
@@ -362,11 +405,10 @@ export default function DashboardScreen() {
     triggerBackfill();
   }, [loadData, triggerBackfill]);
 
-  // Refresh WHOOP data whenever app returns to foreground (catches overnight staleness)
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
       if (appStateRef.current.match(/inactive|background/) && nextState === 'active') {
-        loadData(true); // force fresh — bypass cache
+        loadData(true);
       }
       appStateRef.current = nextState;
     });
@@ -390,39 +432,197 @@ export default function DashboardScreen() {
     return isFinite(result) && !isNaN(result) ? result : undefined;
   };
 
-  // Guard any delta value (including server-computed ones) against Infinity/NaN
   const safeDelta = (v: number | undefined): number | undefined => {
     if (v === undefined || !isFinite(v) || isNaN(v)) return undefined;
     return v;
   };
 
-  const formatTime = (isoString: string): string => {
-    const date = new Date(isoString);
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
-  };
-
-  const formatUpdatedTime = (isoString: string): string => {
-    const date = new Date(isoString);
-    const now = new Date();
-    const diffMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
-
-    if (diffMinutes < 1) return 'Just now';
-    if (diffMinutes < 60) return `${diffMinutes}m ago`;
-    const diffHours = Math.floor(diffMinutes / 60);
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return 'Today';
-  };
-
-  // Calculate delta for absolute values (strain, HRV)
   const calculateAbsoluteDelta = (today: number | undefined | null, yesterday: number | undefined | null): number | undefined => {
     if (today == null || yesterday == null) return undefined;
     return Math.round((today - yesterday) * 10) / 10;
   };
 
-  // HRV values below 10ms are sensor noise from WHOOP — filter them out before computing deltas
   const validHRV = (v: number | undefined | null): number | undefined =>
     (v != null && v >= 10) ? v : undefined;
 
+  // ── Manual mode render ─────────────────────────────────────────────────────
+  if (dataSource === 'manual') {
+    const score = manualCheckin?.recoveryScore ?? null;
+    const { line1, line2 } = score != null
+      ? getManualDirectionLines(score)
+      : { line1: 'Log your morning check-in to see today\'s direction.', line2: '' };
+
+    // Derive yesterday's check-in (most recent that isn't today)
+    const todayStr = new Date().toISOString().split('T')[0];
+    const yesterdayCheckin = recentCheckins.find(c => c.date !== todayStr) ?? null;
+
+    // Derive 7-day averages (exclude today so avg reflects past 7 days)
+    const pastCheckins = recentCheckins.filter(c => c.date !== todayStr);
+    const has7Days = pastCheckins.length >= 7;
+    const avgCheckin = pastCheckins.length > 0 ? {
+      recovery: Math.round(pastCheckins.reduce((s, c) => s + c.recovery, 0) / pastCheckins.length * 10) / 10,
+      energy: Math.round(pastCheckins.reduce((s, c) => s + c.energy, 0) / pastCheckins.length * 10) / 10,
+      sleepHours: Math.round(pastCheckins.reduce((s, c) => s + c.sleepHours, 0) / pastCheckins.length * 10) / 10,
+      recoveryScore: Math.round(pastCheckins.reduce((s, c) => s + c.recoveryScore, 0) / pastCheckins.length * 10) / 10,
+    } : null;
+
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="light-content" />
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.content}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        >
+          {/* Profile Button */}
+          <TouchableOpacity
+            style={styles.profileButton}
+            onPress={() => navigation.navigate('Profile' as never)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.profileButtonInner}>
+              <Ionicons name="person" size={20} color={colors.bgPrimary} />
+            </View>
+          </TouchableOpacity>
+
+          {/* FitScore Forecast Header */}
+          <View style={styles.forecastSection}>
+            <Text style={styles.forecastTitle}>FitScore Forecast</Text>
+
+            {score != null ? (
+              <>
+                <FitScorePulseRing score={parseFloat(score.toFixed(1))} />
+                <View style={styles.forecastTextBlock}>
+                  <Text style={styles.forecastLine1}>{line1}</Text>
+                  <Text style={styles.forecastLine2}>{line2}</Text>
+                </View>
+              </>
+            ) : (
+              <View style={styles.forecastPlaceholder}>
+                <Text style={styles.placeholderText}>No check-in yet today.</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Today's Recovery Inputs (check-in summary) */}
+          {manualCheckin && (
+            <View style={styles.sectionBox}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionAccentBar} />
+                <Text style={styles.sectionTitle}>TODAY'S RECOVERY INPUTS</Text>
+              </View>
+              <InputRow
+                icon="heart-outline"
+                label="Recovery"
+                value={`${manualCheckin.recovery} / 10`}
+                valueColor={getReadinessColor(manualCheckin.recovery)}
+              />
+              <InputRow
+                icon="flash-outline"
+                label="Energy"
+                value={`${manualCheckin.energy} / 10`}
+                valueColor={getReadinessColor(manualCheckin.energy)}
+              />
+              <InputRow
+                icon="bed-outline"
+                label="Sleep"
+                value={`${manualCheckin.sleepHours} h`}
+                valueColor={manualCheckin.sleepHours >= 7 ? state.ready : manualCheckin.sleepHours >= 6 ? '#F5A623' : state.rest}
+              />
+              <InputRow
+                icon="star-outline"
+                label="Sleep Quality"
+                value={sleepQualityLabel(manualCheckin.sleepQuality)}
+                valueColor={getSleepQualityColor(manualCheckin.sleepQuality)}
+                noBorder
+              />
+            </View>
+          )}
+
+          {/* Yesterday's Recovery Inputs */}
+          {yesterdayCheckin && (
+            <View style={styles.sectionBox}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionAccentBar} />
+                <Text style={styles.sectionTitle}>YESTERDAY'S RECOVERY INPUTS</Text>
+              </View>
+              <InputRow
+                icon="heart-outline"
+                label="Recovery"
+                value={`${yesterdayCheckin.recovery} / 10`}
+                valueColor={getReadinessColor(yesterdayCheckin.recovery)}
+              />
+              <InputRow
+                icon="flash-outline"
+                label="Energy"
+                value={`${yesterdayCheckin.energy} / 10`}
+                valueColor={getReadinessColor(yesterdayCheckin.energy)}
+              />
+              <InputRow
+                icon="bed-outline"
+                label="Sleep"
+                value={`${yesterdayCheckin.sleepHours} h`}
+                valueColor={yesterdayCheckin.sleepHours >= 7 ? state.ready : yesterdayCheckin.sleepHours >= 6 ? '#F5A623' : state.rest}
+              />
+              <InputRow
+                icon="star-outline"
+                label="Sleep Quality"
+                value={sleepQualityLabel(yesterdayCheckin.sleepQuality)}
+                valueColor={getSleepQualityColor(yesterdayCheckin.sleepQuality)}
+                noBorder
+              />
+            </View>
+          )}
+
+          {/* 7-Day Averages — only shown after 7 full days of check-ins */}
+          {avgCheckin && has7Days && (
+            <View style={styles.sectionBox}>
+              <View style={styles.sectionHeader}>
+                <View style={styles.sectionAccentBar} />
+                <Text style={styles.sectionTitle}>7-DAY AVERAGES</Text>
+              </View>
+              <InputRow
+                icon="heart-outline"
+                label="Avg Recovery"
+                value={`${avgCheckin.recovery} / 10`}
+                valueColor={getReadinessColor(avgCheckin.recovery)}
+              />
+              <InputRow
+                icon="flash-outline"
+                label="Avg Energy"
+                value={`${avgCheckin.energy} / 10`}
+                valueColor={getReadinessColor(avgCheckin.energy)}
+              />
+              <InputRow
+                icon="bed-outline"
+                label="Avg Sleep"
+                value={`${avgCheckin.sleepHours} h`}
+                valueColor={avgCheckin.sleepHours >= 7 ? state.ready : avgCheckin.sleepHours >= 6 ? '#F5A623' : state.rest}
+              />
+              <InputRow
+                icon="trending-up-outline"
+                label="Avg Readiness Score"
+                value={`${avgCheckin.recoveryScore} / 10`}
+                valueColor={getReadinessColor(avgCheckin.recoveryScore)}
+                noBorder
+              />
+            </View>
+          )}
+
+          {/* FitCoach CTA */}
+          <TouchableOpacity
+            style={styles.chatButton}
+            onPress={() => navigation.navigate('FitCoach' as never)}
+          >
+            <Text style={styles.chatButtonText}>Chat with FitCoach</Text>
+            <Ionicons name="arrow-forward" size={18} color={colors.bgPrimary} />
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  // ── WHOOP mode render ──────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle="light-content" />
@@ -431,7 +631,7 @@ export default function DashboardScreen() {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        {/* Profile Button - Circular Avatar */}
+        {/* Profile Button */}
         <TouchableOpacity
           style={styles.profileButton}
           onPress={() => navigation.navigate('Profile' as never)}
@@ -562,7 +762,7 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        {/* Data coverage notice — shown until monthly comparisons become available */}
+        {/* Data coverage notice */}
         {weeklyMetrics?.comparison?.vs_last_month?.sleep_percent_delta === undefined && daysOfData !== null && daysOfData < 28 && (
           <View style={styles.coverageNotice}>
             <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
@@ -710,7 +910,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     textAlign: 'center',
     color: colors.textPrimary,
-    opacity: 0.75,
     lineHeight: 20,
     opacity: 0.8,
   },
@@ -796,39 +995,56 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing.xs,
-    backgroundColor: colors.bgSecondary,
-    borderRadius: radii.md,
-    padding: spacing.sm,
     marginBottom: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.surfaceMute + '30',
+    paddingHorizontal: spacing.xs,
   },
   coverageNoticeText: {
     ...typography.small,
-    fontSize: 11,
     color: colors.textMuted,
     flex: 1,
     lineHeight: 16,
   },
   coverageNoticeCount: {
-    color: colors.accent,
     fontWeight: '600',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 11,
+  },
+  inputRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.surfaceMute + '50',
+  },
+  inputRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  inputRowLabel: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+  inputRowValue: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
   },
   chatButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.accent,
-    paddingVertical: spacing.md,
+    borderRadius: radii.pill,
+    paddingVertical: spacing.md + 2,
     paddingHorizontal: spacing.xl,
-    borderRadius: radii.md,
     gap: spacing.sm,
-    marginTop: spacing.lg,
-    marginBottom: spacing.xl,
+    marginTop: spacing.sm,
   },
   chatButtonText: {
     ...typography.body,
+    fontWeight: '700',
     color: colors.bgPrimary,
-    fontWeight: '600',
   },
 });

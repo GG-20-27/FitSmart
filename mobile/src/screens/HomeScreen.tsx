@@ -123,7 +123,7 @@ export default function HomeScreen() {
           <>
             <View style={styles.readinessScoreRow}>
               <View style={[styles.readinessScoreCard, { borderColor: recoveryColor(manualCheckin.recoveryScore) }]}>
-                <Text style={styles.readinessScoreLabel}>Recovery Score</Text>
+                <Text style={styles.readinessScoreLabel}>Readiness Score</Text>
                 <Text style={[styles.readinessScoreValue, { color: recoveryColor(manualCheckin.recoveryScore) }]}>
                   {manualCheckin.recoveryScore.toFixed(1)}
                 </Text>
@@ -139,13 +139,15 @@ export default function HomeScreen() {
               <MetricCard label="Sleep" value={`${manualCheckin.sleepHours} hrs`} />
               <MetricCard
                 label="Sleep Quality"
-                value={manualCheckin.sleepQuality.charAt(0).toUpperCase() + manualCheckin.sleepQuality.slice(1)}
+                value={manualCheckin.sleepQuality === 'ok' ? 'Decent' : manualCheckin.sleepQuality.charAt(0).toUpperCase() + manualCheckin.sleepQuality.slice(1)}
               />
             </View>
           </>
         ) : (
-          <View style={styles.errorBox}>
-            <Text style={styles.errorText}>No check-in found for today. Please complete your morning check-in.</Text>
+          <View style={{ paddingVertical: spacing.lg, alignItems: 'center' as const }}>
+            <Text style={{ ...typography.body, color: colors.textMuted, textAlign: 'center' }}>
+              No check-in yet today.{'\n'}Complete your morning check-in to see your readiness.
+            </Text>
           </View>
         )}
 

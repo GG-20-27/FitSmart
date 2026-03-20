@@ -405,7 +405,9 @@ export function composeFitScorePrompt(
   fitScoreTable: string = '',
   trainingEvent: string = '',
   recentHistory: Array<{ role: string; content: string }> = [],
-  goalsContext?: string
+  goalsContext?: string,
+  dataSource?: 'whoop' | 'manual',
+  manualCheckinData?: { readinessScore: number; recovery: number; energy: number; sleepHours: number }
 ): { systemPrompt: string; userPrompt: string } {
   console.log('[PERSONA] Composing FitScore persona prompt...');
 
@@ -423,20 +425,35 @@ export function composeFitScorePrompt(
   // Add date context
   systemPrompt += `\n\n## Today's Date\n${formattedToday}`;
 
-  // Add today's WHOOP context with detailed metrics
-  systemPrompt += `\n\n## Today's WHOOP Data\n`;
-  systemPrompt += `**Sleep Score:** ${ctx.sleepScore !== null ? `${ctx.sleepScore}%` : 'N/A'}${ctx.sleepHours ? ` (${ctx.sleepHours.toFixed(1)}h duration)` : ''}\n`;
-  systemPrompt += `**Recovery:** ${ctx.recoveryScore !== null ? `${ctx.recoveryScore}%` : 'N/A'}\n`;
-  systemPrompt += `**HRV:** ${ctx.hrv !== null ? `${Math.round(ctx.hrv)} ms` : 'N/A'}\n`;
-  systemPrompt += `**Resting Heart Rate:** ${ctx.restingHeartRate !== null ? `${ctx.restingHeartRate} bpm` : 'N/A'}\n`;
-  systemPrompt += `**Strain:** ${ctx.strainScore !== null ? ctx.strainScore : 'N/A'}\n`;
+  if (dataSource === 'manual') {
+    // Manual mode: use self-reported readiness data; skip WHOOP section
+    systemPrompt += `\n\n⚠️ MANUAL TRACKING MODE: This user does NOT use WHOOP. SKIP the "📊 WHOOP Metrics Summary" section entirely — do not output it. Replace it with a brief "Readiness Summary" using the self-reported data below. NEVER mention HRV, WHOOP recovery %, strain values, or any WHOOP-specific signals.\n`;
+    systemPrompt += `\n## Today's Readiness Data (Self-Reported)\n`;
+    if (manualCheckinData) {
+      systemPrompt += `**Readiness Score:** ${manualCheckinData.readinessScore.toFixed(1)}/10\n`;
+      systemPrompt += `**Morning Recovery (self-rated):** ${manualCheckinData.recovery}/10\n`;
+      systemPrompt += `**Energy:** ${manualCheckinData.energy}/10\n`;
+      systemPrompt += `**Sleep:** ${manualCheckinData.sleepHours}h\n`;
+    } else {
+      systemPrompt += `No morning check-in logged today.\n`;
+    }
+    systemPrompt += `\n**Note:** Use this self-reported data in place of WHOOP metrics throughout your response.`;
+  } else {
+    // WHOOP mode: add today's metrics
+    systemPrompt += `\n\n## Today's WHOOP Data\n`;
+    systemPrompt += `**Sleep Score:** ${ctx.sleepScore !== null ? `${ctx.sleepScore}%` : 'N/A'}${ctx.sleepHours ? ` (${ctx.sleepHours.toFixed(1)}h duration)` : ''}\n`;
+    systemPrompt += `**Recovery:** ${ctx.recoveryScore !== null ? `${ctx.recoveryScore}%` : 'N/A'}\n`;
+    systemPrompt += `**HRV:** ${ctx.hrv !== null ? `${Math.round(ctx.hrv)} ms` : 'N/A'}\n`;
+    systemPrompt += `**Resting Heart Rate:** ${ctx.restingHeartRate !== null ? `${ctx.restingHeartRate} bpm` : 'N/A'}\n`;
+    systemPrompt += `**Strain:** ${ctx.strainScore !== null ? ctx.strainScore : 'N/A'}\n`;
 
-  // Add trend notes if available
-  if (ctx.trendNotes) {
-    systemPrompt += `\n**Trend Notes:** ${ctx.trendNotes}\n`;
+    // Add trend notes if available
+    if (ctx.trendNotes) {
+      systemPrompt += `\n**Trend Notes:** ${ctx.trendNotes}\n`;
+    }
+
+    systemPrompt += `\n**Note:** Use these ACTUAL metrics in your WHOOP Metrics Summary section. DO NOT use the example values from the output structure.`;
   }
-
-  systemPrompt += `\n**Note:** Use these ACTUAL metrics in your WHOOP Metrics Summary section. DO NOT use the example values from the output structure.`;
 
   // Add FitScore table
   if (fitScoreTable) {
@@ -506,7 +523,9 @@ export function composePersonaPrompt(
   ctx: ContextPack,
   userProfile: any = null,
   recentHistory: Array<{ role: string; content: string }> = [],
-  goalsContext?: string
+  goalsContext?: string,
+  dataSource?: 'whoop' | 'manual',
+  manualCheckinData?: { readinessScore: number; recovery: number; energy: number; sleepHours: number }
 ): { systemPrompt: string; userPrompt: string } {
   console.log('[PERSONA] Composing persona prompt...');
 
@@ -517,41 +536,55 @@ export function composePersonaPrompt(
   // === SYSTEM PROMPT ===
   let systemPrompt = FITSMART_PERSONA;
 
-  // Add current context awareness with FULL today's metrics
-  systemPrompt += `\n\n## Today's WHOOP Data`;
-  if (ctx.recoveryScore !== null) systemPrompt += `\n- Recovery: ${ctx.recoveryScore}%`;
-  if (ctx.sleepScore !== null) systemPrompt += `\n- Sleep Score: ${ctx.sleepScore}%`;
-  if (ctx.sleepHours !== null) systemPrompt += `\n- Sleep Hours: ${ctx.sleepHours.toFixed(1)}h`;
-  if (ctx.strainScore !== null) systemPrompt += `\n- Strain: ${ctx.strainScore}`;
-  if (ctx.hrv !== null) systemPrompt += `\n- HRV: ${Math.round(ctx.hrv)}ms`;
-  if (ctx.restingHeartRate !== null) systemPrompt += `\n- Resting Heart Rate: ${Math.round(ctx.restingHeartRate)}bpm`;
+  if (dataSource === 'manual') {
+    // Manual mode: self-reported readiness data; no WHOOP
+    systemPrompt += `\n\n⚠️ MANUAL TRACKING MODE: This user has no WHOOP device. NEVER mention HRV, WHOOP strain, WHOOP recovery %, resting heart rate, or any WHOOP-specific biometric signals. Ground all advice in the self-reported readiness data below.`;
+    systemPrompt += `\n\n## Today's Readiness Data (Self-Reported)`;
+    if (manualCheckinData) {
+      systemPrompt += `\n- Readiness Score: ${manualCheckinData.readinessScore.toFixed(1)}/10`;
+      systemPrompt += `\n- Morning Recovery (self-rated): ${manualCheckinData.recovery}/10`;
+      systemPrompt += `\n- Energy: ${manualCheckinData.energy}/10`;
+      systemPrompt += `\n- Sleep: ${manualCheckinData.sleepHours}h`;
+    } else {
+      systemPrompt += `\n- No morning check-in logged today`;
+    }
+  } else {
+    // WHOOP mode: full biometric context
+    systemPrompt += `\n\n## Today's WHOOP Data`;
+    if (ctx.recoveryScore !== null) systemPrompt += `\n- Recovery: ${ctx.recoveryScore}%`;
+    if (ctx.sleepScore !== null) systemPrompt += `\n- Sleep Score: ${ctx.sleepScore}%`;
+    if (ctx.sleepHours !== null) systemPrompt += `\n- Sleep Hours: ${ctx.sleepHours.toFixed(1)}h`;
+    if (ctx.strainScore !== null) systemPrompt += `\n- Strain: ${ctx.strainScore}`;
+    if (ctx.hrv !== null) systemPrompt += `\n- HRV: ${Math.round(ctx.hrv)}ms`;
+    if (ctx.restingHeartRate !== null) systemPrompt += `\n- Resting Heart Rate: ${Math.round(ctx.restingHeartRate)}bpm`;
 
-  // Add yesterday's data if available
-  if (ctx.yesterdayRecovery !== null || ctx.yesterdaySleep !== null || ctx.yesterdayStrain !== null) {
-    systemPrompt += `\n\n**Yesterday's Metrics:**`;
-    if (ctx.yesterdayRecovery !== null) systemPrompt += `\n- Recovery: ${ctx.yesterdayRecovery}%`;
-    if (ctx.yesterdaySleep !== null) systemPrompt += `\n- Sleep Score: ${ctx.yesterdaySleep}%`;
-    if (ctx.yesterdayStrain !== null) systemPrompt += `\n- Strain: ${ctx.yesterdayStrain}`;
-    if (ctx.yesterdayHrv !== null) systemPrompt += `\n- HRV: ${Math.round(ctx.yesterdayHrv)}ms`;
-  }
+    // Add yesterday's data if available
+    if (ctx.yesterdayRecovery !== null || ctx.yesterdaySleep !== null || ctx.yesterdayStrain !== null) {
+      systemPrompt += `\n\n**Yesterday's Metrics:**`;
+      if (ctx.yesterdayRecovery !== null) systemPrompt += `\n- Recovery: ${ctx.yesterdayRecovery}%`;
+      if (ctx.yesterdaySleep !== null) systemPrompt += `\n- Sleep Score: ${ctx.yesterdaySleep}%`;
+      if (ctx.yesterdayStrain !== null) systemPrompt += `\n- Strain: ${ctx.yesterdayStrain}`;
+      if (ctx.yesterdayHrv !== null) systemPrompt += `\n- HRV: ${Math.round(ctx.yesterdayHrv)}ms`;
+    }
 
-  // Add weekly averages if available
-  if (ctx.weeklyAvgRecovery !== null || ctx.weeklyAvgSleep !== null || ctx.weeklyAvgStrain !== null) {
-    systemPrompt += `\n\n**7-Day Averages:**`;
-    if (ctx.weeklyAvgRecovery !== null) systemPrompt += `\n- Avg Recovery: ${Math.round(ctx.weeklyAvgRecovery)}%`;
-    if (ctx.weeklyAvgSleep !== null) systemPrompt += `\n- Avg Sleep Score: ${Math.round(ctx.weeklyAvgSleep)}%`;
-    if (ctx.weeklyAvgStrain !== null) systemPrompt += `\n- Avg Strain: ${ctx.weeklyAvgStrain.toFixed(1)}`;
-    if (ctx.weeklyAvgHrv !== null) systemPrompt += `\n- Avg HRV: ${Math.round(ctx.weeklyAvgHrv)}ms`;
-  }
+    // Add weekly averages if available
+    if (ctx.weeklyAvgRecovery !== null || ctx.weeklyAvgSleep !== null || ctx.weeklyAvgStrain !== null) {
+      systemPrompt += `\n\n**7-Day Averages:**`;
+      if (ctx.weeklyAvgRecovery !== null) systemPrompt += `\n- Avg Recovery: ${Math.round(ctx.weeklyAvgRecovery)}%`;
+      if (ctx.weeklyAvgSleep !== null) systemPrompt += `\n- Avg Sleep Score: ${Math.round(ctx.weeklyAvgSleep)}%`;
+      if (ctx.weeklyAvgStrain !== null) systemPrompt += `\n- Avg Strain: ${ctx.weeklyAvgStrain.toFixed(1)}`;
+      if (ctx.weeklyAvgHrv !== null) systemPrompt += `\n- Avg HRV: ${Math.round(ctx.weeklyAvgHrv)}ms`;
+    }
 
-  // Add trend notes if available
-  if (ctx.trendNotes) {
-    systemPrompt += `\n\n**Recent Trends:** ${ctx.trendNotes}`;
-  }
+    // Add trend notes if available
+    if (ctx.trendNotes) {
+      systemPrompt += `\n\n**Recent Trends:** ${ctx.trendNotes}`;
+    }
 
-  // Add FitScore trend if available
-  if (ctx.fitScoreTrend && ctx.currentFitScore !== null) {
-    systemPrompt += `\n**FitScore:** ${ctx.currentFitScore}/100 (${ctx.fitScoreTrend})`;
+    // Add FitScore trend if available
+    if (ctx.fitScoreTrend && ctx.currentFitScore !== null) {
+      systemPrompt += `\n**FitScore:** ${ctx.currentFitScore}/100 (${ctx.fitScoreTrend})`;
+    }
   }
 
   // Add recent summary for continuity

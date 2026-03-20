@@ -62,11 +62,20 @@ export async function getFitRoastCurrent(): Promise<FitRoastResponse> {
   return data as FitRoastResponse;
 }
 
+export interface WeeklyGoalReview {
+  completedSubGoalsCount: number;
+  completedSubGoals: string[];
+  remainingSubGoals: string[];
+}
+
 /** Generate (or regenerate) this week's FitRoast — only succeeds on Sunday with ≥5 active days */
-export async function generateFitRoast(intensity?: 'Light' | 'Spicy' | 'Savage'): Promise<FitRoastResponse> {
+export async function generateFitRoast(
+  intensity?: 'Light' | 'Spicy' | 'Savage',
+  weeklyGoalReview?: WeeklyGoalReview
+): Promise<FitRoastResponse> {
   return apiRequest<FitRoastResponse>('/api/fitroast/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ intensity }),
+    body: JSON.stringify({ intensity, weeklyGoalReview }),
   });
 }
