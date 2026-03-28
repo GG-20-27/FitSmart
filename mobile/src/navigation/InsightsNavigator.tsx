@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
+import { useRoute, useFocusEffect } from '@react-navigation/native';
 import FitScoreScreen from '../screens/FitScoreScreen';
 import FitLookScreen from '../screens/FitLookScreen';
 import FitRoastScreen from '../screens/FitRoastScreen';
@@ -9,6 +10,15 @@ type InsightTab = 'FitScore' | 'FitLook' | 'FitRoast';
 
 export default function InsightsNavigator() {
   const [activeTab, setActiveTab] = useState<InsightTab>('FitScore');
+  const route = useRoute();
+
+  // Switch to requested tab when navigated here with params (e.g. Sunday FitRoast reminder)
+  useFocusEffect(useCallback(() => {
+    const params = route.params as { initialTab?: InsightTab } | undefined;
+    if (params?.initialTab) {
+      setActiveTab(params.initialTab);
+    }
+  }, [route.params]));
 
   const renderScreen = () => {
     switch (activeTab) {

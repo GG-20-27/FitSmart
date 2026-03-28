@@ -110,8 +110,8 @@ export default function ResetPasswordScreen() {
                     secureTextEntry={!showPassword}
                     autoCapitalize="none"
                     autoCorrect={false}
-                    autoComplete="new-password"
-                    textContentType="newPassword"
+                    autoComplete="off"
+                    textContentType="none"
                   />
                   <TouchableOpacity
                     style={styles.showPasswordBtn}
@@ -137,8 +137,8 @@ export default function ResetPasswordScreen() {
                   secureTextEntry={!showPassword}
                   autoCapitalize="none"
                   autoCorrect={false}
-                  autoComplete="new-password"
-                  textContentType="newPassword"
+                  autoComplete="off"
+                  textContentType="none"
                 />
               </View>
 

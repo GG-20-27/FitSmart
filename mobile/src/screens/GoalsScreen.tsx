@@ -546,6 +546,7 @@ export default function GoalsScreen() {
   const [endedData, setEndedData] = useState<{ pillar: string; avg: number | null } | null>(null);
   const endedSlideAnim = useRef(new Animated.Value(300));
   const prevActivePlanIdsRef = useRef<Map<number, { pillar: string }>>(new Map());
+  const ACTIVE_PLAN_IDS_KEY = '@activePlanIds_goals';
 
   const normalizeTime = (raw: string): string => {
     const digits = raw.replace(/\D/g, '');
@@ -762,32 +763,33 @@ export default function GoalsScreen() {
         .then(status => {
           const prevMap = prevActivePlanIdsRef.current;
           const newActiveIds = new Set((status.activePlans ?? []).map(p => p.id));
-          if (prevMap.size > 0) {
-            for (const [id, { pillar }] of prevMap) {
-              if (!newActiveIds.has(id)) {
-                const resolved = status.completedPlans.find(p => p.id === id);
-                // Only celebrate genuine completions — not expirations
-                if (resolved?.status === 'completed') {
-                  const avg = resolved.rollingAvgAtCompletion ?? 0;
-                  setCompletionData({ pillar, avg });
-                  completionScaleAnim.current.setValue(0);
-                  setShowCompletionModal(true);
-                  Animated.spring(completionScaleAnim.current, {
-                    toValue: 1, useNativeDriver: true, tension: 80, friction: 7,
-                  }).start();
-                } else if (resolved?.status === 'expired') {
-                  setEndedData({ pillar, avg: resolved.rollingAvgAtCompletion ?? null });
-                  endedSlideAnim.current.setValue(300);
-                  setShowEndedModal(true);
-                  Animated.spring(endedSlideAnim.current, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
-                }
-                break;
+          for (const [id, { pillar }] of prevMap) {
+            if (!newActiveIds.has(id)) {
+              const resolved = status.completedPlans.find(p => p.id === id);
+              // Only celebrate genuine completions — not expirations
+              if (resolved?.status === 'completed') {
+                const avg = resolved.rollingAvgAtCompletion ?? 0;
+                setCompletionData({ pillar, avg });
+                completionScaleAnim.current.setValue(0);
+                setShowCompletionModal(true);
+                Animated.spring(completionScaleAnim.current, {
+                  toValue: 1, useNativeDriver: true, tension: 80, friction: 7,
+                }).start();
+              } else if (resolved?.status === 'expired') {
+                setEndedData({ pillar, avg: resolved.rollingAvgAtCompletion ?? null });
+                endedSlideAnim.current.setValue(300);
+                setShowEndedModal(true);
+                Animated.spring(endedSlideAnim.current, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
               }
+              break;
             }
           }
           const newMap = new Map<number, { pillar: string }>();
           for (const p of (status.activePlans ?? [])) newMap.set(p.id, { pillar: p.pillar });
           prevActivePlanIdsRef.current = newMap;
+          // Persist to AsyncStorage so completion is detected after app restart
+          const toStore = Array.from(newMap.entries()).map(([id, { pillar }]) => ({ id, pillar }));
+          AsyncStorage.setItem(ACTIVE_PLAN_IDS_KEY, JSON.stringify(toStore)).catch(() => {});
           setImprovementPlanStatus(status);
         })
         .catch(() => {});
@@ -817,6 +819,16 @@ export default function GoalsScreen() {
         await AsyncStorage.setItem(RESET_FLAG, '1');
       } catch { /* graceful */ }
     })();
+  }, []);
+
+  // Hydrate prevActivePlanIdsRef from AsyncStorage so completion detection works across app restarts
+  useEffect(() => {
+    AsyncStorage.getItem(ACTIVE_PLAN_IDS_KEY).then(stored => {
+      if (stored) {
+        const ids: Array<{ id: number; pillar: string }> = JSON.parse(stored);
+        prevActivePlanIdsRef.current = new Map(ids.map(({ id, pillar }) => [id, { pillar }]));
+      }
+    }).catch(() => {});
   }, []);
 
   // Toggle daily habit completion — streak is now driven by FitScore check-ins, not here
@@ -1101,7 +1113,7 @@ Identify:
                 onPress={() => { setShowEndedModal(false); setEndedData(null); endedSlideAnim.current.setValue(300); }}
                 activeOpacity={0.8}
               >
-                <Text style={styles.endedCloseBtnText}>Start again when ready</Text>
+                <Text style={styles.endedCloseBtnText}>Got it</Text>
               </TouchableOpacity>
             </Animated.View>
           </View>
@@ -1282,6 +1294,11 @@ Identify:
             </TouchableOpacity>
 
             {planContent ? (
+              <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={{ flex: 1 }}
+                keyboardVerticalOffset={100}
+              >
               <ScrollView contentContainerStyle={{ paddingBottom: 48 }}>
                 {/* Hero header */}
                 {(() => {
@@ -2073,6 +2090,7 @@ Identify:
                   </Modal>
                 </View>
               </ScrollView>
+              </KeyboardAvoidingView>
             ) : (
               <View style={styles.planModalLoading}>
                 <ActivityIndicator color={colors.accent} />

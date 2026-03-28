@@ -13,6 +13,7 @@ import { Button } from '../ui/components';
 import FitScoreTriangle from '../components/FitScoreTriangle';
 import {
   uploadMeal,
+  uploadMealText,
   getMealsByDate,
   deleteMeal as deleteMealAPI,
   saveTrainingData,
@@ -915,6 +916,7 @@ export default function FitScoreScreen() {
 
   // Meal modal state
   const [showMealModal, setShowMealModal] = useState(false);
+  const [textOnlyMode, setTextOnlyMode] = useState(false);
   const [pendingMealImage, setPendingMealImage] = useState<string | null>(null);
   const [pendingMealAssetId, setPendingMealAssetId] = useState<string | null>(null); // for image cache pre-fill
   const [selectedMealType, setSelectedMealType] = useState('');
@@ -1016,6 +1018,9 @@ export default function FitScoreScreen() {
   const [endedData, setEndedData] = useState<{ pillar: string; avg: number | null } | null>(null);
   const endedSlideAnim = useRef(new Animated.Value(300));
   const prevActivePlanIdsRef = useRef<Map<number, { pillar: string }>>(new Map());
+  const ACTIVE_PLAN_IDS_KEY = '@activePlanIds_fitscore';
+  const coachPulseAnim = useRef(new Animated.Value(0)).current;
+  const [coachGlowActive, setCoachGlowActive] = useState(false);
   // FitCook state
   const [showFitCookModal, setShowFitCookModal] = useState(false);
   const [fitCookTimes, setFitCookTimes] = useState({ breakfast: '', lunch: '', dinner: '' });
@@ -1064,6 +1069,8 @@ export default function FitScoreScreen() {
   const [triangleAnimating, setTriangleAnimating] = useState(false);
   const triangleHasAnimated = useRef(false);
   const triangleViewRef = useRef<any>(null);
+  const fitScoreResultSectionYRef = useRef<number>(0);
+  const fitScoreBreakdownTitleOffsetYRef = useRef<number>(0);
   const fitScoreScrollRef = useRef<any>(null);
   const mealScrollRef = useRef<ScrollView>(null);
   const visibilityPollRef = useRef<ReturnType<typeof setInterval>>();
@@ -1076,13 +1083,15 @@ export default function FitScoreScreen() {
   const [showReadyReveal, setShowReadyReveal] = useState(false);
   const revealOpacity = useRef(new Animated.Value(0)).current;
   const revealScale = useRef(new Animated.Value(0.92)).current;
+  const revealDismissCallbackRef = useRef<(() => void) | null>(null);
   const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // All-green banner — only shown after triangle animation fully completes
   const [showAllGreenBanner, setShowAllGreenBanner] = useState(false);
   const allGreenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const triggerReadyReveal = () => {
+  const triggerReadyReveal = (onDismiss?: () => void) => {
+    revealDismissCallbackRef.current = onDismiss ?? null;
     revealOpacity.setValue(0);
     revealScale.setValue(0.92);
     setShowReadyReveal(true);
@@ -1097,8 +1106,12 @@ export default function FitScoreScreen() {
     if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
     Animated.timing(revealOpacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => {
       setShowReadyReveal(false);
+      const cb = revealDismissCallbackRef.current;
+      revealDismissCallbackRef.current = null;
+      cb?.();
       setTimeout(() => {
-        fitScoreScrollRef.current?.scrollTo({ y: 650, animated: true });
+        const y = fitScoreResultSectionYRef.current + fitScoreBreakdownTitleOffsetYRef.current;
+        fitScoreScrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
       }, 80);
     });
   };
@@ -1142,38 +1155,79 @@ export default function FitScoreScreen() {
           // Detect plan completion: was active before, not active now
           const prevMap = prevActivePlanIdsRef.current;
           const newActiveIds = new Set((status.activePlans ?? []).map(p => p.id));
-          if (prevMap.size > 0) {
-            for (const [id, { pillar }] of prevMap) {
-              if (!newActiveIds.has(id)) {
-                const resolved = status.completedPlans.find(p => p.id === id);
-                // Only celebrate genuine completions — not expirations
-                if (resolved?.status === 'completed') {
-                  const avg = resolved.rollingAvgAtCompletion ?? 0;
-                  setCompletionData({ pillar, avg });
-                  completionScaleAnim.current.setValue(0);
-                  setShowCompletionModal(true);
-                  Animated.spring(completionScaleAnim.current, {
-                    toValue: 1, useNativeDriver: true, tension: 80, friction: 7,
-                  }).start();
-                } else if (resolved?.status === 'expired') {
-                  setEndedData({ pillar, avg: resolved.rollingAvgAtCompletion ?? null });
-                  endedSlideAnim.current.setValue(300);
-                  setShowEndedModal(true);
-                  Animated.spring(endedSlideAnim.current, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
-                }
-                break;
+          for (const [id, { pillar }] of prevMap) {
+            if (!newActiveIds.has(id)) {
+              const resolved = status.completedPlans.find(p => p.id === id);
+              // Only celebrate genuine completions — not expirations
+              if (resolved?.status === 'completed') {
+                const avg = resolved.rollingAvgAtCompletion ?? 0;
+                setCompletionData({ pillar, avg });
+                completionScaleAnim.current.setValue(0);
+                setShowCompletionModal(true);
+                Animated.spring(completionScaleAnim.current, {
+                  toValue: 1, useNativeDriver: true, tension: 80, friction: 7,
+                }).start();
+              } else if (resolved?.status === 'expired') {
+                setEndedData({ pillar, avg: resolved.rollingAvgAtCompletion ?? null });
+                endedSlideAnim.current.setValue(300);
+                setShowEndedModal(true);
+                Animated.spring(endedSlideAnim.current, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
               }
+              break;
             }
           }
           // Update prevMap with current active plans
           const newMap = new Map<number, { pillar: string }>();
           for (const p of (status.activePlans ?? [])) newMap.set(p.id, { pillar: p.pillar });
           prevActivePlanIdsRef.current = newMap;
+          // Persist to AsyncStorage so completion is detected after app restart
+          const toStore = Array.from(newMap.entries()).map(([id, { pillar }]) => ({ id, pillar }));
+          AsyncStorage.setItem(ACTIVE_PLAN_IDS_KEY, JSON.stringify(toStore)).catch(() => {});
           setImprovementPlanStatus(status);
         })
         .catch(() => {}); // non-fatal
     }, [])
   );
+
+  // FitCoach card pulse animation
+  const coachGlowLoopRef = useRef<Animated.CompositeAnimation | null>(null);
+  const stopCoachGlow = () => {
+    coachGlowLoopRef.current?.stop();
+    coachGlowLoopRef.current = null;
+    Animated.timing(coachPulseAnim, { toValue: 0, duration: 800, useNativeDriver: false }).start();
+    setCoachGlowActive(false);
+  };
+  const startCoachGlow = () => {
+    coachGlowLoopRef.current?.stop();
+    coachPulseAnim.setValue(0);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(coachPulseAnim, { toValue: 1, duration: 1400, useNativeDriver: false }),
+        Animated.timing(coachPulseAnim, { toValue: 0, duration: 1400, useNativeDriver: false }),
+      ])
+    );
+    coachGlowLoopRef.current = loop;
+    loop.start();
+    setCoachGlowActive(true);
+  };
+  const coachBorderColor = coachPulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [colors.surfaceMute + '30', colors.accent + '80'],
+  });
+  const coachCtaOpacity = coachPulseAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.5, 1],
+  });
+
+  // Hydrate prevActivePlanIdsRef from AsyncStorage so completion detection works across app restarts
+  useEffect(() => {
+    AsyncStorage.getItem(ACTIVE_PLAN_IDS_KEY).then(stored => {
+      if (stored) {
+        const ids: Array<{ id: number; pillar: string }> = JSON.parse(stored);
+        prevActivePlanIdsRef.current = new Map(ids.map(({ id, pillar }) => [id, { pillar }]));
+      }
+    }).catch(() => {});
+  }, []);
 
   // Load macro targets once on mount (used for nutrition pre-filled prompt)
   useEffect(() => {
@@ -1426,6 +1480,7 @@ export default function FitScoreScreen() {
           setFitScoreResult(cached);
           setShowFitScoreResult(true);
           fitScoreFadeAnim.setValue(1); // cached restore — show immediately without fade
+          startCoachGlow();
           // Restore or fetch coach summary
           try {
             const rawCoach = await AsyncStorage.getItem(`coachSummary_${dateStr}`);
@@ -1507,24 +1562,24 @@ export default function FitScoreScreen() {
 
       console.log(`[FITSCORE] Result received: ${result.fitScore}/10`);
       setFitScoreResult(result);
-      setShowFitScoreResult(true);
       // Cache by date so navigating away and back restores the result (in-memory + persisted)
       fitScoreCacheRef.current.set(dateStr, result);
       try {
         AsyncStorage.setItem(`fitScoreCache_${dateStr}`, JSON.stringify(result)).catch(() => {});
       } catch { /* JSON serialization failed — skip cache */ }
 
-      // Trigger fade-in animation
-      fitScoreFadeAnim.setValue(0);
-      setTriangleAnimating(false);
-      Animated.timing(fitScoreFadeAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }).start();
-
-      // Premium reveal moment
-      triggerReadyReveal();
+      // Premium reveal moment — show triangle only AFTER the modal dismisses
+      triggerReadyReveal(() => {
+        setTriangleAnimating(false);
+        setShowFitScoreResult(true);
+        startCoachGlow();
+        fitScoreFadeAnim.setValue(0);
+        Animated.timing(fitScoreFadeAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }).start();
+      });
 
       // Fetch coach summary in the background and cache it
       const habitsCtx = dailyHabits.length > 0 ? {
@@ -1662,7 +1717,7 @@ export default function FitScoreScreen() {
     if (!hasPermission) return;
 
     Alert.alert(
-      'Add Meal Photo',
+      'Add Meal',
       'Choose a source',
       [
         {
@@ -1672,6 +1727,18 @@ export default function FitScoreScreen() {
         {
           text: 'Gallery',
           onPress: () => pickImageFromGallery(),
+        },
+        {
+          text: 'Describe (no photo)',
+          onPress: () => {
+            setTextOnlyMode(true);
+            setPendingMealImage(null);
+            setPendingMealAssetId(null);
+            setSelectedMealType('');
+            setMealNotes('');
+            setEditingMealId(null);
+            setShowMealModal(true);
+          },
         },
         {
           text: 'Cancel',
@@ -1696,6 +1763,7 @@ export default function FitScoreScreen() {
     });
 
     if (!result.canceled && result.assets[0]) {
+      setTextOnlyMode(false);
       setPendingMealImage(result.assets[0].uri);
       setPendingMealAssetId(null); // Camera photos are unique each time — no cache lookup
       setSelectedMealType('');
@@ -1714,6 +1782,7 @@ export default function FitScoreScreen() {
 
     if (!result.canceled && result.assets[0]) {
       const asset = result.assets[0];
+      setTextOnlyMode(false);
       setPendingMealImage(asset.uri);
       const assetId = asset.assetId ?? null;
       setPendingMealAssetId(assetId);
@@ -1782,6 +1851,7 @@ export default function FitScoreScreen() {
 
   const handleEditMeal = (meal: MealData) => {
     setEditingMealId(meal.id);
+    setTextOnlyMode(!meal.imageUri);
     setPendingMealImage(meal.imageUri);
     setSelectedMealType(meal.mealType);
     setMealNotes(meal.mealNotes || '');
@@ -1795,14 +1865,18 @@ export default function FitScoreScreen() {
       return;
     }
 
-    if (!pendingMealImage) {
+    if (!textOnlyMode && !pendingMealImage) {
       Alert.alert('Missing Information', 'No meal image selected.');
       return;
     }
 
+    if (textOnlyMode && !mealNotes.trim()) {
+      Alert.alert('Missing Information', 'Please describe your meal so it can be scored.');
+      return;
+    }
+
     // Snapshot form state into local variables BEFORE any state changes.
-    // This prevents a concurrent upload's finally-block from clearing a second
-    // meal's image that the user has already picked while the first is uploading.
+    const isTextOnly = textOnlyMode;
     const imageUri = pendingMealImage;
     const mealType = selectedMealType;
     const notes = mealNotes;
@@ -1811,6 +1885,7 @@ export default function FitScoreScreen() {
     const editId = editingMealId; // snapshot before clearing
 
     // Clear form state immediately so the next modal open starts fresh
+    setTextOnlyMode(false);
     setPendingMealImage(null);
     setPendingMealAssetId(null);
     setSelectedMealType('');
@@ -1824,18 +1899,17 @@ export default function FitScoreScreen() {
 
     // If editing, remove the old meal from UI immediately and replace with placeholder
     if (editId) {
-      setMeals(currentMeals => currentMeals.map(m => m.id === editId ? { ...m, id: tempId, imageUri } : m));
+      setMeals(currentMeals => currentMeals.map(m => m.id === editId ? { ...m, id: tempId, imageUri: isTextOnly ? null : imageUri } : m));
     } else {
       // Create temporary placeholder meal using the snapshotted values
       const tempMeal: MealData = {
         id: tempId,
         mealType: mealType,
         mealNotes: notes || undefined,
-        imageUri: imageUri,
+        imageUri: isTextOnly ? null : imageUri,
         date: formatDate(selectedDate),
         uploadedAt: new Date().toISOString(),
       };
-      // Add placeholder to meals array using functional update (safe with concurrent adds)
       setMeals(currentMeals => [...currentMeals, tempMeal]);
     }
 
@@ -1846,17 +1920,23 @@ export default function FitScoreScreen() {
           await deleteMealAPI(editId);
         } catch (err) {
           console.error('[MEAL EDIT] Failed to delete old meal:', err);
-          // Continue regardless — upload the new version
         }
       }
 
-      const newMeal = await uploadMeal({
-        imageUri: imageUri,
-        mealType: mealType,
-        mealNotes: notes || undefined,
-        date: formatDate(selectedDate),
-        mealTime: capturedTime.toTimeString().slice(0, 5), // HH:MM format
-      });
+      const newMeal = isTextOnly
+        ? await uploadMealText({
+            mealDescription: notes,
+            mealType: mealType,
+            date: formatDate(selectedDate),
+            mealTime: capturedTime.toTimeString().slice(0, 5),
+          })
+        : await uploadMeal({
+            imageUri: imageUri!,
+            mealType: mealType,
+            mealNotes: notes || undefined,
+            date: formatDate(selectedDate),
+            mealTime: capturedTime.toTimeString().slice(0, 5),
+          });
 
       // Replace placeholder with actual meal (matches only this upload's tempId)
       setMeals(currentMeals =>
@@ -2307,7 +2387,12 @@ export default function FitScoreScreen() {
                 onPress={() => meal.id > 0 && handleMealPress(meal)}
                 disabled={meal.id < 0}
               >
-                <Image source={{ uri: meal.imageUri }} style={styles.mealImage} />
+                {meal.imageUri
+                  ? <Image source={{ uri: meal.imageUri }} style={styles.mealImage} />
+                  : <View style={[styles.mealImage, styles.mealImagePlaceholder]}>
+                      <Ionicons name="help-circle-outline" size={36} color={colors.surfaceMute} />
+                    </View>
+                }
                 {meal.id < 0 && (
                   <View style={styles.analyzingOverlay}>
                     <ActivityIndicator size="small" color={colors.accent} />
@@ -2319,7 +2404,7 @@ export default function FitScoreScreen() {
                     <Ionicons name="create" size={32} color={colors.textPrimary} />
                   </View>
                 )}
-                {meal.id > 0 && !isEditingMeals && meal.nutritionScore && (
+                {meal.id > 0 && !isEditingMeals && meal.nutritionScore && (showFitScoreResult || isPastDate) && (
                   <View style={[styles.scoreBadge, { backgroundColor: getScoreColor(meal.nutritionScore) }]}>
                     <Text style={styles.scoreText}>{Math.round(meal.nutritionScore)}</Text>
                   </View>
@@ -2504,7 +2589,7 @@ export default function FitScoreScreen() {
                     )}
                     <View style={styles.trainingCardHeaderRow}>
                       <Text style={styles.trainingCardType} numberOfLines={1}>{training.type}</Text>
-                      {training.id !== -1 && !analyzingTrainingIds.has(training.id) && training.score && !isEditingTrainings && (
+                      {training.id !== -1 && !analyzingTrainingIds.has(training.id) && training.score && !isEditingTrainings && (showFitScoreResult || isPastDate) && (
                         <View style={[
                           styles.trainingScoreBadge,
                           { backgroundColor: getScoreColor(training.score) }
@@ -2779,7 +2864,10 @@ export default function FitScoreScreen() {
 
       {/* FitScore Result - Recovery Analysis FIRST, then Triangle */}
       {showFitScoreResult && fitScoreResult && (
-        <Animated.View style={[styles.fitScoreResultSection, { opacity: fitScoreFadeAnim }]}>
+        <Animated.View
+          style={[styles.fitScoreResultSection, { opacity: fitScoreFadeAnim }]}
+          onLayout={(e) => { fitScoreResultSectionYRef.current = e.nativeEvent.layout.y; }}
+        >
           {/* 1. Recovery Analysis Card - FIRST (WHOOP only) */}
           {!(fitScoreResult.dataSource === 'manual' || dataSource === 'manual') && <View style={styles.recoveryAnalysisCard}>
             <Text style={styles.recoveryAnalysisTitle}>Recovery Analysis</Text>
@@ -2942,7 +3030,10 @@ export default function FitScoreScreen() {
           </View>}
 
           {/* 2. FitScore Breakdown Title */}
-          <Text style={styles.sectionTitleLarge}>FitScore Breakdown</Text>
+          <Text
+            style={styles.sectionTitleLarge}
+            onLayout={(e) => { fitScoreBreakdownTitleOffsetYRef.current = e.nativeEvent.layout.y; }}
+          >FitScore Breakdown</Text>
 
           {/* 3. FitScore Triangle Visual - SVG Equilateral Triangle */}
           <View
@@ -2992,33 +3083,40 @@ export default function FitScoreScreen() {
           )}
 
           {/* FitCoach Preview */}
-          <TouchableOpacity
-            style={styles.coachPreviewCard}
-            onPress={() => !isPastDate && coachSummary?.slides && setShowCoachModal(true)}
-            activeOpacity={!isPastDate && coachSummary?.slides ? 0.7 : 1}
-          >
-            <View style={styles.coachSummaryHeader}>
-              <View style={styles.coachIconContainer}>
-                <Ionicons name="chatbubbles" size={18} color={colors.accent} />
+          <Animated.View style={[styles.coachPreviewCard, { borderColor: coachBorderColor }]}>
+            <TouchableOpacity
+              onPress={() => {
+                if (coachGlowActive) stopCoachGlow();
+                if (!isPastDate && coachSummary?.slides) setShowCoachModal(true);
+              }}
+              activeOpacity={!isPastDate && coachSummary?.slides ? 0.7 : 1}
+            >
+              <View style={styles.coachSummaryHeader}>
+                <View style={styles.coachIconContainer}>
+                  <Ionicons name="chatbubbles" size={18} color={colors.accent} />
+                </View>
+                <Text style={styles.coachSummaryTitle}>FitCoach</Text>
               </View>
-              <Text style={styles.coachSummaryTitle}>FitCoach</Text>
-            </View>
-            {loadingCoachSummary ? (
-              <View style={styles.coachSummaryLoading}>
-                <ActivityIndicator size="small" color={colors.accent} />
-                <Text style={styles.coachSummaryLoadingText}>Analyzing your day...</Text>
-              </View>
-            ) : coachSummary ? (
-              <>
-                <Text style={styles.coachPreviewText}>{coachSummary.preview}</Text>
-                {!isPastDate && (
-                  <Text style={styles.coachPreviewCTA}>Tap to see detailed overview</Text>
-                )}
-              </>
-            ) : (
-              <Text style={styles.coachSummaryPlaceholder}>Coach analysis loading...</Text>
-            )}
-          </TouchableOpacity>
+              {loadingCoachSummary ? (
+                <View style={styles.coachSummaryLoading}>
+                  <ActivityIndicator size="small" color={colors.accent} />
+                  <Text style={styles.coachSummaryLoadingText}>Analyzing your day...</Text>
+                </View>
+              ) : coachSummary ? (
+                <>
+                  <Text style={styles.coachPreviewText}>{coachSummary.preview}</Text>
+                  {!isPastDate && (
+                    <Animated.View style={[styles.coachPreviewCTABtn, { opacity: coachCtaOpacity }]}>
+                      <Text style={styles.coachPreviewCTABtnText}>DETAILED OVERVIEW</Text>
+                      <Ionicons name="arrow-forward" size={13} color={colors.accent} />
+                    </Animated.View>
+                  )}
+                </>
+              ) : (
+                <Text style={styles.coachSummaryPlaceholder}>Coach analysis loading...</Text>
+              )}
+            </TouchableOpacity>
+          </Animated.View>
 
           {/* Today's Biggest Lever */}
           {weakLink ? (
@@ -3099,7 +3197,7 @@ export default function FitScoreScreen() {
                   onPress={() => { setShowEndedModal(false); setEndedData(null); endedSlideAnim.current.setValue(300); }}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.endedCloseBtnText}>Start again when ready</Text>
+                  <Text style={styles.endedCloseBtnText}>Got it</Text>
                 </TouchableOpacity>
               </Animated.View>
             </View>
@@ -4136,7 +4234,7 @@ export default function FitScoreScreen() {
         visible={showMealModal}
         transparent
         animationType="slide"
-        onRequestClose={() => setShowMealModal(false)}
+        onRequestClose={() => { setShowMealModal(false); setTextOnlyMode(false); }}
       >
         <KeyboardAvoidingView
           style={{ flex: 1 }}
@@ -4149,6 +4247,7 @@ export default function FitScoreScreen() {
               <TouchableOpacity
                 onPress={() => {
                   setShowMealModal(false);
+                  setTextOnlyMode(false);
                   setPendingMealImage(null);
                   setSelectedMealType('');
                   setMealNotes('');
@@ -4165,9 +4264,16 @@ export default function FitScoreScreen() {
             </View>
 
             <ScrollView ref={mealScrollRef} style={styles.modalScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Image Preview */}
-              {pendingMealImage && (
+              {/* Image Preview / Text-Only Placeholder */}
+              {!textOnlyMode && pendingMealImage && (
                 <Image source={{ uri: pendingMealImage }} style={styles.mealPreviewImage} />
+              )}
+              {textOnlyMode && (
+                <View style={styles.textOnlyPlaceholder}>
+                  <Ionicons name="help-circle-outline" size={48} color={colors.surfaceMute} />
+                  <Text style={styles.textOnlyPlaceholderText}>Text-only meal</Text>
+                  <Text style={styles.textOnlyPlaceholderSub}>Scored from your description below</Text>
+                </View>
               )}
 
               {/* Meal Type Selection */}
@@ -4249,16 +4355,22 @@ export default function FitScoreScreen() {
                 </>
               )}
 
-              {/* Meal Notes */}
-              <Text style={styles.modalSectionTitle}>Meal Notes (Optional)</Text>
+              {/* Meal Notes / Description */}
+              <Text style={styles.modalSectionTitle}>
+                {textOnlyMode ? 'Describe Your Meal' : 'Meal Notes (Optional)'}
+              </Text>
               <Text style={styles.modalSectionSubtitle}>
-                Add any details not visible in the photo (e.g., "The carbs are polenta, not mashed potatoes")
+                {textOnlyMode
+                  ? 'Include foods, cooking method, and rough portions — the more detail, the better the score.'
+                  : 'Add any details not visible in the photo (e.g., "The carbs are polenta, not mashed potatoes")'}
               </Text>
               <TextInput
                 style={styles.mealNotesInput}
                 value={mealNotes}
                 onChangeText={setMealNotes}
-                placeholder="E.g., ingredients, cooking method, portion size..."
+                placeholder={textOnlyMode
+                  ? 'E.g., "Grilled chicken breast ~150g, brown rice ~200g, steamed broccoli, olive oil drizzle"'
+                  : 'E.g., ingredients, cooking method, portion size...'}
                 placeholderTextColor={colors.textMuted}
                 multiline
                 onFocus={() => {
@@ -4304,7 +4416,7 @@ export default function FitScoreScreen() {
                     <Text style={styles.mealAnalysisTitle}>{selectedMeal.mealType}</Text>
                   </View>
 
-                  {selectedMeal.nutritionScore && (
+                  {selectedMeal.nutritionScore && (showFitScoreResult || isPastDate) && (
                     <View style={styles.mealAnalysisScoreSection}>
                       <View style={[styles.mealAnalysisScoreBadge, { backgroundColor: getScoreColor(selectedMeal.nutritionScore) }]}>
                         <Text style={styles.mealAnalysisScoreValue}>
@@ -4480,7 +4592,7 @@ export default function FitScoreScreen() {
                   </View>
 
                   {/* Score Badge + Zone */}
-                  {selectedTraining.score && (
+                  {selectedTraining.score && (showFitScoreResult || isPastDate) && (
                     <View style={styles.trainingAnalysisScoreSection}>
                       <View
                         style={[
@@ -4784,6 +4896,11 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  mealImagePlaceholder: {
+    backgroundColor: colors.bgSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   editOverlay: {
     position: 'absolute',
     top: 0,
@@ -5073,6 +5190,28 @@ const styles = StyleSheet.create({
     height: 200,
     borderRadius: radii.md,
     marginBottom: spacing.lg,
+  },
+  textOnlyPlaceholder: {
+    width: '100%',
+    height: 140,
+    borderRadius: radii.md,
+    marginBottom: spacing.lg,
+    backgroundColor: colors.bgSecondary,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+  },
+  textOnlyPlaceholderText: {
+    ...typography.body,
+    color: colors.textMuted,
+    fontWeight: '600',
+  },
+  textOnlyPlaceholderSub: {
+    ...typography.small,
+    color: colors.textMuted,
   },
   modalSectionTitle: {
     ...typography.title,
@@ -5978,11 +6117,28 @@ const styles = StyleSheet.create({
   },
   // Coach Summary Styles
   coachPreviewCard: {
-    backgroundColor: colors.surfaceMute + '20',
     borderRadius: radii.lg,
     padding: spacing.lg,
     marginTop: spacing.lg,
     marginBottom: spacing.lg,
+    borderWidth: 1,
+    backgroundColor: colors.bgSecondary,
+  },
+  coachCornerTL: {
+    position: 'absolute', top: 8, left: 8, width: 10, height: 10,
+    borderTopWidth: 1.5, borderLeftWidth: 1.5, borderColor: colors.accent + 'CC',
+  },
+  coachCornerTR: {
+    position: 'absolute', top: 8, right: 8, width: 10, height: 10,
+    borderTopWidth: 1.5, borderRightWidth: 1.5, borderColor: colors.accent + 'CC',
+  },
+  coachCornerBL: {
+    position: 'absolute', bottom: 8, left: 8, width: 10, height: 10,
+    borderBottomWidth: 1.5, borderLeftWidth: 1.5, borderColor: colors.accent + 'CC',
+  },
+  coachCornerBR: {
+    position: 'absolute', bottom: 8, right: 8, width: 10, height: 10,
+    borderBottomWidth: 1.5, borderRightWidth: 1.5, borderColor: colors.accent + 'CC',
   },
   coachSummaryHeader: {
     flexDirection: 'row',
@@ -6014,6 +6170,24 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     marginTop: spacing.md,
     fontWeight: '500',
+  },
+  coachPreviewCTABtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.accent,
+    borderRadius: radii.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  coachPreviewCTABtnText: {
+    ...typography.small,
+    color: colors.accent,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
   coachSummaryLoading: {
     flexDirection: 'row',

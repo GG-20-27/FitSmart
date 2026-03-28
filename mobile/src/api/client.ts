@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
+import { DeviceEventEmitter } from 'react-native';
 
 const AUTH_TOKEN_KEY = 'fitscore_jwt_staging';
 const DEV_STATIC_JWT = process.env.EXPO_PUBLIC_STATIC_JWT?.trim() || 
@@ -167,7 +168,7 @@ export async function apiRequest<T = any>(path: string, options: RequestInit = {
     // Better error handling for network issues
     if (error instanceof TypeError && error.message.includes('Network request failed')) {
       console.error(`[API] Network error - Cannot reach ${url}`);
-      console.error(`[API] Check: 1) Phone and laptop on same WiFi 2) Backend running 3) IP address correct`);
+      DeviceEventEmitter.emit('networkError');
       throw new Error(`Cannot connect to server at ${API_BASE_URL}. Check network connection.`);
     }
     throw error;

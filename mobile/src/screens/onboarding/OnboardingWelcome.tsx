@@ -160,8 +160,16 @@ export default function OnboardingWelcome() {
           activeOpacity={0.85}
         >
           <Ionicons name="mail-outline" size={20} color={colors.accent} />
-          <Text style={styles.emailButtonText}>Continue with Email</Text>
+          <Text style={styles.emailButtonText}>Sign Up with Email</Text>
         </TouchableOpacity>
+
+        {/* Already have an account */}
+        <View style={styles.signInRow}>
+          <Text style={styles.signInText}>Already have an account? </Text>
+          <TouchableOpacity onPress={() => navigation.navigate('OnboardingEmailAuth', { mode: 'signin' })}>
+            <Text style={styles.signInLink}>Sign in</Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Security Note */}
         <View style={styles.securityNote}>
@@ -289,6 +297,21 @@ const styles = StyleSheet.create({
     ...typography.title,
     color: colors.accent,
     fontSize: 17,
+    fontWeight: '600',
+  },
+  signInRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  signInText: {
+    ...typography.small,
+    color: colors.textMuted,
+  },
+  signInLink: {
+    ...typography.small,
+    color: colors.accent,
     fontWeight: '600',
   },
   securityNote: {

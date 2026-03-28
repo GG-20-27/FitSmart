@@ -8,7 +8,7 @@ import ForgotPasswordScreen from '../screens/onboarding/ForgotPasswordScreen';
 
 export type OnboardingStackParamList = {
   OnboardingWelcome: undefined;
-  OnboardingEmailAuth: undefined;
+  OnboardingEmailAuth: { mode?: 'signin' | 'register' } | undefined;
   OnboardingQuestion: undefined;
   PhaseTransition: { phase: string };
   ForgotPassword: undefined;

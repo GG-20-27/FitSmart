@@ -181,6 +181,7 @@ FACTORS — assess each with status + confidence + evidence:
    - "good": whole or minimally processed foods dominate (fresh meat, whole veg, eggs, whole grains)
    - "warning": mostly ultra-processed (croissants, deli/cold cuts, packaged sauces, refined white bread, canned processed foods)
    - "unknown": processing level hard to determine from image
+   SNACK EXCEPTION: If the meal type is a snack and the snack is primarily a protein-rich food (e.g., protein shake, Greek yogurt, cottage cheese, hard-boiled eggs, cheese, jerky, whey/casein powder mixed with liquid), mark processingLoad as "unknown" — the processing level of intentional protein snacks is typically acceptable and should not penalise the score.
 
 5. portionBalance
    - "good": portion appears appropriate for the stated meal type and time of day
@@ -199,6 +200,7 @@ DESCRIPTION LINES — derive from your factor results:
 - gap: name the most impactful WARNING factor only. If none, say "No major gaps." Explicitly say why it matters in context.
 - upgrade: one concrete action (verb first, ≤90 chars). Tie to the top warning. If no warnings, suggest an enhancement.
 NOTE: Do NOT mention a factor in gap/upgrade if you rated it "good" or "unknown" — only cite real warnings.
+NOTE: Never use camelCase field names (like fiberPlantVolume, plantFiberVolume, nutrientDiversity, processingLoad, proteinAdequacy, portionBalance) in the strength, gap, or upgrade text. Use plain English instead: "plant fiber", "nutrient variety", "processing level", "protein", "portion size".
 INGREDIENT RULE: If the user notes mention a specific ingredient (e.g., "with berries", "added nuts", "includes spinach"), do NOT suggest adding that same ingredient in the upgrade — assume it is present even if you cannot see it clearly in the image.
 
 DIET PHASE CONTEXT (if provided):
@@ -835,9 +837,16 @@ Return valid JSON only — no score.`;
       // ── Build text from AI's description lines ─────────────────────────────
       // AI was instructed to write strength/gap/upgrade consistent with its factor ratings.
       // We trust this text but fall back gracefully if any field is empty.
-      const strength = (aiResult.strength || '').trim();
-      const gap      = (aiResult.gap      || '').trim();
-      const upgrade  = (aiResult.upgrade  || '').trim();
+      const sanitizeMealText = (text: string) => text
+        .replace(/\bplantFiberVolume\b/g, 'plant fiber')
+        .replace(/\bfiberPlantVolume\b/g, 'plant fiber')
+        .replace(/\bnutrientDiversity\b/g, 'nutrient variety')
+        .replace(/\bprocessingLoad\b/g, 'processing level')
+        .replace(/\bproteinAdequacy\b/g, 'protein')
+        .replace(/\bportionBalance\b/g, 'portion size');
+      const strength = sanitizeMealText((aiResult.strength || '').trim());
+      const gap      = sanitizeMealText((aiResult.gap      || '').trim());
+      const upgrade  = sanitizeMealText((aiResult.upgrade  || '').trim());
 
       // If gap text is present but no warnings actually exist (after confidence override),
       // override with a neutral gap message to avoid false negatives
@@ -888,6 +897,137 @@ Return valid JSON only — no score.`;
 
     } catch (error) {
       console.error('[OpenAI Service] Failed to analyze meal:', error);
+      return {
+        nutrition_subscore: 5,
+        ai_analysis: '✅ Strength: Meal logged successfully.\n⚠️ Gap: Analysis temporarily unavailable.\n🔧 Upgrade: Try re-analyzing when connection is stable.',
+        score_raw: 5,
+        score_display: 5,
+      };
+    }
+  }
+
+  /**
+   * Analyze a meal from a text description (no image)
+   */
+  async analyzeMealText(
+    mealDescription: string,
+    mealType: string,
+    goalPhase?: string
+  ): Promise<MealAnalysisResult> {
+    if (!this.apiKey) {
+      throw new Error('OpenAI API key not configured');
+    }
+
+    try {
+      console.log(`[OpenAI Service] Analyzing ${mealType} by text description`);
+
+      const userPrompt = `Assess this ${mealType} meal based on the user's description: "${mealDescription}"${goalPhase ? `\n\nUser's current diet phase: ${goalPhase}` : ''}
+
+For each factor: report status ("good"/"warning"/"unknown"), your confidence (0.0–1.0), and a short evidence note.
+If you are not sure, use "unknown" — do NOT default to "warning" just because something isn't obvious.
+Then write strength/gap/upgrade — reference only factors you actually rated "warning" in the gap.
+Return valid JSON only — no score.`;
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: this.textModel,
+          messages: [
+            { role: 'system', content: FITSCORE_AI_SYSTEM_PROMPT },
+            { role: 'user', content: userPrompt }
+          ],
+          max_completion_tokens: 700,
+          temperature: 0.4,
+          response_format: { type: 'json_object' }
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`[OpenAI Service] API error ${response.status}: ${errorText}`);
+        throw new Error(`OpenAI API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) throw new Error('No response from OpenAI');
+
+      const aiResult = JSON.parse(content);
+
+      const f = aiResult.factors;
+      if (!f?.proteinAdequacy?.status) throw new Error('AI returned invalid factor structure');
+
+      const normalizeFactor = (raw: any): RawFactorWithConfidence => ({
+        status:       (['good','warning','unknown'].includes(raw?.status) ? raw.status : 'unknown') as FactorStatus,
+        confidence:   typeof raw?.confidence === 'number' ? Math.min(1, Math.max(0, raw.confidence)) : 0.5,
+        evidence:     raw?.evidence     || '',
+        short_reason: raw?.short_reason || '',
+        quick_fix:    raw?.quick_fix    || '',
+      });
+
+      const factors: RawFactors = {
+        proteinAdequacy:  normalizeFactor(f.proteinAdequacy),
+        fiberPlantVolume: normalizeFactor(f.fiberPlantVolume),
+        nutrientDiversity:normalizeFactor(f.nutrientDiversity),
+        processingLoad:   normalizeFactor(f.processingLoad),
+        portionBalance:   normalizeFactor(f.portionBalance),
+      };
+
+      const { score_raw, score_display, goalModifierApplied, isPureJunk, isUltraProcessedCombo, effectiveStatuses } = computeMealScore(factors, goalPhase);
+
+      const sanitizeMealText = (text: string) => text
+        .replace(/\bplantFiberVolume\b/g, 'plant fiber')
+        .replace(/\bfiberPlantVolume\b/g, 'plant fiber')
+        .replace(/\bnutrientDiversity\b/g, 'nutrient variety')
+        .replace(/\bprocessingLoad\b/g, 'processing level')
+        .replace(/\bproteinAdequacy\b/g, 'protein')
+        .replace(/\bportionBalance\b/g, 'portion size');
+      const strength = sanitizeMealText((aiResult.strength || '').trim());
+      const gap      = sanitizeMealText((aiResult.gap      || '').trim());
+      const upgrade  = sanitizeMealText((aiResult.upgrade  || '').trim());
+
+      const hasEffectiveWarnings = Object.values(effectiveStatuses).some(s => s === 'warning');
+      const resolvedGap = hasEffectiveWarnings
+        ? (gap || 'One nutritional aspect could be improved.')
+        : 'No major gaps — this is a solid meal.';
+
+      const ai_analysis = `✅ Strength: ${strength || 'Logged and counted — every meal adds data.'}\n⚠️ Gap: ${resolvedGap}\n🔧 Upgrade: ${upgrade || 'Consider adding a variety of whole foods.'}`;
+
+      const buildFlag = (raw: RawFactorWithConfidence): MealQualityFlag => ({
+        status:          raw.status,
+        effectiveStatus: resolveStatus(raw),
+        confidence:      raw.confidence,
+        evidence:        raw.evidence,
+        short_reason:    raw.short_reason ?? '',
+        quick_fix:       raw.quick_fix ?? '',
+      });
+
+      const meal_quality_flags: MealQualityFlags = {
+        proteinAdequacy:  buildFlag(factors.proteinAdequacy),
+        fiberPlantVolume: buildFlag(factors.fiberPlantVolume),
+        nutrientDiversity:buildFlag(factors.nutrientDiversity),
+        processingLoad:   buildFlag(factors.processingLoad),
+        portionBalance:   buildFlag(factors.portionBalance),
+        goalModifierApplied,
+        goalPhase: goalPhase || 'Maintenance',
+        isPureJunk,
+        isUltraProcessedCombo,
+      };
+
+      const estimatedCalories = typeof aiResult.estimatedCalories === 'number' && aiResult.estimatedCalories > 0
+        ? Math.round(aiResult.estimatedCalories) : null;
+      const estimatedProtein = typeof aiResult.estimatedProtein === 'number' && aiResult.estimatedProtein > 0
+        ? Math.round(aiResult.estimatedProtein) : null;
+
+      console.log(`[OpenAI Service] Text analysis complete: score_raw=${score_raw} display=${score_display}`);
+      return { nutrition_subscore: score_raw, ai_analysis, score_raw, score_display, meal_quality_flags, estimatedCalories, estimatedProtein };
+
+    } catch (error) {
+      console.error('[OpenAI Service] Failed to analyze meal text:', error);
       return {
         nutrition_subscore: 5,
         ai_analysis: '✅ Strength: Meal logged successfully.\n⚠️ Gap: Analysis temporarily unavailable.\n🔧 Upgrade: Try re-analyzing when connection is stable.',

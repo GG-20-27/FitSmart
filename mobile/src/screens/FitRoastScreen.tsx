@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, spacing, typography, radii } from '../theme';
-import { getFitRoastCurrent, generateFitRoast, type FitRoastResponse, type FitRoastSegment, type WeeklyGoalReview } from '../api/fitroast';
+import { getFitRoastCurrent, generateFitRoast, generateFitRoastDev, type FitRoastResponse, type FitRoastSegment, type WeeklyGoalReview } from '../api/fitroast';
 import FitRoastShareModal from '../components/FitRoastShareModal';
 import { apiRequest } from '../api/client';
 
@@ -584,6 +584,22 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 22,
     marginTop: spacing.sm,
+  },
+  devTestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xl,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+  },
+  devTestBtnText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 11,
   },
   activeDaysRow: {
     flexDirection: 'row',

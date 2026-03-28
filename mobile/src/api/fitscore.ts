@@ -28,7 +28,7 @@ export interface MealData {
   id: number;
   mealType: string;
   mealNotes?: string;
-  imageUri: string;
+  imageUri: string | null;
   date: string;
   uploadedAt: string;
   nutritionScore?: number;        // score_raw (float)
@@ -254,6 +254,39 @@ export async function uploadMeal(params: {
   const result: UploadMealResponse = await response.json();
   console.log('[API] Meal uploaded successfully');
 
+  return result.meal;
+}
+
+/**
+ * Log a meal using text description only (no image)
+ */
+export async function uploadMealText(params: {
+  mealDescription: string;
+  mealType: string;
+  mealNotes?: string;
+  date?: string;
+  mealTime?: string;
+}): Promise<MealData> {
+  const { mealDescription, mealType, mealNotes, date, mealTime } = params;
+  const token = await getAuthToken();
+  const url = `${API_BASE_URL}/api/meals/text`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ mealDescription, mealType, mealNotes, date, mealTime }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to log meal: ${response.status} ${errorText}`);
+  }
+
+  const result: UploadMealResponse = await response.json();
   return result.meal;
 }
 

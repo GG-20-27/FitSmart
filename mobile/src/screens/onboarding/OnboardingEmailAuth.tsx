@@ -12,7 +12,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, spacing, radii, typography } from '../../theme';
@@ -20,10 +20,12 @@ import { API_BASE_URL, setAuthToken } from '../../api/client';
 import { OnboardingStackParamList } from '../../navigation/OnboardingNavigator';
 
 type NavigationProp = NativeStackNavigationProp<OnboardingStackParamList>;
+type RoutePropType = RouteProp<OnboardingStackParamList, 'OnboardingEmailAuth'>;
 
 export default function OnboardingEmailAuth() {
   const navigation = useNavigation<NavigationProp>();
-  const [mode, setMode] = useState<'signin' | 'register'>('signin');
+  const route = useRoute<RoutePropType>();
+  const [mode, setMode] = useState<'signin' | 'register'>(route.params?.mode ?? 'register');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);

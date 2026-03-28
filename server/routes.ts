@@ -26,6 +26,7 @@ import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekl
 import type { UserGoal, FitScore } from '@shared/schema';
 import { eq, desc, sql, and, gte, lt } from 'drizzle-orm';
 import { Resend } from 'resend';
+import cron from 'node-cron';
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(process.cwd(), "uploads");
@@ -212,6 +213,167 @@ function calculateMacroTargets(params: {
   const calorieTarget = Math.round(tdee / 50) * 50;
 
   return { proteinTarget, calorieTarget };
+}
+
+// ── FitRoast generation helper (used by route + cron) ────────────────────────
+async function buildAndStoreFitRoast(
+  userId: string,
+  dataSource: string,
+  opts?: {
+    intensity?: 'Light' | 'Spicy' | 'Savage';
+    weeklyGoalReview?: { completedSubGoalsCount: number; completedSubGoals: string[]; remainingSubGoals: string[] };
+  }
+): Promise<{ payload: any; record: any }> {
+  const zurichNow = DateTime.now().setZone('Europe/Zurich');
+  const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+  const weekStart = zurichNow.startOf('week').toISODate()!;
+
+  let avgFitScore: number | undefined;
+  let bestDayScore: number | undefined;
+  let worstDayScore: number | undefined;
+  let bestDay: string | undefined;
+  let worstDay: string | undefined;
+
+  try {
+    const weekScores = await db.select()
+      .from(fitScores)
+      .where(and(eq(fitScores.userId, userId), sql`date >= ${weekStart} AND date <= ${weekEnd}`))
+      .orderBy(desc(fitScores.score));
+    if (weekScores.length > 0) {
+      avgFitScore = Math.round((weekScores.reduce((s, r) => s + r.score, 0) / weekScores.length) * 10) / 10;
+      bestDayScore = weekScores[0].score;
+      bestDay = weekScores[0].date;
+      worstDayScore = weekScores[weekScores.length - 1].score;
+      worstDay = weekScores[weekScores.length - 1].date;
+    }
+  } catch { /* graceful */ }
+
+  let avgRecovery: number | undefined;
+  let avgReadiness: number | undefined;
+  if (dataSource === 'manual') {
+    try {
+      const days: string[] = [];
+      for (let i = 0; i < 7; i++) days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+      const scores: number[] = [];
+      for (const day of days) {
+        const mc = await storage.getManualCheckin(userId, day);
+        if (mc) scores.push(mc.recoveryScore);
+      }
+      if (scores.length > 0) avgReadiness = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
+    } catch { /* graceful */ }
+  } else {
+    try {
+      const whoopToday = await whoopApiService.getTodaysData(userId);
+      if (whoopToday?.recovery_score) avgRecovery = whoopToday.recovery_score;
+    } catch { /* graceful */ }
+  }
+
+  let trainingCount: number | undefined;
+  try {
+    const days: string[] = [];
+    for (let i = 0; i < 7; i++) days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+    let count = 0;
+    for (const day of days) count += (await storage.getTrainingDataByUserAndDate(userId, day)).length;
+    trainingCount = count;
+  } catch { /* graceful */ }
+
+  let nutritionLogDays: number | undefined;
+  try {
+    const days: string[] = [];
+    for (let i = 0; i < 7; i++) days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+    let loggedDays = 0;
+    for (const day of days) if ((await storage.getMealsByUserAndDate(userId, day)).length > 0) loggedDays++;
+    nutritionLogDays = loggedDays;
+  } catch { /* graceful */ }
+
+  let feelingsThisWeek: string[] | undefined;
+  try {
+    const days: string[] = [];
+    for (let i = 0; i < 7; i++) days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+    const feelings: string[] = [];
+    for (const day of days) {
+      const checkin = await storage.getCheckinByUserAndDate(userId, day);
+      if (checkin) feelings.push(checkin.feeling);
+    }
+    if (feelings.length > 0) feelingsThisWeek = feelings;
+  } catch { /* graceful */ }
+
+  let userGoalTitle: string | undefined;
+  try {
+    const [goal] = await db.select().from(userGoals).where(eq(userGoals.userId, userId)).limit(1);
+    if (goal) userGoalTitle = goal.title;
+  } catch { /* graceful */ }
+
+  let injuryNotes: string | undefined;
+  try {
+    const days: string[] = [];
+    for (let i = 0; i < 7; i++) days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
+    const notes: string[] = [];
+    for (const day of days) {
+      const sessions = await storage.getTrainingDataByUserAndDate(userId, day);
+      for (const s of sessions) {
+        if (s.comment && /injur|pain|sore|strain|hurt/i.test(s.comment)) notes.push(s.comment);
+      }
+    }
+    if (notes.length > 0) injuryNotes = notes.join('; ');
+  } catch { /* graceful */ }
+
+  let roastContextSummary: string | undefined;
+  try {
+    const ctx = await storage.getUserContext(userId);
+    if (ctx) {
+      const parts = [
+        `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, training phase=${ctx.tier2Phase}, diet phase=${ctx.tier2DietPhase}, emphasis=${ctx.tier2Emphasis}`,
+        `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
+      ];
+      if (ctx.injuryType && ctx.injuryType !== 'None') {
+        parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
+      }
+      roastContextSummary = parts.join('\n');
+    }
+  } catch { /* graceful */ }
+
+  let lastRoastTheme: string | undefined;
+  try {
+    const prevWeekEnd = DateTime.fromISO(weekEnd).minus({ weeks: 1 }).toISODate()!;
+    const prevRoast = await storage.getFitroastByUserAndWeek(userId, prevWeekEnd);
+    if (prevRoast) {
+      const prevPayload = JSON.parse(prevRoast.payloadJson);
+      lastRoastTheme = prevPayload.theme_used as string | undefined;
+    }
+  } catch { /* graceful */ }
+
+  const payload = await openAIService.generateFitRoast({
+    weekStart,
+    weekEnd,
+    avgFitScore,
+    bestDayScore,
+    worstDayScore,
+    bestDay,
+    worstDay,
+    avgRecovery: dataSource !== 'manual' ? avgRecovery : undefined,
+    dataSource,
+    avgReadiness: dataSource === 'manual' ? avgReadiness : undefined,
+    trainingCount,
+    nutritionLogDays,
+    totalDays: 7,
+    feelingsThisWeek,
+    userGoal: userGoalTitle,
+    injuryNotes,
+    userContextSummary: roastContextSummary,
+    intensity: opts?.intensity,
+    lastTheme: lastRoastTheme,
+    weeklyGoalReview: opts?.weeklyGoalReview,
+  });
+
+  const record = await storage.createFitroast({
+    userId,
+    weekStart,
+    weekEnd,
+    payloadJson: JSON.stringify(payload),
+  });
+
+  return { payload, record };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -4293,6 +4455,76 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/meals/text — log a meal by text description only (no image)
+  app.post('/api/meals/text', requireJWTAuth, async (req: Request, res: Response) => {
+    try {
+      const { mealType, mealDescription, mealNotes, date, mealTime } = req.body ?? {};
+
+      if (!mealType) return res.status(400).json({ error: 'Meal type is required' });
+      if (!mealDescription || !mealDescription.trim()) return res.status(400).json({ error: 'Meal description is required' });
+
+      const userId = getCurrentUserId(req) || 'default-user';
+      const uploadDate = date || getTodayDate();
+
+      const meal = await storage.createMeal({
+        userId,
+        filename: 'text-only',
+        originalName: 'text-only',
+        mimetype: 'text/plain',
+        size: 0,
+        date: uploadDate,
+        mealType,
+        mealNotes: mealNotes || mealDescription,
+        analysisResult: null,
+      });
+
+      let dietPhase: string | undefined;
+      try {
+        const [ctx] = await db.select().from(userContext).where(eq(userContext.userId, userId)).limit(1);
+        dietPhase = ctx?.tier2DietPhase ?? undefined;
+      } catch { /* non-fatal */ }
+
+      const analysis = await openAIService.analyzeMealText(mealDescription, mealType, dietPhase);
+
+      const analysisData = {
+        nutrition_subscore: analysis.nutrition_subscore,
+        score_raw: analysis.score_raw,
+        score_display: analysis.score_display,
+        ai_analysis: analysis.ai_analysis,
+        meal_quality_flags: analysis.meal_quality_flags ?? null,
+        meal_time: (mealTime as string) || null,
+        estimated_calories: analysis.estimatedCalories ?? null,
+        estimated_protein: analysis.estimatedProtein ?? null,
+      };
+
+      const updatedMeal = await storage.updateMeal(meal.id, { analysisResult: JSON.stringify(analysisData) });
+
+      console.log(`[MEAL TEXT] Analysis complete: score_raw=${analysis.score_raw} display=${analysis.score_display}`);
+
+      res.json({
+        message: 'Meal logged successfully',
+        meal: {
+          id: updatedMeal.id,
+          mealType: updatedMeal.mealType,
+          mealNotes: updatedMeal.mealNotes,
+          imageUri: null,
+          date: updatedMeal.date,
+          uploadedAt: updatedMeal.uploadedAt,
+          nutritionScore: analysis.score_raw,
+          nutritionScoreDisplay: analysis.score_display,
+          analysis: analysis.ai_analysis,
+          mealQualityFlags: analysis.meal_quality_flags ?? null,
+          estimatedCalories: analysis.estimatedCalories ?? null,
+          estimatedProtein: analysis.estimatedProtein ?? null,
+        }
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[MEAL TEXT] Error:', message);
+      res.status(500).json({ error: 'Failed to log meal', details: message });
+    }
+  });
+
   // Get today's meals endpoint
   app.get('/api/meals/today', async (req, res) => {
     try {
@@ -4381,7 +4613,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           id: meal.id,
           mealType: meal.mealType,
           mealNotes: meal.mealNotes,
-          imageUri: `${baseUrl}/uploads/${meal.filename}`,
+          imageUri: meal.filename === 'text-only' ? null : `${baseUrl}/uploads/${meal.filename}`,
           date: meal.date,
           uploadedAt: meal.uploadedAt,
           nutritionScore,
@@ -5910,6 +6142,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/fitroast/generate-dev — Dev only: force-generate bypassing Sunday check
+  app.post('/api/fitroast/generate-dev', requireJWTAuth, async (req, res) => {
+    if (process.env.ALLOW_DEV_ENDPOINTS !== 'true') {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      const zurichNow = DateTime.now().setZone('Europe/Zurich');
+      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      await storage.deleteFitroastByUserAndWeek(userId, weekEnd);
+      const roastDataSource = (req as any).dataSource || 'whoop';
+      const { payload, record } = await buildAndStoreFitRoast(userId, roastDataSource);
+      console.log(`[FITROAST-DEV] Force-generated for user=${userId} dataSource=${roastDataSource}`);
+      res.json({ ...payload, cached: false, created_at: record.createdAt });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITROAST-DEV] error:', message);
+      res.status(500).json({ error: 'Failed to generate FitRoast', details: message });
+    }
+  });
+
   // POST /api/fitroast/generate — Generate (or regenerate) this week's roast
   app.post('/api/fitroast/generate', requireJWTAuth, async (req, res) => {
     try {
@@ -5918,11 +6172,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const zurichNow = DateTime.now().setZone('Europe/Zurich');
       const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
-      const weekStart = zurichNow.startOf('week').toISODate()!;
 
       // Eligibility check: Sunday only
       const isSunday = zurichNow.weekday === 7;
-
       if (!isSunday) {
         console.log(`[FITROAST] Not eligible for user=${userId}: not Sunday (weekday=${zurichNow.weekday})`);
         return res.status(403).json({
@@ -5935,195 +6187,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Delete existing roast for this week (allow regeneration on Sunday)
       await storage.deleteFitroastByUserAndWeek(userId, weekEnd);
 
-      console.log(`[FITROAST] Generating roast for user=${userId} week=${weekStart}–${weekEnd}`);
-
-      // Gather weekly data (all graceful)
-      let avgFitScore: number | undefined;
-      let bestDayScore: number | undefined;
-      let worstDayScore: number | undefined;
-      let bestDay: string | undefined;
-      let worstDay: string | undefined;
-      let avgRecovery: number | undefined;
-
-      try {
-        const weekScores = await db.select()
-          .from(fitScores)
-          .where(and(eq(fitScores.userId, userId), sql`date >= ${weekStart} AND date <= ${weekEnd}`))
-          .orderBy(desc(fitScores.score));
-
-        if (weekScores.length > 0) {
-          avgFitScore = Math.round((weekScores.reduce((s, r) => s + r.score, 0) / weekScores.length) * 10) / 10;
-          bestDayScore = weekScores[0].score;
-          bestDay = weekScores[0].date;
-          worstDayScore = weekScores[weekScores.length - 1].score;
-          worstDay = weekScores[weekScores.length - 1].date;
-        }
-      } catch { /* graceful */ }
-
       const roastDataSource = (req as any).dataSource || 'whoop';
-
-      // Recovery trend / readiness — branch by data source
-      let recoveryTrend: string | undefined;
-      let avgReadiness: number | undefined;
-      if (roastDataSource === 'manual') {
-        // Average manual readiness across the week
-        try {
-          const days: string[] = [];
-          for (let i = 0; i < 7; i++) days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
-          const scores: number[] = [];
-          for (const day of days) {
-            const mc = await storage.getManualCheckin(userId, day);
-            if (mc) scores.push(mc.recoveryScore);
-          }
-          if (scores.length > 0) {
-            avgReadiness = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
-          }
-        } catch { /* graceful */ }
-      } else {
-        try {
-          const whoopToday = await whoopApiService.getTodaysData(userId);
-          if (whoopToday?.recovery_score) {
-            avgRecovery = whoopToday.recovery_score;
-          }
-        } catch { /* graceful */ }
-      }
-
-      // Training count this week
-      let trainingCount: number | undefined;
-      try {
-        const days: string[] = [];
-        for (let i = 0; i < 7; i++) {
-          days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
-        }
-        let count = 0;
-        for (const day of days) {
-          const sessions = await storage.getTrainingDataByUserAndDate(userId, day);
-          count += sessions.length;
-        }
-        trainingCount = count;
-      } catch { /* graceful */ }
-
-      // Nutrition log days this week
-      let nutritionLogDays: number | undefined;
-      try {
-        const days: string[] = [];
-        for (let i = 0; i < 7; i++) {
-          days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
-        }
-        let loggedDays = 0;
-        for (const day of days) {
-          const meals = await storage.getMealsByUserAndDate(userId, day);
-          if (meals.length > 0) loggedDays++;
-        }
-        nutritionLogDays = loggedDays;
-      } catch { /* graceful */ }
-
-      // Feelings this week from daily checkins
-      let feelingsThisWeek: string[] | undefined;
-      try {
-        const days: string[] = [];
-        for (let i = 0; i < 7; i++) {
-          days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
-        }
-        const feelings: string[] = [];
-        for (const day of days) {
-          const checkin = await storage.getCheckinByUserAndDate(userId, day);
-          if (checkin) feelings.push(checkin.feeling);
-        }
-        if (feelings.length > 0) feelingsThisWeek = feelings;
-      } catch { /* graceful */ }
-
-      // User goal
-      let userGoalTitle: string | undefined;
-      try {
-        const [goal] = await db.select().from(userGoals).where(eq(userGoals.userId, userId)).limit(1);
-        if (goal) userGoalTitle = goal.title;
-      } catch { /* graceful */ }
-
-      // Injury notes from this week's training
-      let injuryNotes: string | undefined;
-      try {
-        const days: string[] = [];
-        for (let i = 0; i < 7; i++) {
-          days.push(DateTime.fromISO(weekStart).plus({ days: i }).toISODate()!);
-        }
-        const notes: string[] = [];
-        for (const day of days) {
-          const sessions = await storage.getTrainingDataByUserAndDate(userId, day);
-          for (const s of sessions) {
-            if (s.comment && /injur|pain|sore|strain|hurt/i.test(s.comment)) {
-              notes.push(s.comment);
-            }
-          }
-        }
-        if (notes.length > 0) injuryNotes = notes.join('; ');
-      } catch { /* graceful */ }
-
-      // User context for AI personalisation
-      let roastContextSummary: string | undefined;
-      try {
-        const ctx = await storage.getUserContext(userId);
-        if (ctx) {
-          const parts = [
-            `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, training phase=${ctx.tier2Phase}, diet phase=${ctx.tier2DietPhase}, emphasis=${ctx.tier2Emphasis}`,
-            `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
-          ];
-          if (ctx.injuryType && ctx.injuryType !== 'None') {
-            parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
-          }
-          roastContextSummary = parts.join('\n');
-        }
-      } catch { /* graceful */ }
-
-      // Fetch last week's roast to extract theme_used (avoid repeating same theme)
-      let lastRoastTheme: string | undefined;
-      try {
-        const prevWeekEnd = DateTime.fromISO(weekEnd).minus({ weeks: 1 }).toISODate()!;
-        const prevRoast = await storage.getFitroastByUserAndWeek(userId, prevWeekEnd);
-        if (prevRoast) {
-          const prevPayload = JSON.parse(prevRoast.payloadJson);
-          lastRoastTheme = prevPayload.theme_used as string | undefined;
-        }
-      } catch { /* graceful — theme diversity is best-effort */ }
-
-      // Generate
       const roastIntensity = req.body?.intensity as 'Light' | 'Spicy' | 'Savage' | undefined;
       const weeklyGoalReview = req.body?.weeklyGoalReview as {
-        completedSubGoalsCount: number;
-        completedSubGoals: string[];
-        remainingSubGoals: string[];
+        completedSubGoalsCount: number; completedSubGoals: string[]; remainingSubGoals: string[];
       } | undefined;
-      const payload = await openAIService.generateFitRoast({
-        weekStart,
-        weekEnd,
-        avgFitScore,
-        bestDayScore,
-        worstDayScore,
-        bestDay,
-        worstDay,
-        recoveryTrend,
-        avgRecovery: roastDataSource !== 'manual' ? avgRecovery : undefined,
-        dataSource: roastDataSource,
-        avgReadiness: roastDataSource === 'manual' ? avgReadiness : undefined,
-        trainingCount,
-        nutritionLogDays,
-        totalDays: 7,
-        feelingsThisWeek,
-        userGoal: userGoalTitle,
-        injuryNotes,
-        userContextSummary: roastContextSummary,
-        intensity: roastIntensity,
-        lastTheme: lastRoastTheme,
-        weeklyGoalReview,
-      });
 
-      // Store
-      const record = await storage.createFitroast({
-        userId,
-        weekStart,
-        weekEnd,
-        payloadJson: JSON.stringify(payload),
-      });
+      const { payload, record } = await buildAndStoreFitRoast(userId, roastDataSource, { intensity: roastIntensity, weeklyGoalReview });
 
       console.log(`[FITROAST] Generated and stored for user=${userId} week=${weekEnd}`);
       res.json({ ...payload, cached: false, created_at: record.createdAt });
@@ -7601,6 +7671,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Static file serving
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+
+  // ── FitRoast Sunday auto-generation cron ──────────────────────────────────
+  // Runs every Sunday at 00:00 Zurich time — generates roasts for users who
+  // haven't triggered their own yet.
+  cron.schedule('0 0 * * 0', async () => {
+    console.log('[Cron] FitRoast auto-generation starting...');
+    try {
+      const zurichNow = DateTime.now().setZone('Europe/Zurich');
+      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      const allUsers = await storage.getAllUsers();
+      let generated = 0;
+      let skipped = 0;
+      for (const user of allUsers) {
+        try {
+          const existing = await storage.getFitroastByUserAndWeek(user.id, weekEnd);
+          if (existing) { skipped++; continue; }
+          await buildAndStoreFitRoast(user.id, user.dataSource ?? 'whoop');
+          generated++;
+          console.log(`[Cron] FitRoast generated for user=${user.id}`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[Cron] FitRoast failed for user=${user.id}: ${msg}`);
+        }
+      }
+      console.log(`[Cron] FitRoast done: generated=${generated} skipped=${skipped}`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[Cron] FitRoast cron error:', msg);
+    }
+  }, { timezone: 'Europe/Zurich' });
 
   const httpServer = createServer(app);
   return httpServer;

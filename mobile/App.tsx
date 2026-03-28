@@ -1,7 +1,7 @@
-import React, { useState, useEffect, Component, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View, StyleSheet, ActivityIndicator, TouchableOpacity, Linking, Image } from 'react-native';
+import { Text, View, StyleSheet, ActivityIndicator, TouchableOpacity, Linking, Image, Animated, DeviceEventEmitter, Platform, StatusBar } from 'react-native';
 import Constants from 'expo-constants';
 import DashboardScreen from './src/screens/DashboardScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
@@ -70,6 +70,91 @@ function PlaceholderScreen({ title }: { title: string }) {
     </View>
   );
 }
+
+// ── Network Error Banner ───────────────────────────────────────────────────
+function NetworkErrorBanner() {
+  const slideAnim = useRef(new Animated.Value(-130)).current;
+  const [visible, setVisible] = useState(false);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const show = () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    setVisible(true);
+    Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, tension: 80, friction: 10 }).start();
+    hideTimer.current = setTimeout(() => hide(), 5000);
+  };
+
+  const hide = () => {
+    Animated.timing(slideAnim, { toValue: -130, duration: 300, useNativeDriver: true }).start(() => setVisible(false));
+  };
+
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener('networkError', show);
+    return () => { sub.remove(); if (hideTimer.current) clearTimeout(hideTimer.current); };
+  }, []);
+
+  if (!visible) return null;
+  return (
+    <Animated.View style={[networkBannerStyles.banner, { transform: [{ translateY: slideAnim }] }]}>
+      <View style={networkBannerStyles.row}>
+        <Text style={networkBannerStyles.icon}>📡</Text>
+        <View style={networkBannerStyles.textBlock}>
+          <Text style={networkBannerStyles.title}>No connection</Text>
+          <Text style={networkBannerStyles.subtitle}>Can't reach the server. Check your network.</Text>
+        </View>
+        <TouchableOpacity onPress={hide} style={networkBannerStyles.closeBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <Text style={networkBannerStyles.closeText}>✕</Text>
+        </TouchableOpacity>
+      </View>
+    </Animated.View>
+  );
+}
+
+const BANNER_TOP_PADDING = Platform.OS === 'ios' ? 54 : (StatusBar.currentHeight ?? 24) + 10;
+
+const networkBannerStyles = StyleSheet.create({
+  banner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 9999,
+    backgroundColor: colors.bgSecondary,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.accent + '40',
+    paddingTop: BANNER_TOP_PADDING,
+    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  icon: {
+    fontSize: 20,
+  },
+  textBlock: {
+    flex: 1,
+  },
+  title: {
+    color: colors.textPrimary,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  subtitle: {
+    color: colors.textMuted,
+    fontSize: 12,
+    marginTop: 1,
+  },
+  closeBtn: {
+    padding: spacing.xs,
+  },
+  closeText: {
+    color: colors.textMuted,
+    fontSize: 16,
+  },
+});
 
 const Tab = createBottomTabNavigator();
 
@@ -255,11 +340,14 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <NavigationContainer theme={navigationTheme}>
-        {onboardingComplete
-          ? <MainTabs />
-          : <OnboardingNavigator />}
-      </NavigationContainer>
+      <View style={{ flex: 1 }}>
+        <NavigationContainer theme={navigationTheme}>
+          {onboardingComplete
+            ? <MainTabs />
+            : <OnboardingNavigator />}
+        </NavigationContainer>
+        <NetworkErrorBanner />
+      </View>
     </ErrorBoundary>
   );
 }

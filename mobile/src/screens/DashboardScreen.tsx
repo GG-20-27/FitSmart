@@ -310,6 +310,24 @@ export default function DashboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [daysOfData, setDaysOfData] = useState<number | null>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const [showFitRoastReminder, setShowFitRoastReminder] = useState(false);
+
+  // Show Sunday FitRoast reminder if today is Sunday and not yet dismissed this week
+  useEffect(() => {
+    const today = new Date();
+    if (today.getDay() !== 0) return; // 0 = Sunday
+    const weekKey = `@fitroast_reminder_dismissed_${today.toISOString().split('T')[0]}`;
+    AsyncStorage.getItem(weekKey).then(val => {
+      if (!val) setShowFitRoastReminder(true);
+    }).catch(() => {});
+  }, []);
+
+  const dismissFitRoastReminder = useCallback(() => {
+    const today = new Date();
+    const weekKey = `@fitroast_reminder_dismissed_${today.toISOString().split('T')[0]}`;
+    AsyncStorage.setItem(weekKey, '1').catch(() => {});
+    setShowFitRoastReminder(false);
+  }, []);
 
   const triggerBackfill = useCallback(async () => {
     try {
@@ -485,6 +503,24 @@ export default function DashboardScreen() {
             </View>
           </TouchableOpacity>
 
+          {/* Sunday FitRoast Reminder */}
+          {showFitRoastReminder && (
+            <TouchableOpacity
+              style={styles.fitRoastReminderCard}
+              onPress={() => { (navigation as any).navigate('Insights', { initialTab: 'FitRoast' }); }}
+              activeOpacity={0.85}
+            >
+              <View style={styles.fitRoastReminderRow}>
+                <Ionicons name="flame" size={20} color={colors.accent} />
+                <View style={styles.fitRoastReminderText}>
+                  <Text style={styles.fitRoastReminderTitle}>FitRoast Sunday</Text>
+                  <Text style={styles.fitRoastReminderSubtitle}>Check your sub-goals and get your weekly roast</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+              </View>
+            </TouchableOpacity>
+          )}
+
           {/* FitScore Forecast Header */}
           <View style={styles.forecastSection}>
             <Text style={styles.forecastTitle}>FitScore Forecast</Text>
@@ -641,6 +677,27 @@ export default function DashboardScreen() {
             <Ionicons name="person" size={20} color={colors.bgPrimary} />
           </View>
         </TouchableOpacity>
+
+        {/* Sunday FitRoast Reminder */}
+        {showFitRoastReminder && (
+          <TouchableOpacity
+            style={styles.fitRoastReminderCard}
+            onPress={() => { dismissFitRoastReminder(); (navigation as any).navigate('Insights', { initialTab: 'FitRoast' }); }}
+            activeOpacity={0.85}
+          >
+            <View style={styles.fitRoastReminderRow}>
+              <Ionicons name="flame" size={20} color={colors.accent} />
+              <View style={styles.fitRoastReminderText}>
+                <Text style={styles.fitRoastReminderTitle}>FitRoast Sunday</Text>
+                <Text style={styles.fitRoastReminderSubtitle}>Check your sub-goals and get your weekly roast</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.accent} />
+            </View>
+            <TouchableOpacity onPress={dismissFitRoastReminder} style={styles.fitRoastReminderClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close" size={14} color={colors.textMuted} />
+            </TouchableOpacity>
+          </TouchableOpacity>
+        )}
 
         {/* FitScore Forecast Header */}
         <View style={styles.forecastSection}>
@@ -1046,5 +1103,56 @@ const styles = StyleSheet.create({
     ...typography.body,
     fontWeight: '700',
     color: colors.bgPrimary,
+  },
+  devTestBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    alignSelf: 'flex-end',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+    marginBottom: spacing.sm,
+  },
+  devTestBtnText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 11,
+  },
+  fitRoastReminderCard: {
+    backgroundColor: colors.accent + '15',
+    borderRadius: radii.lg,
+    borderWidth: 1,
+    borderColor: colors.accent + '40',
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    marginTop: spacing.xs,
+  },
+  fitRoastReminderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  fitRoastReminderText: {
+    flex: 1,
+  },
+  fitRoastReminderTitle: {
+    ...typography.body,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    fontSize: 14,
+  },
+  fitRoastReminderSubtitle: {
+    ...typography.small,
+    color: colors.textMuted,
+    marginTop: 2,
+  },
+  fitRoastReminderClose: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    padding: spacing.xs,
   },
 });

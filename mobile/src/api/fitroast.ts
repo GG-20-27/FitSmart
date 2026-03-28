@@ -68,6 +68,13 @@ export interface WeeklyGoalReview {
   remainingSubGoals: string[];
 }
 
+/** Dev/admin only: force-generate FitRoast bypassing Sunday check */
+export async function generateFitRoastDev(): Promise<FitRoastResponse> {
+  return apiRequest<FitRoastResponse>('/api/fitroast/generate-dev', {
+    method: 'POST',
+  });
+}
+
 /** Generate (or regenerate) this week's FitRoast — only succeeds on Sunday with ≥5 active days */
 export async function generateFitRoast(
   intensity?: 'Light' | 'Spicy' | 'Savage',
