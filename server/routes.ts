@@ -6207,13 +6207,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // DELETE /api/fitroast/current-dev — Dev only: delete current week's FitRoast (for testing)
-  app.delete('/api/fitroast/current-dev', requireJWTAuth, async (req, res) => {
+  app.delete('/api/fitroast/current-dev', async (req, res) => {
     if (process.env.ALLOW_DEV_ENDPOINTS !== 'true') {
       return res.status(404).json({ error: 'Not found' });
     }
     try {
-      const userId = getCurrentUserId(req);
-      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      // Accept userId directly as query param (dev only — no auth needed)
+      const userId = (req.query.userId as string) || getCurrentUserId(req);
+      if (!userId) return res.status(400).json({ error: 'userId query param required' });
       const zurichNow = DateTime.now().setZone('Europe/Zurich');
       const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
       await storage.deleteFitroastByUserAndWeek(userId, weekEnd);
@@ -7738,9 +7739,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
   // ── FitRoast Sunday auto-generation cron ──────────────────────────────────
-  // Runs every Sunday at 00:00 Zurich time — generates roasts for users who
-  // haven't triggered their own yet.
-  cron.schedule('0 0 * * 0', async () => {
+  // Runs every Sunday at 22:00 Zurich time — fallback for users who never
+  // opened the app on Sunday (preserves the goal-check flow for active users).
+  cron.schedule('0 22 * * 0', async () => {
     console.log('[Cron] FitRoast auto-generation starting...');
     try {
       const zurichNow = DateTime.now().setZone('Europe/Zurich');
