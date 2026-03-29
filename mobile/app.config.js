@@ -1,7 +1,7 @@
 module.exports = {
   expo: {
     name: "FitSmart",
-    slug: "fitsmart",
+    slug: "fitscoreai",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/logo.png",
