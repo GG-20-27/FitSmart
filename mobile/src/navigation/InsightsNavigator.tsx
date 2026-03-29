@@ -9,7 +9,7 @@ import { colors, spacing, typography, radii } from '../theme';
 type InsightTab = 'FitScore' | 'FitLook' | 'FitRoast';
 
 export default function InsightsNavigator() {
-  const [activeTab, setActiveTab] = useState<InsightTab>('FitScore');
+  const [activeTab, setActiveTab] = useState<InsightTab>('FitLook');
   const route = useRoute();
 
   // Switch to requested tab when navigated here with params (e.g. Sunday FitRoast reminder)
