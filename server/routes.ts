@@ -7739,9 +7739,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
   // ── FitRoast Sunday auto-generation cron ──────────────────────────────────
-  // Runs every Sunday at 22:00 Zurich time — fallback for users who never
-  // opened the app on Sunday (preserves the goal-check flow for active users).
-  cron.schedule('0 22 * * 0', async () => {
+  // Runs every Sunday at 23:59 Zurich time — fallback for users who forgot
+  // to generate their FitRoast all Sunday (preserves the goal-check flow for active users).
+  cron.schedule('59 23 * * 0', async () => {
     console.log('[Cron] FitRoast auto-generation starting...');
     try {
       const zurichNow = DateTime.now().setZone('Europe/Zurich');
