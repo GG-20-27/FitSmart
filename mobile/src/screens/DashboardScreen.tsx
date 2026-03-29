@@ -315,21 +315,9 @@ export default function DashboardScreen() {
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const [showFitRoastReminder, setShowFitRoastReminder] = useState(false);
 
-  // Show Sunday FitRoast reminder if today is Sunday and not yet dismissed this week
+  // Show Sunday FitRoast reminder all day on Sundays
   useEffect(() => {
-    const today = new Date();
-    if (today.getDay() !== 0) return; // 0 = Sunday
-    const weekKey = `@fitroast_reminder_dismissed_${today.toISOString().split('T')[0]}`;
-    AsyncStorage.getItem(weekKey).then(val => {
-      if (!val) setShowFitRoastReminder(true);
-    }).catch(() => {});
-  }, []);
-
-  const dismissFitRoastReminder = useCallback(() => {
-    const today = new Date();
-    const weekKey = `@fitroast_reminder_dismissed_${today.toISOString().split('T')[0]}`;
-    AsyncStorage.setItem(weekKey, '1').catch(() => {});
-    setShowFitRoastReminder(false);
+    if (new Date().getDay() === 0) setShowFitRoastReminder(true);
   }, []);
 
   const triggerBackfill = useCallback(async () => {
@@ -730,7 +718,7 @@ export default function DashboardScreen() {
         {showFitRoastReminder && (
           <TouchableOpacity
             style={styles.fitRoastReminderCard}
-            onPress={() => { dismissFitRoastReminder(); (navigation as any).navigate('Insights', { initialTab: 'FitRoast' }); }}
+            onPress={() => { (navigation as any).navigate('Insights', { initialTab: 'FitRoast' }); }}
             activeOpacity={0.85}
           >
             <View style={styles.fitRoastReminderRow}>
@@ -741,9 +729,6 @@ export default function DashboardScreen() {
               </View>
               <Ionicons name="chevron-forward" size={18} color={colors.accent} />
             </View>
-            <TouchableOpacity onPress={dismissFitRoastReminder} style={styles.fitRoastReminderClose} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close" size={14} color={colors.textMuted} />
-            </TouchableOpacity>
           </TouchableOpacity>
         )}
 
