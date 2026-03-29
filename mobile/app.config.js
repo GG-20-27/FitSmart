@@ -1,7 +1,7 @@
 module.exports = {
   expo: {
-    name: "FitScoreAI",
-    slug: "fitscoreai",
+    name: "FitSmart",
+    slug: "fitsmart",
     version: "1.0.0",
     orientation: "portrait",
     icon: "./assets/logo.png",
@@ -18,9 +18,9 @@ module.exports = {
       supportsTablet: true,
       bundleIdentifier: "com.fitscoreai.app",
       infoPlist: {
-        NSCameraUsageDescription: "FitScore AI needs camera access to analyze your meals for nutrition tracking.",
-        NSMicrophoneUsageDescription: "FitScore AI needs microphone access for voice message transcription.",
-        NSPhotoLibraryUsageDescription: "FitScore AI needs photo library access to select meal images for analysis.",
+        NSCameraUsageDescription: "FitSmart needs camera access to analyze your meals for nutrition tracking.",
+        NSMicrophoneUsageDescription: "FitSmart needs microphone access for voice message transcription.",
+        NSPhotoLibraryUsageDescription: "FitSmart needs photo library access to select meal images for analysis.",
         ITSAppUsesNonExemptEncryption: false
       }
     },
@@ -55,7 +55,8 @@ module.exports = {
     },
     plugins: [
       "expo-asset",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-localization"
     ],
     // Force tunnel mode for development
     packagerOpts: {

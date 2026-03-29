@@ -12,7 +12,9 @@ import {
   StatusBar,
   AppState,
   AppStateStatus,
+  Modal,
 } from 'react-native';
+import MorningCheckInScreen from './MorningCheckInScreen';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiRequest, getDataSource } from '../api/client';
@@ -299,6 +301,7 @@ function InputRow({
 export default function DashboardScreen() {
   const navigation = useNavigation();
   const [dataSource, setDataSource] = useState<'whoop' | 'manual'>('whoop');
+  const [showEditCheckin, setShowEditCheckin] = useState(false);
   const [manualCheckin, setManualCheckin] = useState<ManualCheckin | null>(null);
   const [recentCheckins, setRecentCheckins] = useState<ManualCheckin[]>([]);
   const [forecast, setForecast] = useState<FitScoreForecast | null>(null);
@@ -348,6 +351,7 @@ export default function DashboardScreen() {
   }, []);
 
   const CACHE_KEY = 'dashboard_cache_v3';
+  const CHECKIN_CACHE_KEY = 'manual_checkin_today_cache';
   const todayDateStr = () => new Date().toISOString().split('T')[0];
 
   const loadData = useCallback(async (isRefresh = false) => {
@@ -357,11 +361,27 @@ export default function DashboardScreen() {
 
       // ── Manual mode: fetch today + last 7 days ────────────────────────────
       if (ds === 'manual') {
+        // Load cached check-in immediately so the card shows even if server is slow
+        if (!isRefresh) {
+          try {
+            const cached = await AsyncStorage.getItem(CHECKIN_CACHE_KEY);
+            if (cached) {
+              const parsed = JSON.parse(cached);
+              if (parsed.date === todayDateStr()) {
+                setManualCheckin(parsed.checkin);
+              }
+            }
+          } catch { /* ignore */ }
+        }
+
         const [checkin, recent] = await Promise.all([
-          apiRequest<ManualCheckin | null>('/api/checkin/today').catch(() => null),
+          apiRequest<ManualCheckin | null>('/api/checkin/today').catch(() => undefined),
           apiRequest<ManualCheckin[]>('/api/checkin/recent?days=7').catch(() => []),
         ]);
-        setManualCheckin(checkin);
+        if (checkin !== undefined) {
+          setManualCheckin(checkin);
+          AsyncStorage.setItem(CHECKIN_CACHE_KEY, JSON.stringify({ date: todayDateStr(), checkin })).catch(() => {});
+        }
         setRecentCheckins(recent ?? []);
         return;
       }
@@ -540,12 +560,40 @@ export default function DashboardScreen() {
             )}
           </View>
 
+          {/* Edit Check-In Modal */}
+          <Modal visible={showEditCheckin} animationType="slide" presentationStyle="fullScreen">
+            <MorningCheckInScreen
+              isEdit
+              initialValues={manualCheckin ? {
+                recovery: manualCheckin.recovery,
+                energy: manualCheckin.energy,
+                sleepHours: manualCheckin.sleepHours,
+                sleepQuality: manualCheckin.sleepQuality as any,
+              } : undefined}
+              onComplete={async () => {
+                setShowEditCheckin(false);
+                const updated = await apiRequest<ManualCheckin | null>('/api/checkin/today').catch(() => null);
+                if (updated) {
+                  setManualCheckin(updated);
+                  AsyncStorage.setItem(CHECKIN_CACHE_KEY, JSON.stringify({ date: todayDateStr(), checkin: updated })).catch(() => {});
+                }
+              }}
+            />
+          </Modal>
+
           {/* Today's Recovery Inputs (check-in summary) */}
           {manualCheckin && (
             <View style={styles.sectionBox}>
               <View style={styles.sectionHeader}>
                 <View style={styles.sectionAccentBar} />
                 <Text style={styles.sectionTitle}>TODAY'S RECOVERY INPUTS</Text>
+                <TouchableOpacity
+                  onPress={() => setShowEditCheckin(true)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={{ marginLeft: 'auto' }}
+                >
+                  <Ionicons name="pencil-outline" size={16} color={colors.textMuted} />
+                </TouchableOpacity>
               </View>
               <InputRow
                 icon="heart-outline"

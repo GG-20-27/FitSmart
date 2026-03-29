@@ -222,9 +222,11 @@ async function buildAndStoreFitRoast(
   opts?: {
     intensity?: 'Light' | 'Spicy' | 'Savage';
     weeklyGoalReview?: { completedSubGoalsCount: number; completedSubGoals: string[]; remainingSubGoals: string[] };
+    tz?: string;
   }
 ): Promise<{ payload: any; record: any }> {
-  const zurichNow = DateTime.now().setZone('Europe/Zurich');
+  const tz = opts?.tz || 'Europe/Zurich';
+  const zurichNow = DateTime.now().setZone(tz);
   const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
   const weekStart = zurichNow.startOf('week').toISODate()!;
 
@@ -2343,6 +2345,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(409).json({ error: 'Check-in already submitted for today' });
       }
       console.error('[CHECKIN] POST error:', e);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
+  // PUT /api/checkin — update today's manual check-in
+  app.put('/api/checkin', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Auth required' });
+
+      const { recovery, energy, sleepHours, sleepQuality } = req.body ?? {};
+      if (recovery == null || energy == null || sleepHours == null || !sleepQuality) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      let sleepScore: number;
+      const sh = Number(sleepHours);
+      if (sh < 5) sleepScore = 3;
+      else if (sh < 6) sleepScore = 5;
+      else if (sh < 7) sleepScore = 7;
+      else if (sh < 8) sleepScore = 8;
+      else sleepScore = 9;
+
+      const recoveryScore = Math.round((0.5 * Number(recovery) + 0.3 * Number(energy) + 0.2 * sleepScore) * 10) / 10;
+      const today = new Date().toISOString().split('T')[0];
+
+      const updated = await storage.updateManualCheckin(userId, today, {
+        recovery: Number(recovery),
+        energy: Number(energy),
+        sleepHours: sh,
+        sleepQuality: String(sleepQuality),
+        recoveryScore,
+      });
+      if (!updated) return res.status(404).json({ error: 'No check-in found for today' });
+      res.json(updated);
+    } catch (e: any) {
+      console.error('[CHECKIN] PUT error:', e);
       res.status(500).json({ error: 'Internal error' });
     }
   });
@@ -6088,7 +6127,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
-      const zurichNow = DateTime.now().setZone('Europe/Zurich');
+      const rawTz = typeof req.query.tz === 'string' ? req.query.tz : '';
+      const tz = (rawTz && DateTime.now().setZone(rawTz).isValid) ? rawTz : 'Europe/Zurich';
+      console.log(`[FITROAST] GET current user=${userId} tz=${tz}${rawTz !== tz ? ` (fallback from "${rawTz}")` : ''}`);
+      const zurichNow = DateTime.now().setZone(tz);
       // Week: Monday–Sunday
       const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
       const weekStart = zurichNow.startOf('week').toISODate()!;
@@ -6164,13 +6206,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // DELETE /api/fitroast/current-dev — Dev only: delete current week's FitRoast (for testing)
+  app.delete('/api/fitroast/current-dev', requireJWTAuth, async (req, res) => {
+    if (process.env.ALLOW_DEV_ENDPOINTS !== 'true') {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      const zurichNow = DateTime.now().setZone('Europe/Zurich');
+      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      await storage.deleteFitroastByUserAndWeek(userId, weekEnd);
+      console.log(`[FITROAST-DEV] Deleted current week's roast for user=${userId} week=${weekEnd}`);
+      res.json({ success: true, week_end: weekEnd });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error('[FITROAST-DEV] delete error:', message);
+      res.status(500).json({ error: 'Failed to delete FitRoast', details: message });
+    }
+  });
+
   // POST /api/fitroast/generate — Generate (or regenerate) this week's roast
   app.post('/api/fitroast/generate', requireJWTAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
-      const zurichNow = DateTime.now().setZone('Europe/Zurich');
+      const rawTz = typeof req.body?.tz === 'string' ? req.body.tz : '';
+      const tz = (rawTz && DateTime.now().setZone(rawTz).isValid) ? rawTz : 'Europe/Zurich';
+      console.log(`[FITROAST] POST generate user=${userId} tz=${tz}${rawTz !== tz ? ` (fallback from "${rawTz}")` : ''}`);
+      const zurichNow = DateTime.now().setZone(tz);
       const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
 
       // Eligibility check: Sunday only
@@ -6193,7 +6258,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         completedSubGoalsCount: number; completedSubGoals: string[]; remainingSubGoals: string[];
       } | undefined;
 
-      const { payload, record } = await buildAndStoreFitRoast(userId, roastDataSource, { intensity: roastIntensity, weeklyGoalReview });
+      const { payload, record } = await buildAndStoreFitRoast(userId, roastDataSource, { intensity: roastIntensity, weeklyGoalReview, tz });
 
       console.log(`[FITROAST] Generated and stored for user=${userId} week=${weekEnd}`);
       res.json({ ...payload, cached: false, created_at: record.createdAt });

@@ -7,7 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { colors, spacing, typography, radii } from '../theme';
-import { getFitRoastCurrent, generateFitRoast, generateFitRoastDev, type FitRoastResponse, type FitRoastSegment, type WeeklyGoalReview } from '../api/fitroast';
+import { getFitRoastCurrent, generateFitRoast, generateFitRoastDev, resetFitRoastDev, type FitRoastResponse, type FitRoastSegment, type WeeklyGoalReview } from '../api/fitroast';
 import FitRoastShareModal from '../components/FitRoastShareModal';
 import { apiRequest } from '../api/client';
 
@@ -242,6 +242,14 @@ export default function FitRoastScreen() {
         <Text style={styles.lockedSubtitle}>
           Every Sunday your week gets roasted.{'\n'}Come back in {daysUntilSunday} day{daysUntilSunday !== 1 ? 's' : ''}.
         </Text>
+        {__DEV__ && (
+          <TouchableOpacity
+            onPress={async () => { try { await resetFitRoastDev(); loadRoast(); } catch (e) { console.warn('Dev reset failed', e); } }}
+            style={{ marginTop: 32, opacity: 0.4 }}
+          >
+            <Text style={{ color: colors.textMuted, fontSize: 11 }}>[dev] reset roast</Text>
+          </TouchableOpacity>
+        )}
       </Animated.View>
     );
   }
@@ -343,6 +351,15 @@ export default function FitRoastScreen() {
             />
           ))}
         </View>
+
+        {__DEV__ && (
+          <TouchableOpacity
+            onPress={async () => { try { await resetFitRoastDev(); loadRoast(); } catch (e) { console.warn('Dev reset failed', e); } }}
+            style={{ position: 'absolute', top: 16, right: 16, opacity: 0.25 }}
+          >
+            <Text style={{ color: colors.textMuted, fontSize: 10 }}>[dev] reset</Text>
+          </TouchableOpacity>
+        )}
       </Animated.View>
     );
   }

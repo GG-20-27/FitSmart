@@ -16,15 +16,22 @@ import { apiRequest } from '../api/client';
 
 interface Props {
   onComplete: () => void;
+  isEdit?: boolean;
+  initialValues?: {
+    recovery: number;
+    energy: number;
+    sleepHours: number;
+    sleepQuality: 'poor' | 'ok' | 'great';
+  };
 }
 
 type SleepQuality = 'poor' | 'ok' | 'great';
 
-export default function MorningCheckInScreen({ onComplete }: Props) {
-  const [recovery, setRecovery] = useState(5);
-  const [energy, setEnergy] = useState(5);
-  const [sleepHours, setSleepHours] = useState(7);
-  const [sleepQuality, setSleepQuality] = useState<SleepQuality>('ok');
+export default function MorningCheckInScreen({ onComplete, isEdit = false, initialValues }: Props) {
+  const [recovery, setRecovery] = useState(initialValues?.recovery ?? 5);
+  const [energy, setEnergy] = useState(initialValues?.energy ?? 5);
+  const [sleepHours, setSleepHours] = useState(initialValues?.sleepHours ?? 7);
+  const [sleepQuality, setSleepQuality] = useState<SleepQuality>(initialValues?.sleepQuality ?? 'ok');
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
 
@@ -32,20 +39,17 @@ export default function MorningCheckInScreen({ onComplete }: Props) {
     try {
       setIsLoading(true);
       await apiRequest('/api/checkin', {
-        method: 'POST',
+        method: isEdit ? 'PUT' : 'POST',
         body: JSON.stringify({ recovery, energy, sleepHours, sleepQuality }),
       });
       setSuccess(true);
-      // Short delay to show success state, then unlock the app
       setTimeout(() => onComplete(), 1500);
     } catch (e: any) {
       if (e?.message?.includes('409') || e?.message?.includes('already submitted')) {
-        // Already checked in today — let them through
         onComplete();
         return;
       }
       console.error('[CHECKIN] Submit error:', e);
-      // Still allow through on error — don't block the user
       onComplete();
     } finally {
       setIsLoading(false);
@@ -57,8 +61,8 @@ export default function MorningCheckInScreen({ onComplete }: Props) {
       <SafeAreaView style={styles.container}>
         <View style={styles.successContainer}>
           <Ionicons name="checkmark-circle" size={64} color={colors.accent} />
-          <Text style={styles.successTitle}>Morning Check-In Complete</Text>
-          <Text style={styles.successSubtitle}>Have a great day!</Text>
+          <Text style={styles.successTitle}>{isEdit ? 'Recovery Updated' : 'Morning Check-In Complete'}</Text>
+          <Text style={styles.successSubtitle}>{isEdit ? 'Your inputs have been saved.' : 'Have a great day!'}</Text>
         </View>
       </SafeAreaView>
     );
@@ -74,9 +78,14 @@ export default function MorningCheckInScreen({ onComplete }: Props) {
         >
           {/* Header */}
           <View style={styles.header}>
-            <Ionicons name="sunny-outline" size={36} color={colors.accent} style={{ marginBottom: spacing.sm }} />
-            <Text style={styles.title}>Morning Check-In</Text>
-            <Text style={styles.subtitle}>How are you feeling today?</Text>
+            {isEdit && (
+              <TouchableOpacity onPress={onComplete} style={styles.closeBtn}>
+                <Ionicons name="close" size={22} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+            <Ionicons name={isEdit ? 'pencil-outline' : 'sunny-outline'} size={36} color={colors.accent} style={{ marginBottom: spacing.sm }} />
+            <Text style={styles.title}>{isEdit ? 'Edit Check-In' : 'Morning Check-In'}</Text>
+            <Text style={styles.subtitle}>{isEdit ? 'Update your recovery inputs for today.' : 'How are you feeling today?'}</Text>
           </View>
 
           {/* Recovery */}
@@ -213,7 +222,7 @@ export default function MorningCheckInScreen({ onComplete }: Props) {
             {isLoading ? (
               <ActivityIndicator color={colors.bgPrimary} />
             ) : (
-              <Text style={styles.submitBtnText}>Start my day</Text>
+              <Text style={styles.submitBtnText}>{isEdit ? 'Update' : 'Start my day'}</Text>
             )}
           </TouchableOpacity>
         </ScrollView>
@@ -236,6 +245,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.xxl,
     paddingTop: spacing.md,
+  },
+  closeBtn: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: 0,
+    padding: spacing.xs,
   },
   title: {
     ...typography.h1,

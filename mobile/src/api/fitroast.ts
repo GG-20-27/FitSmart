@@ -3,6 +3,15 @@
  */
 
 import { apiRequest, API_BASE_URL, getAuthToken } from './client';
+import { getCalendars } from 'expo-localization';
+
+function getDeviceTimezone(): string {
+  try {
+    return getCalendars()[0]?.timeZone || 'Europe/Zurich';
+  } catch {
+    return 'Europe/Zurich';
+  }
+}
 
 export interface FitRoastSegment {
   topic: string;
@@ -35,7 +44,8 @@ export interface FitRoastEligibilityError extends Error {
  */
 export async function getFitRoastCurrent(): Promise<FitRoastResponse> {
   const token = await getAuthToken();
-  const url = `${API_BASE_URL}/api/fitroast/current`;
+  const tz = encodeURIComponent(getDeviceTimezone());
+  const url = `${API_BASE_URL}/api/fitroast/current?tz=${tz}`;
 
   const response = await fetch(url, {
     headers: {
@@ -68,11 +78,16 @@ export interface WeeklyGoalReview {
   remainingSubGoals: string[];
 }
 
-/** Dev/admin only: force-generate FitRoast bypassing Sunday check */
+/** Dev only: force-generate FitRoast bypassing Sunday check */
 export async function generateFitRoastDev(): Promise<FitRoastResponse> {
   return apiRequest<FitRoastResponse>('/api/fitroast/generate-dev', {
     method: 'POST',
   });
+}
+
+/** Dev only: delete current week's FitRoast (to test the generation flow from scratch) */
+export async function resetFitRoastDev(): Promise<void> {
+  await apiRequest('/api/fitroast/current-dev', { method: 'DELETE' });
 }
 
 /** Generate (or regenerate) this week's FitRoast — only succeeds on Sunday with ≥5 active days */
@@ -80,9 +95,10 @@ export async function generateFitRoast(
   intensity?: 'Light' | 'Spicy' | 'Savage',
   weeklyGoalReview?: WeeklyGoalReview
 ): Promise<FitRoastResponse> {
+  const tz = getDeviceTimezone();
   return apiRequest<FitRoastResponse>('/api/fitroast/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ intensity, weeklyGoalReview }),
+    body: JSON.stringify({ intensity, weeklyGoalReview, tz }),
   });
 }

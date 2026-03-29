@@ -72,6 +72,7 @@ export interface IStorage {
   getManualCheckin(userId: string, date: string): Promise<ManualCheckin | undefined>;
   getManualCheckins(userId: string, fromDate: string, toDate: string): Promise<ManualCheckin[]>;
   createManualCheckin(data: InsertManualCheckin): Promise<ManualCheckin>;
+  updateManualCheckin(userId: string, date: string, data: Partial<InsertManualCheckin>): Promise<ManualCheckin | undefined>;
 
   // User list
   getAllUsers(): Promise<User[]>;
@@ -387,6 +388,14 @@ export class DatabaseStorage implements IStorage {
   async createManualCheckin(data: InsertManualCheckin): Promise<ManualCheckin> {
     const [row] = await db.insert(manualCheckins).values(data).returning();
     return row;
+  }
+
+  async updateManualCheckin(userId: string, date: string, data: Partial<InsertManualCheckin>): Promise<ManualCheckin | undefined> {
+    const [row] = await db.update(manualCheckins)
+      .set(data)
+      .where(and(eq(manualCheckins.userId, userId), eq(manualCheckins.date, date)))
+      .returning();
+    return row || undefined;
   }
 
   async getAllUsers(): Promise<User[]> {
