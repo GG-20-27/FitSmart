@@ -2334,8 +2334,8 @@ function AddGoalModal({
   const [title, setTitle] = useState('');
   const [emoji, setEmoji] = useState('🎯');
   const [category, setCategory] = useState<GoalCategory>('Training');
-  const [habits, setHabits] = useState<string[]>(['', '', '']);
-  const [subgoalInputs, setSubgoalInputs] = useState<string[]>(['', '', '']);
+  const [habits, setHabits] = useState<string[]>(['']);
+  const [subgoalInputs, setSubgoalInputs] = useState<string[]>(['']);
 
   const handleAdd = () => {
     if (!title.trim()) {
@@ -2371,8 +2371,8 @@ function AddGoalModal({
     setTitle('');
     setEmoji('🎯');
     setCategory('Training');
-    setHabits(['', '', '']);
-    setSubgoalInputs(['', '', '']);
+    setHabits(['']);
+    setSubgoalInputs(['']);
   };
 
   return (
@@ -2454,42 +2454,68 @@ function AddGoalModal({
 
             {/* Daily Habits Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Daily Habits (1-3)</Text>
+              <Text style={styles.inputLabel}>Daily Habits</Text>
               <Text style={styles.inputHint}>Recurring actions tracked daily — build your streak</Text>
               {habits.map((habit, index) => (
-                <TextInput
-                  key={index}
-                  style={styles.textInput}
-                  placeholder={`Habit ${index + 1}`}
-                  placeholderTextColor={colors.textMuted}
-                  value={habit}
-                  onChangeText={(text) => {
-                    const newHabits = [...habits];
-                    newHabits[index] = text;
-                    setHabits(newHabits);
-                  }}
-                />
+                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <TextInput
+                    style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+                    placeholder={`Habit ${index + 1}`}
+                    placeholderTextColor={colors.textMuted}
+                    value={habit}
+                    onChangeText={(text) => {
+                      const newHabits = [...habits];
+                      newHabits[index] = text;
+                      setHabits(newHabits);
+                    }}
+                  />
+                  {habits.length > 1 && (
+                    <TouchableOpacity onPress={() => setHabits(habits.filter((_, i) => i !== index))}>
+                      <Ionicons name="close-circle" size={22} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               ))}
+              <TouchableOpacity
+                onPress={() => setHabits([...habits, ''])}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}
+              >
+                <Ionicons name="add-circle-outline" size={20} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontSize: 14 }}>Add habit</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Sub-goals Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Sub-goals (1-3)</Text>
+              <Text style={styles.inputLabel}>Sub-goals</Text>
               <Text style={styles.inputHint}>Milestones toward your goal — check off when done</Text>
               {subgoalInputs.map((sg, index) => (
-                <TextInput
-                  key={index}
-                  style={styles.textInput}
-                  placeholder={`Sub-goal ${index + 1}`}
-                  placeholderTextColor={colors.textMuted}
-                  value={sg}
-                  onChangeText={(text) => {
-                    const updated = [...subgoalInputs];
-                    updated[index] = text;
-                    setSubgoalInputs(updated);
-                  }}
-                />
+                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <TextInput
+                    style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+                    placeholder={`Sub-goal ${index + 1}`}
+                    placeholderTextColor={colors.textMuted}
+                    value={sg}
+                    onChangeText={(text) => {
+                      const updated = [...subgoalInputs];
+                      updated[index] = text;
+                      setSubgoalInputs(updated);
+                    }}
+                  />
+                  {subgoalInputs.length > 1 && (
+                    <TouchableOpacity onPress={() => setSubgoalInputs(subgoalInputs.filter((_, i) => i !== index))}>
+                      <Ionicons name="close-circle" size={22} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               ))}
+              <TouchableOpacity
+                onPress={() => setSubgoalInputs([...subgoalInputs, ''])}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}
+              >
+                <Ionicons name="add-circle-outline" size={20} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontSize: 14 }}>Add sub-goal</Text>
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity style={[styles.createButton, { marginBottom: spacing.xl }]} onPress={handleAdd}>
@@ -2521,10 +2547,10 @@ function EditGoalModal({
   const [emoji, setEmoji] = useState(goal.emoji);
   const [category, setCategory] = useState<GoalCategory>(goal.category);
   const [habits, setHabits] = useState<string[]>(
-    goal.microhabits.map(h => h.text).concat(['', '', '']).slice(0, 3)
+    goal.microhabits.map(h => h.text).length > 0 ? goal.microhabits.map(h => h.text) : ['']
   );
   const [subgoalInputs, setSubgoalInputs] = useState<string[]>(
-    (goal.subgoals || []).map(s => s.text).concat(['', '', '']).slice(0, 3)
+    (goal.subgoals || []).length > 0 ? (goal.subgoals || []).map(s => s.text) : ['']
   );
 
   // Reset form when goal changes
@@ -2532,8 +2558,8 @@ function EditGoalModal({
     setTitle(goal.title);
     setEmoji(goal.emoji);
     setCategory(goal.category);
-    setHabits(goal.microhabits.map(h => h.text).concat(['', '', '']).slice(0, 3));
-    setSubgoalInputs((goal.subgoals || []).map(s => s.text).concat(['', '', '']).slice(0, 3));
+    setHabits(goal.microhabits.map(h => h.text).length > 0 ? goal.microhabits.map(h => h.text) : ['']);
+    setSubgoalInputs((goal.subgoals || []).length > 0 ? (goal.subgoals || []).map(s => s.text) : ['']);
   }, [goal]);
 
   const handleSave = () => {
@@ -2657,42 +2683,68 @@ function EditGoalModal({
 
             {/* Daily Habits Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Daily Habits (1-3)</Text>
+              <Text style={styles.inputLabel}>Daily Habits</Text>
               <Text style={styles.inputHint}>Recurring actions tracked daily — build your streak</Text>
               {habits.map((habit, index) => (
-                <TextInput
-                  key={index}
-                  style={styles.textInput}
-                  placeholder={`Habit ${index + 1}`}
-                  placeholderTextColor={colors.textMuted}
-                  value={habit}
-                  onChangeText={(text) => {
-                    const newHabits = [...habits];
-                    newHabits[index] = text;
-                    setHabits(newHabits);
-                  }}
-                />
+                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <TextInput
+                    style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+                    placeholder={`Habit ${index + 1}`}
+                    placeholderTextColor={colors.textMuted}
+                    value={habit}
+                    onChangeText={(text) => {
+                      const newHabits = [...habits];
+                      newHabits[index] = text;
+                      setHabits(newHabits);
+                    }}
+                  />
+                  {habits.length > 1 && (
+                    <TouchableOpacity onPress={() => setHabits(habits.filter((_, i) => i !== index))}>
+                      <Ionicons name="close-circle" size={22} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               ))}
+              <TouchableOpacity
+                onPress={() => setHabits([...habits, ''])}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}
+              >
+                <Ionicons name="add-circle-outline" size={20} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontSize: 14 }}>Add habit</Text>
+              </TouchableOpacity>
             </View>
 
             {/* Sub-goals Input */}
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>Sub-goals (1-3)</Text>
+              <Text style={styles.inputLabel}>Sub-goals</Text>
               <Text style={styles.inputHint}>Milestones toward your goal — check off when done</Text>
               {subgoalInputs.map((sg, index) => (
-                <TextInput
-                  key={index}
-                  style={styles.textInput}
-                  placeholder={`Sub-goal ${index + 1}`}
-                  placeholderTextColor={colors.textMuted}
-                  value={sg}
-                  onChangeText={(text) => {
-                    const updated = [...subgoalInputs];
-                    updated[index] = text;
-                    setSubgoalInputs(updated);
-                  }}
-                />
+                <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <TextInput
+                    style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+                    placeholder={`Sub-goal ${index + 1}`}
+                    placeholderTextColor={colors.textMuted}
+                    value={sg}
+                    onChangeText={(text) => {
+                      const updated = [...subgoalInputs];
+                      updated[index] = text;
+                      setSubgoalInputs(updated);
+                    }}
+                  />
+                  {subgoalInputs.length > 1 && (
+                    <TouchableOpacity onPress={() => setSubgoalInputs(subgoalInputs.filter((_, i) => i !== index))}>
+                      <Ionicons name="close-circle" size={22} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               ))}
+              <TouchableOpacity
+                onPress={() => setSubgoalInputs([...subgoalInputs, ''])}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}
+              >
+                <Ionicons name="add-circle-outline" size={20} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontSize: 14 }}>Add sub-goal</Text>
+              </TouchableOpacity>
             </View>
 
             <TouchableOpacity style={[styles.createButton, { marginBottom: spacing.xl }]} onPress={handleSave}>
@@ -2724,6 +2776,16 @@ function ContextPanel({
   scrollViewRef?: React.RefObject<ScrollView>;
 }) {
   const [expandedTier, setExpandedTier] = useState<1 | 2 | 3 | 4 | null>(null);
+
+  // Local state for free-text inputs — avoids API call + full re-render on every keystroke
+  const [localSport, setLocalSport] = useState(context.sportSpecific ?? '');
+  const [localInjuryDesc, setLocalInjuryDesc] = useState(context.injuryDescription ?? '');
+  const [localInjuryLocation, setLocalInjuryLocation] = useState(context.injuryLocation ?? '');
+
+  // Sync local state when context changes externally (e.g. on load)
+  useEffect(() => { setLocalSport(context.sportSpecific ?? ''); }, [context.sportSpecific]);
+  useEffect(() => { setLocalInjuryDesc(context.injuryDescription ?? ''); }, [context.injuryDescription]);
+  useEffect(() => { setLocalInjuryLocation(context.injuryLocation ?? ''); }, [context.injuryLocation]);
 
   // Track Y positions via onLayout — reliable content-relative coordinates
   // that update automatically whenever tiers collapse/expand and layout re-settles.
@@ -2840,8 +2902,9 @@ function ContextPanel({
               style={ctxStyles.textInput}
               placeholder="e.g. Basketball, Rowing..."
               placeholderTextColor={colors.textMuted}
-              value={context.sportSpecific ?? ''}
-              onChangeText={t => onUpdate('sportSpecific', t.slice(0, 30) || null)}
+              value={localSport}
+              onChangeText={t => setLocalSport(t.slice(0, 30))}
+              onBlur={() => onUpdate('sportSpecific', localSport.trim() || null)}
               maxLength={30}
             />
           </View>
@@ -2877,8 +2940,9 @@ function ContextPanel({
               style={ctxStyles.textInput}
               placeholder="Brief description..."
               placeholderTextColor={colors.textMuted}
-              value={context.injuryDescription ?? ''}
-              onChangeText={t => onUpdate('injuryDescription', t || null)}
+              value={localInjuryDesc}
+              onChangeText={t => setLocalInjuryDesc(t)}
+              onBlur={() => onUpdate('injuryDescription', localInjuryDesc.trim() || null)}
             />
           </View>
         )}
@@ -2899,8 +2963,9 @@ function ContextPanel({
                 style={ctxStyles.textInput}
                 placeholder="Left ankle – lateral ligament"
                 placeholderTextColor={colors.textMuted}
-                value={context.injuryLocation ?? ''}
-                onChangeText={t => onUpdate('injuryLocation', t || null)}
+                value={localInjuryLocation}
+                onChangeText={t => setLocalInjuryLocation(t)}
+                onBlur={() => onUpdate('injuryLocation', localInjuryLocation.trim() || null)}
               />
             </View>
 
