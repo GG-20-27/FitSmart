@@ -20,19 +20,6 @@ export default function InsightsNavigator() {
     }
   }, [route.params]));
 
-  const renderScreen = () => {
-    switch (activeTab) {
-      case 'FitScore':
-        return <FitScoreScreen />;
-      case 'FitLook':
-        return <FitLookScreen />;
-      case 'FitRoast':
-        return <FitRoastScreen />;
-      default:
-        return <FitScoreScreen />;
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       {/* Top Segmented Navigation */}
@@ -89,9 +76,15 @@ export default function InsightsNavigator() {
         </TouchableOpacity>
       </View>
 
-      {/* Screen Content */}
-      <View style={styles.screenContainer}>
-        {renderScreen()}
+      {/* Keep all screens mounted to preserve state — show/hide via display */}
+      <View style={[styles.screenContainer, { display: activeTab === 'FitScore' ? 'flex' : 'none' }]}>
+        <FitScoreScreen />
+      </View>
+      <View style={[styles.screenContainer, { display: activeTab === 'FitLook' ? 'flex' : 'none' }]}>
+        <FitLookScreen />
+      </View>
+      <View style={[styles.screenContainer, { display: activeTab === 'FitRoast' ? 'flex' : 'none' }]}>
+        <FitRoastScreen />
       </View>
     </SafeAreaView>
   );
