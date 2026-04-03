@@ -546,6 +546,7 @@ export default function GoalsScreen() {
   const [endedData, setEndedData] = useState<{ pillar: string; avg: number | null } | null>(null);
   const endedSlideAnim = useRef(new Animated.Value(300));
   const prevActivePlanIdsRef = useRef<Map<number, { pillar: string }>>(new Map());
+  const planIdsHydrated = useRef(false);
   const ACTIVE_PLAN_IDS_KEY = '@activePlanIds_goals';
 
   const normalizeTime = (raw: string): string => {
@@ -759,8 +760,20 @@ export default function GoalsScreen() {
     useCallback(() => {
       loadGoals();
       loadContext();
-      getImprovementPlanStatus()
-        .then(status => {
+      (async () => {
+        // Hydrate ref before checking completion to avoid race with useEffect
+        if (!planIdsHydrated.current) {
+          try {
+            const stored = await AsyncStorage.getItem(ACTIVE_PLAN_IDS_KEY);
+            if (stored) {
+              const ids: Array<{ id: number; pillar: string }> = JSON.parse(stored);
+              prevActivePlanIdsRef.current = new Map(ids.map(({ id, pillar }) => [id, { pillar }]));
+            }
+          } catch {}
+          planIdsHydrated.current = true;
+        }
+        const status = await getImprovementPlanStatus();
+        {
           const prevMap = prevActivePlanIdsRef.current;
           const newActiveIds = new Set((status.activePlans ?? []).map(p => p.id));
           for (const [id, { pillar }] of prevMap) {
@@ -791,8 +804,8 @@ export default function GoalsScreen() {
           const toStore = Array.from(newMap.entries()).map(([id, { pillar }]) => ({ id, pillar }));
           AsyncStorage.setItem(ACTIVE_PLAN_IDS_KEY, JSON.stringify(toStore)).catch(() => {});
           setImprovementPlanStatus(status);
-        })
-        .catch(() => {});
+        }
+      })().catch(() => {});
     }, [loadGoals, loadContext])
   );
 
@@ -819,16 +832,6 @@ export default function GoalsScreen() {
         await AsyncStorage.setItem(RESET_FLAG, '1');
       } catch { /* graceful */ }
     })();
-  }, []);
-
-  // Hydrate prevActivePlanIdsRef from AsyncStorage so completion detection works across app restarts
-  useEffect(() => {
-    AsyncStorage.getItem(ACTIVE_PLAN_IDS_KEY).then(stored => {
-      if (stored) {
-        const ids: Array<{ id: number; pillar: string }> = JSON.parse(stored);
-        prevActivePlanIdsRef.current = new Map(ids.map(({ id, pillar }) => [id, { pillar }]));
-      }
-    }).catch(() => {});
   }, []);
 
   // Toggle daily habit completion — streak is now driven by FitScore check-ins, not here
@@ -1089,7 +1092,7 @@ Identify:
                 onPress={() => { setShowCompletionModal(false); setCompletionData(null); completionScaleAnim.current.setValue(0); }}
                 activeOpacity={0.8}
               >
-                <Text style={styles.completionCloseBtnText}>Close</Text>
+                <Text style={styles.completionCloseBtnText}>Got it</Text>
               </TouchableOpacity>
             </Animated.View>
           </View>

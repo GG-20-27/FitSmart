@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   ActivityIndicator, Animated,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { colors, spacing, typography, radii, shadows } from '../theme';
@@ -10,6 +11,8 @@ import {
   getCheckinToday, saveCheckin, getFitLookToday, regenerateFitLook,
   type Feeling, type FitLookResponse,
 } from '../api/fitlook';
+
+const FITLOOK_CHECKIN_KEY = () => `fitlook_checkin_${new Date().toISOString().slice(0, 10)}`;
 
 /**
  * Builds the prefilled FitCoach prompt from the FitLook payload.
@@ -89,11 +92,24 @@ export default function FitLookScreen() {
   }, []);
 
   async function checkInitialState() {
+    // Restore from cache immediately to prevent feeling question flashing on remount
+    try {
+      const cached = await AsyncStorage.getItem(FITLOOK_CHECKIN_KEY());
+      if (cached) {
+        const { feeling: cachedFeeling } = JSON.parse(cached);
+        setCheckinDone(true);
+        setFeeling(cachedFeeling);
+        await loadFitLook();
+        return;
+      }
+    } catch { /* ignore cache errors */ }
+
     try {
       const checkin = await getCheckinToday();
       if (checkin.exists && checkin.feeling) {
         setCheckinDone(true);
         setFeeling(checkin.feeling);
+        await AsyncStorage.setItem(FITLOOK_CHECKIN_KEY(), JSON.stringify({ feeling: checkin.feeling })).catch(() => {});
         await loadFitLook();
       } else {
         setCheckinDone(false);
@@ -119,6 +135,7 @@ export default function FitLookScreen() {
       await saveCheckin(selectedFeeling);
       setFeeling(selectedFeeling);
       setCheckinDone(true);
+      await AsyncStorage.setItem(FITLOOK_CHECKIN_KEY(), JSON.stringify({ feeling: selectedFeeling })).catch(() => {});
       await loadFitLook();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save check-in');
@@ -294,6 +311,11 @@ export default function FitLookScreen() {
 
       <Animated.View style={[styles.cards, { opacity: fadeAnim }]}>
 
+        {/* Reasoning sentence — why this plan */}
+        {fitlook.reasoning && (
+          <Text style={styles.reasoningText}>{fitlook.reasoning}</Text>
+        )}
+
         {/* A) Readiness — 3-column metrics row */}
         <View style={styles.card}>
           <Text style={styles.cardLabel}>READINESS</Text>
@@ -418,6 +440,13 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
     marginBottom: spacing.sm,
     letterSpacing: 0.3,
+  },
+  reasoningText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontStyle: 'italic',
+    marginBottom: spacing.sm,
+    lineHeight: 18,
   },
 
   // Check-in

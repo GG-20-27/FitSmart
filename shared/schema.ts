@@ -258,6 +258,7 @@ export interface FitLookPayload {
   feeling: string;
   slides?: FitLookSlide[]; // v1 legacy — kept for backward compat
   // v2 structured A-B-C-D format
+  reasoning?: string;         // One sentence explaining why this plan — "Based on X and Y..."
   snapshot_chips?: string[];  // A) Readiness: ["Recovery 96%", "Sleep 9.1h", "Feeling: Steady"]
   focus?: string;             // B) Today's Focus: one bold line
   do?: string[];              // C) Do: 1-2 concrete action bullets

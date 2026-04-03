@@ -300,6 +300,7 @@ REHAB RULE: If rehabActive or injuryNotes are present, ALL action bullets must s
 
 OUTPUT: Return valid JSON with exactly this structure:
 {
+  "reasoning": "Based on your low recovery and yesterday's heavy training load, today calls for controlled effort.",
   "snapshot_chips": ["Recovery 96%", "Sleep 9.1h", "Feeling: Steady"],
   "focus": "Controlled ankle rehab — keep it brief",
   "do": ["Short rehab strength (≤30 min)", "Protein by 11:00"],
@@ -308,6 +309,7 @@ OUTPUT: Return valid JSON with exactly this structure:
 }
 
 FIELD RULES:
+- reasoning: Exactly 1 sentence. Starts with "Based on..." and names 1–2 specific signals from today's data (recovery %, sleep, yesterday's training, feeling, injury stage, nutrition trend). This is what makes the plan feel earned, not generic. Max 80 chars. Plain language only — no jargon.
 - snapshot_chips: 2–4 chips. Always include Feeling chip. Include Recovery % and Sleep hours if available. Include a trend tag if meaningful (e.g. "3-day: improving").
 - focus: One sentence max, bold intent. Start with an action noun or verb. Max 60 chars.
 - do: Array of exactly 2 strings. Each bullet is concrete, time-aware if relevant, max 40 chars. No vague verbs.
@@ -1677,7 +1679,7 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
         }
       }
 
-      const userPrompt = `Generate this morning's FitLook briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required v2 fields: snapshot_chips, focus, do (array of 2), avoid, forecast_line. No slides array.`;
+      const userPrompt = `Generate this morning's FitLook briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required v2 fields: reasoning, snapshot_chips, focus, do (array of 2), avoid, forecast_line. No slides array.`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -1722,6 +1724,7 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       const payload: import('@shared/schema').FitLookPayload = {
         date_local: input.dateLocal,
         feeling: input.feeling,
+        ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
         snapshot_chips: parsed.snapshot_chips,
         focus: parsed.focus,
         do: parsed.do,

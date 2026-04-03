@@ -5672,10 +5672,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             let injuryLine = `Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}`;
             if (ctx.rehabStage) {
               const stageExpectation: Record<string, string> = {
-                'Acute (rest & protection)':  'Complete rest is correct. Do NOT suggest more activity. Praise any rest taken.',
-                'Sub-acute (light movement)': 'Light movement is appropriate. WHOOP strain 2–6 is correct. Gently encourage gradual progression.',
-                'Rehab (guided exercises)':   'Guided rehab exercises are the goal. WHOOP strain 4–10 is appropriate. Push user to stay consistent with their sessions and track progression.',
-                'Return to training':         'Progressive loading is the goal. WHOOP strain 8–15 is the target range. Encourage increasing intensity week by week within safe limits.',
+                'Acute (rest & protection)':  'Complete rest is correct. WHOOP strain 6–11 is the ceiling — do NOT suggest more activity. Praise any rest taken.',
+                'Sub-acute (light movement)': 'Light movement is appropriate. WHOOP strain 7–12 is correct. Gently encourage gradual progression.',
+                'Rehab (guided exercises)':   'Guided rehab exercises are the goal. WHOOP strain 8–16 is appropriate. Push user to stay consistent with their sessions and track progression.',
+                'Return to training':         'Progressive loading is the goal. WHOOP strain 8–20 is the target range. Encourage increasing intensity week by week within safe limits.',
               };
               const expectation = stageExpectation[ctx.rehabStage];
               injuryLine += `. Rehab stage: ${ctx.rehabStage}${expectation ? `. Training slide context: ${expectation}` : ''}`;
@@ -7324,7 +7324,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let pendingPlans: Array<{ pillar: string; weaknessCount: number; unlocked: boolean }> = [];
 
       if (builtActivePlans.length === 0) {
-        const weakness = await computePillarWeakness(userId, activePillarSet);
+        // Exclude pillars where a plan was completed or expired in the last 7 days
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const recentlyFinishedPillars = new Set(
+          completedPlans
+            .filter(p => p.completedAt && new Date(p.completedAt) >= sevenDaysAgo)
+            .map(p => p.pillar)
+        );
+        const excludePillarSet = new Set([...activePillarSet, ...recentlyFinishedPillars]);
+        const weakness = await computePillarWeakness(userId, excludePillarSet);
         if (weakness) {
           pendingPlan = { pillar: weakness.pillar, weaknessCount: weakness.weaknessCount, unlocked: weakness.weaknessCount >= 5 };
           pendingPlans = [pendingPlan];

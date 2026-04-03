@@ -1018,8 +1018,11 @@ export default function FitScoreScreen() {
   const [endedData, setEndedData] = useState<{ pillar: string; avg: number | null } | null>(null);
   const endedSlideAnim = useRef(new Animated.Value(300));
   const prevActivePlanIdsRef = useRef<Map<number, { pillar: string }>>(new Map());
+  const planIdsHydrated = useRef(false);
   const ACTIVE_PLAN_IDS_KEY = '@activePlanIds_fitscore';
   const coachPulseAnim = useRef(new Animated.Value(0)).current;
+  const calcPulseAnim = useRef(new Animated.Value(0)).current;
+  const calcGlowLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const [coachGlowActive, setCoachGlowActive] = useState(false);
   // FitCook state
   const [showFitCookModal, setShowFitCookModal] = useState(false);
@@ -1150,42 +1153,52 @@ export default function FitScoreScreen() {
   // Load improvement plan status on focus — re-fetches when navigating back
   useFocusEffect(
     React.useCallback(() => {
-      getImprovementPlanStatus()
-        .then(status => {
-          // Detect plan completion: was active before, not active now
-          const prevMap = prevActivePlanIdsRef.current;
-          const newActiveIds = new Set((status.activePlans ?? []).map(p => p.id));
-          for (const [id, { pillar }] of prevMap) {
-            if (!newActiveIds.has(id)) {
-              const resolved = status.completedPlans.find(p => p.id === id);
-              // Only celebrate genuine completions — not expirations
-              if (resolved?.status === 'completed') {
-                const avg = resolved.rollingAvgAtCompletion ?? 0;
-                setCompletionData({ pillar, avg });
-                completionScaleAnim.current.setValue(0);
-                setShowCompletionModal(true);
-                Animated.spring(completionScaleAnim.current, {
-                  toValue: 1, useNativeDriver: true, tension: 80, friction: 7,
-                }).start();
-              } else if (resolved?.status === 'expired') {
-                setEndedData({ pillar, avg: resolved.rollingAvgAtCompletion ?? null });
-                endedSlideAnim.current.setValue(300);
-                setShowEndedModal(true);
-                Animated.spring(endedSlideAnim.current, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
-              }
-              break;
+      (async () => {
+        // Hydrate ref before checking completion to avoid race with useEffect
+        if (!planIdsHydrated.current) {
+          try {
+            const stored = await AsyncStorage.getItem(ACTIVE_PLAN_IDS_KEY);
+            if (stored) {
+              const ids: Array<{ id: number; pillar: string }> = JSON.parse(stored);
+              prevActivePlanIdsRef.current = new Map(ids.map(({ id, pillar }) => [id, { pillar }]));
             }
+          } catch {}
+          planIdsHydrated.current = true;
+        }
+        const status = await getImprovementPlanStatus();
+        // Detect plan completion: was active before, not active now
+        const prevMap = prevActivePlanIdsRef.current;
+        const newActiveIds = new Set((status.activePlans ?? []).map(p => p.id));
+        for (const [id, { pillar }] of prevMap) {
+          if (!newActiveIds.has(id)) {
+            const resolved = status.completedPlans.find(p => p.id === id);
+            // Only celebrate genuine completions — not expirations
+            if (resolved?.status === 'completed') {
+              const avg = resolved.rollingAvgAtCompletion ?? 0;
+              setCompletionData({ pillar, avg });
+              completionScaleAnim.current.setValue(0);
+              setShowCompletionModal(true);
+              Animated.spring(completionScaleAnim.current, {
+                toValue: 1, useNativeDriver: true, tension: 80, friction: 7,
+              }).start();
+            } else if (resolved?.status === 'expired') {
+              setEndedData({ pillar, avg: resolved.rollingAvgAtCompletion ?? null });
+              endedSlideAnim.current.setValue(300);
+              setShowEndedModal(true);
+              Animated.spring(endedSlideAnim.current, { toValue: 0, useNativeDriver: true, tension: 80, friction: 8 }).start();
+            }
+            break;
           }
-          // Update prevMap with current active plans
-          const newMap = new Map<number, { pillar: string }>();
-          for (const p of (status.activePlans ?? [])) newMap.set(p.id, { pillar: p.pillar });
-          prevActivePlanIdsRef.current = newMap;
-          // Persist to AsyncStorage so completion is detected after app restart
-          const toStore = Array.from(newMap.entries()).map(([id, { pillar }]) => ({ id, pillar }));
-          AsyncStorage.setItem(ACTIVE_PLAN_IDS_KEY, JSON.stringify(toStore)).catch(() => {});
-          setImprovementPlanStatus(status);
-        })
-        .catch(() => {}); // non-fatal
+        }
+        // Update prevMap with current active plans
+        const newMap = new Map<number, { pillar: string }>();
+        for (const p of (status.activePlans ?? [])) newMap.set(p.id, { pillar: p.pillar });
+        prevActivePlanIdsRef.current = newMap;
+        // Persist to AsyncStorage so completion is detected after app restart
+        const toStore = Array.from(newMap.entries()).map(([id, { pillar }]) => ({ id, pillar }));
+        AsyncStorage.setItem(ACTIVE_PLAN_IDS_KEY, JSON.stringify(toStore)).catch(() => {});
+        setImprovementPlanStatus(status);
+      })().catch(() => {}); // non-fatal
     }, [])
   );
 
@@ -1218,16 +1231,6 @@ export default function FitScoreScreen() {
     inputRange: [0, 1],
     outputRange: [0.5, 1],
   });
-
-  // Hydrate prevActivePlanIdsRef from AsyncStorage so completion detection works across app restarts
-  useEffect(() => {
-    AsyncStorage.getItem(ACTIVE_PLAN_IDS_KEY).then(stored => {
-      if (stored) {
-        const ids: Array<{ id: number; pillar: string }> = JSON.parse(stored);
-        prevActivePlanIdsRef.current = new Map(ids.map(({ id, pillar }) => [id, { pillar }]));
-      }
-    }).catch(() => {});
-  }, []);
 
   // Load macro targets once on mount (used for nutrition pre-filled prompt)
   useEffect(() => {
@@ -1351,6 +1354,27 @@ export default function FitScoreScreen() {
   const hasMeals = meals.length > 0;
   const hasTraining = trainingSessions.length > 0;
   const canCalculate = hasMeals; // Training is optional — minimum is one meal
+
+  // Pulse the Calculate button when meals are logged but FitScore not yet calculated
+  useEffect(() => {
+    const shouldPulse = canCalculate && (isToday || isYesterday) && !showFitScoreResult;
+    if (shouldPulse) {
+      calcPulseAnim.setValue(0);
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(calcPulseAnim, { toValue: 1, duration: 1600, useNativeDriver: false }),
+          Animated.timing(calcPulseAnim, { toValue: 0, duration: 1600, useNativeDriver: false }),
+        ])
+      );
+      calcGlowLoopRef.current = loop;
+      loop.start();
+    } else {
+      calcGlowLoopRef.current?.stop();
+      calcGlowLoopRef.current = null;
+      calcPulseAnim.setValue(0);
+    }
+    return () => { calcGlowLoopRef.current?.stop(); };
+  }, [canCalculate, isToday, isYesterday, showFitScoreResult]);
 
   // ── Triangle visibility detection ─────────────────────────────────────────────
   // Uses measureInWindow (real screen coords) instead of layout.y (parent-relative)
@@ -2852,13 +2876,22 @@ export default function FitScoreScreen() {
       {/* Calculate FitScore Button */}
       {canCalculate && (isToday || isYesterday) && !showFitScoreResult && (
         <View style={styles.calculateSection}>
-          <Button
-            onPress={handleCalculateFitScore}
-            style={styles.calculateButton}
-            disabled={calculatingFitScore}
-          >
-            {calculatingFitScore ? 'Calculating...' : 'Calculate My FitScore'}
-          </Button>
+          <Animated.View style={{
+            borderRadius: 12,
+            shadowColor: colors.accent,
+            shadowOffset: { width: 0, height: 0 },
+            shadowOpacity: calcPulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] }),
+            shadowRadius: calcPulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 12] }),
+            elevation: 0,
+          }}>
+            <Button
+              onPress={handleCalculateFitScore}
+              style={styles.calculateButton}
+              disabled={calculatingFitScore}
+            >
+              {calculatingFitScore ? 'Calculating...' : 'Calculate My FitScore'}
+            </Button>
+          </Animated.View>
         </View>
       )}
 
@@ -3173,7 +3206,7 @@ export default function FitScoreScreen() {
                   onPress={() => { setShowCompletionModal(false); setCompletionData(null); completionScaleAnim.current.setValue(0); }}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.completionCloseBtnText}>Close</Text>
+                  <Text style={styles.completionCloseBtnText}>Got it</Text>
                 </TouchableOpacity>
               </Animated.View>
             </View>

@@ -287,10 +287,10 @@ export class TrainingScoreService {
         // Return-to-training: progressive ramp — wider band since daily WHOOP strain
         // accumulates from all activity, not just the workout. Don't penalise moderate
         // training days that sit above a narrow upper limit.
-        return { min: 8, max: 18, ideal: 12 };
+        return { min: 8, max: 20, ideal: 13 };
       }
       // Default rehab band: covers 'Rehab' stage, post-surgery goal, post-op injury, unspecified stage
-      return { min: 8, max: 13, ideal: 10.5 };
+      return { min: 8, max: 16, ideal: 11 };
     }
 
     const isDeload   = load === 'light' || note.includes('deload') || note.includes('de-load');
