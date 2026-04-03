@@ -7328,7 +7328,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
         const recentlyFinishedPillars = new Set(
           completedPlans
-            .filter(p => p.completedAt && new Date(p.completedAt) >= sevenDaysAgo)
+            .filter(p => p.status === 'completed' && p.completedAt && new Date(p.completedAt) >= sevenDaysAgo)
             .map(p => p.pillar)
         );
         const excludePillarSet = new Set([...activePillarSet, ...recentlyFinishedPillars]);
