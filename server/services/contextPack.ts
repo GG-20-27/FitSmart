@@ -13,7 +13,7 @@
 
 import '../loadEnv';
 import { db } from '../db';
-import { users, whoopData, chatSummaries, userGoals } from '@shared/schema';
+import { users, whoopData, chatSummaries, userGoals, fitScores } from '@shared/schema';
 import { eq, desc } from 'drizzle-orm';
 import { whoopApiService } from '../whoopApiService';
 import { storage } from '../storage';
@@ -72,6 +72,9 @@ export interface ContextPack {
 
   // Trend notes (7-day comparison)
   trendNotes: string | null;
+
+  // 7-day per-pillar pattern summary
+  pillarPattern7d: string | null;
 
   // User context (3-tier training profile)
   userContextSummary: string | null;
@@ -215,7 +218,48 @@ export async function buildContextPack(userId: string): Promise<ContextPack> {
       console.warn('[CTX] Failed to calculate trend notes:', error);
     }
 
-    // 6. Fetch user goals from database
+    // 6. Compute 7-day per-pillar pattern summary
+    let pillarPattern7d: string | null = null;
+    try {
+      const recentScores = await db.select({
+        nutritionScore: fitScores.nutritionScore,
+        trainingScore: fitScores.trainingScore,
+        recoveryScore: fitScores.recoveryScore,
+      })
+        .from(fitScores)
+        .where(eq(fitScores.userId, userId))
+        .orderBy(desc(fitScores.date))
+        .limit(7);
+
+      if (recentScores.length >= 3) {
+        const summarize = (scores: (number | null)[]) => {
+          const valid = scores.filter((s): s is number => s != null);
+          if (valid.length === 0) return null;
+          const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
+          const weakDays = valid.filter(s => s < 7).length;
+          const label = avg >= 7.5 ? 'strong' : avg >= 6.5 ? 'moderate' : 'weak';
+          return { avg: Math.round(avg * 10) / 10, weakDays, total: valid.length, label };
+        };
+
+        const nutrition = summarize(recentScores.map(r => r.nutritionScore));
+        const training = summarize(recentScores.map(r => r.trainingScore));
+        const recovery = summarize(recentScores.map(r => r.recoveryScore));
+
+        const parts: string[] = [];
+        if (nutrition) parts.push(`Nutrition: ${nutrition.label} (avg ${nutrition.avg}/10, below-7 ${nutrition.weakDays}/${nutrition.total} days)`);
+        if (training) parts.push(`Training: ${training.label} (avg ${training.avg}/10, below-7 ${training.weakDays}/${training.total} days)`);
+        if (recovery) parts.push(`Recovery: ${recovery.label} (avg ${recovery.avg}/10, below-7 ${recovery.weakDays}/${recovery.total} days)`);
+
+        if (parts.length > 0) {
+          pillarPattern7d = `7-day pillar patterns: ${parts.join('; ')}`;
+          console.log(`[CTX] Pillar patterns: ${pillarPattern7d}`);
+        }
+      }
+    } catch (error) {
+      console.warn('[CTX] Failed to compute pillar patterns:', error);
+    }
+
+    // 7. Fetch user goals from database
     let goalsContext: string | null = null;
     try {
       const goals = await db
@@ -311,6 +355,7 @@ export async function buildContextPack(userId: string): Promise<ContextPack> {
       nextTraining,
       recentSummary,
       trendNotes,
+      pillarPattern7d,
       userContextSummary,
     };
 

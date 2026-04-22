@@ -5975,16 +5975,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (ys) yesterdayFitScore = ys.score;
       } catch { /* graceful */ }
 
-      // 3-day FitScore trend
-      let fitScoreTrend3d: number[] | undefined;
+      // 7-day per-pillar FitScore pattern
+      let pillarPattern7d: string | undefined;
       try {
-        const recentScores = await db.select({ score: fitScores.score })
+        const recentScores = await db.select({
+          date: fitScores.date,
+          score: fitScores.score,
+          nutritionScore: fitScores.nutritionScore,
+          trainingScore: fitScores.trainingScore,
+          recoveryScore: fitScores.recoveryScore,
+        })
           .from(fitScores)
           .where(eq(fitScores.userId, userId))
           .orderBy(desc(fitScores.date))
-          .limit(3);
-        if (recentScores.length >= 2) {
-          fitScoreTrend3d = recentScores.map(r => r.score);
+          .limit(7);
+
+        if (recentScores.length >= 3) {
+          const summarize = (scores: (number | null)[]) => {
+            const valid = scores.filter((s): s is number => s != null);
+            if (valid.length === 0) return null;
+            const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
+            const weakDays = valid.filter(s => s < 7).length;
+            const label = avg >= 7.5 ? 'strong' : avg >= 6.5 ? 'moderate' : 'weak';
+            return { avg: Math.round(avg * 10) / 10, weakDays, total: valid.length, label };
+          };
+
+          const nutrition = summarize(recentScores.map(r => r.nutritionScore));
+          const training = summarize(recentScores.map(r => r.trainingScore));
+          const recovery = summarize(recentScores.map(r => r.recoveryScore));
+
+          const parts: string[] = [];
+          if (nutrition) parts.push(`Nutrition: ${nutrition.label} (avg ${nutrition.avg}/10, below-7 ${nutrition.weakDays}/${nutrition.total} days)`);
+          if (training) parts.push(`Training: ${training.label} (avg ${training.avg}/10, below-7 ${training.weakDays}/${training.total} days)`);
+          if (recovery) parts.push(`Recovery: ${recovery.label} (avg ${recovery.avg}/10, below-7 ${recovery.weakDays}/${recovery.total} days)`);
+
+          if (parts.length > 0) {
+            pillarPattern7d = `7-day pillar patterns: ${parts.join('; ')}`;
+          }
         }
       } catch { /* graceful */ }
 
@@ -6070,7 +6097,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         strainScore: fitlookDataSource !== 'manual' ? strainScore : undefined,
         yesterdayFitScore,
         yesterdayBreakdown,
-        fitScoreTrend3d,
+        pillarPattern7d,
         plannedTraining,
         userGoalTitle,
         injuryNotes,

@@ -487,6 +487,11 @@ export class ChatService {
         }
       }
 
+      // Add 7-day pillar pattern — always surface when available, regardless of data source
+      if (contextPack.pillarPattern7d) {
+        contextData += `\n\n${contextPack.pillarPattern7d}\nReference these patterns when giving advice — name the weak pillar specifically.\n`;
+      }
+
       // Fetch calendar data if needed
       if (needsCalendarData) {
         console.log('[CHAT SERVICE] Calendar data requested - fetching events...');

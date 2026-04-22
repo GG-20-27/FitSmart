@@ -455,6 +455,11 @@ export function composeFitScorePrompt(
     systemPrompt += `\n**Note:** Use these ACTUAL metrics in your WHOOP Metrics Summary section. DO NOT use the example values from the output structure.`;
   }
 
+  // Add 7-day pillar patterns — always surface, regardless of data source
+  if (ctx.pillarPattern7d) {
+    systemPrompt += `\n\n## 7-Day Pillar Patterns\n${ctx.pillarPattern7d}\nWhen discussing trends, name the weak or strong pillars specifically — e.g. "your nutrition has been consistently below target this week" or "your recovery pillar has been solid".`;
+  }
+
   // Add FitScore table
   if (fitScoreTable) {
     systemPrompt += `\n\n## FitScore Calculation\n${fitScoreTable}`;

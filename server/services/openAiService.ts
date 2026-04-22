@@ -538,7 +538,7 @@ export interface FitLookGenerationInput {
     training?: number;
     nutrition?: number;
   };
-  fitScoreTrend3d?: number[];
+  pillarPattern7d?: string;
   plannedTraining?: string;
   userGoalTitle?: string;
   injuryNotes?: string;
@@ -1620,10 +1620,9 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
         }
       }
 
-      if (input.fitScoreTrend3d && input.fitScoreTrend3d.length >= 2) {
-        const trend = input.fitScoreTrend3d;
-        const direction = trend[0] > trend[trend.length - 1] ? 'improving' : trend[0] < trend[trend.length - 1] ? 'slipping' : 'steady';
-        parts.push(`FitScore trend (last 3 days, newest first): ${trend.join(', ')} (${direction})`);
+      if (input.pillarPattern7d) {
+        parts.push(input.pillarPattern7d);
+        parts.push(`Use these patterns in your reasoning sentence and plan — name the weak pillar specifically (e.g. "nutrition has been consistently below target this week").`);
       }
 
       if (input.plannedTraining) {
