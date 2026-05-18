@@ -171,15 +171,6 @@ export default function OnboardingWelcome() {
           </TouchableOpacity>
         </View>
 
-        {/* Join team link */}
-        <TouchableOpacity
-          style={styles.joinTeamRow}
-          onPress={() => navigation.navigate('TeamSignup')}
-        >
-          <Text style={styles.joinTeamText}>Joining a team? </Text>
-          <Text style={styles.joinTeamLink}>Enter team code →</Text>
-        </TouchableOpacity>
-
         {/* Security Note */}
         <View style={styles.securityNote}>
           <Ionicons name="lock-closed-outline" size={14} color={colors.textMuted} />
