@@ -8047,6 +8047,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      console.log('[Coach] members:', members.map(m => ({ userId: m.userId, dataSource: m.dataSource })));
       const players = await Promise.all(members.map(async (m) => {
         const isWhoop = m.dataSource === 'whoop';
         const [scores, meals, trainingSessions, checkins, whoopEntries] = await Promise.all([
@@ -8093,6 +8094,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       }));
 
+      console.log('[Coach] whoopByDate per player:', players.map(p => ({ userId: p.userId, dataSource: p.dataSource, whoopDays: Object.keys(p.whoopByDate) })));
       res.json({ team: { id: team.id, name: team.name, sport: team.sport, phase: team.phase, weekStart }, players });
     } catch (err) {
       console.error('[Teams] coach endpoint error:', err);
