@@ -7903,10 +7903,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { name, sport } = req.body;
       if (!name || !sport) return res.status(400).json({ error: 'name and sport required' });
 
-      // Ensure user isn't already on a team
-      const existing = await storage.getTeamMembership(userId);
-      if (existing) return res.status(409).json({ error: 'Already on a team' });
-
       const joinCode = generateJoinCode();
       const coachToken = crypto.randomUUID();
       const team = await storage.createTeam({ name, sport, joinCode, coachToken, createdBy: userId });
@@ -7926,11 +7922,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { joinCode } = req.body;
       if (!joinCode) return res.status(400).json({ error: 'joinCode required' });
 
-      const existing = await storage.getTeamMembership(userId);
-      if (existing) return res.status(409).json({ error: 'Already on a team' });
-
       const team = await storage.getTeamByJoinCode(joinCode.toUpperCase());
       if (!team) return res.status(404).json({ error: 'Team not found' });
+
+      // Prevent duplicate membership in the same team
+      const alreadyMember = await storage.isTeamMember(team.id, userId);
+      if (alreadyMember) return res.status(409).json({ error: 'Already a member of this team' });
 
       const member = await storage.addTeamMember(team.id, userId, 'member');
       res.json({ team, member });

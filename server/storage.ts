@@ -482,7 +482,9 @@ export class DatabaseStorage implements IStorage {
       .select({ team: teams, member: teamMembers })
       .from(teamMembers)
       .innerJoin(teams, eq(teamMembers.teamId, teams.id))
-      .where(eq(teamMembers.userId, userId));
+      .where(eq(teamMembers.userId, userId))
+      .orderBy(desc(teamMembers.joinedAt))
+      .limit(1);
     return row || undefined;
   }
 
