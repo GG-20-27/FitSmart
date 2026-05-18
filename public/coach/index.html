@@ -798,8 +798,9 @@
         const mealList = player.mealsByDate[d] ?? [];
         const trainingList = (player.trainingByDate ?? {})[d] ?? [];
         const checkin = (player.checkinByDate ?? {})[d];
+        const whoopEntry = (player.whoopByDate ?? {})[d];
         const scoreEntry = player.scoresByDate[d];
-        if (mealList.length === 0 && trainingList.length === 0 && !checkin && !scoreEntry) return;
+        if (mealList.length === 0 && trainingList.length === 0 && !checkin && !whoopEntry && !scoreEntry) return;
 
         const card = document.createElement('div');
         card.className = 'day-card';
@@ -946,7 +947,16 @@
         // Recovery column (rightmost)
         {
           const { sec, content } = makeSection('💤', 'Recovery');
-          if (checkin) {
+          if (whoopEntry) {
+            const sleepHoursStr = whoopEntry.sleepHours != null ? whoopEntry.sleepHours.toFixed(1) + 'h' : '—';
+            const hrvStr = whoopEntry.hrv != null ? Math.round(whoopEntry.hrv) + ' ms' : '—';
+            content.innerHTML = `<div class="checkin-pills">
+              <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Recovery</span><span>${Math.round(whoopEntry.recoveryScore)}%</span></div>
+              <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Sleep score</span><span>${Math.round(whoopEntry.sleepScore)}%</span></div>
+              <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Sleep</span><span>${sleepHoursStr}</span></div>
+              <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">HRV</span><span>${hrvStr}</span></div>
+            </div>`;
+          } else if (checkin) {
             content.innerHTML = `<div class="checkin-pills">
               <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Recovery</span><span>${checkin.recovery}/10</span></div>
               <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Energy</span><span>${checkin.energy}/10</span></div>

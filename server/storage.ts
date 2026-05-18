@@ -72,6 +72,7 @@ export interface IStorage {
   // Manual checkin operations
   getManualCheckin(userId: string, date: string): Promise<ManualCheckin | undefined>;
   getManualCheckins(userId: string, fromDate: string, toDate: string): Promise<ManualCheckin[]>;
+  getWhoopDataByUserAndDateRange(userId: string, fromDate: string, toDate: string): Promise<WhoopData[]>;
   createManualCheckin(data: InsertManualCheckin): Promise<ManualCheckin>;
   updateManualCheckin(userId: string, date: string, data: Partial<InsertManualCheckin>): Promise<ManualCheckin | undefined>;
 
@@ -415,6 +416,15 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(manualCheckins.date));
   }
 
+  async getWhoopDataByUserAndDateRange(userId: string, fromDate: string, toDate: string): Promise<WhoopData[]> {
+    return db.select().from(whoopData)
+      .where(and(
+        eq(whoopData.userId, userId),
+        sql`${whoopData.date} >= ${fromDate} AND ${whoopData.date} <= ${toDate}`,
+      ))
+      .orderBy(desc(whoopData.date));
+  }
+
   async createManualCheckin(data: InsertManualCheckin): Promise<ManualCheckin> {
     const [row] = await db.insert(manualCheckins).values(data).returning();
     return row;
@@ -459,7 +469,7 @@ export class DatabaseStorage implements IStorage {
     return member;
   }
 
-  async getTeamMembers(teamId: number): Promise<(TeamMember & { displayName: string | null; email: string })[]> {
+  async getTeamMembers(teamId: number): Promise<(TeamMember & { displayName: string | null; email: string; dataSource: string })[]> {
     const rows = await db
       .select({
         id: teamMembers.id,
@@ -470,6 +480,7 @@ export class DatabaseStorage implements IStorage {
         joinedAt: teamMembers.joinedAt,
         displayName: users.displayName,
         email: users.email,
+        dataSource: users.dataSource,
       })
       .from(teamMembers)
       .innerJoin(users, eq(teamMembers.userId, users.id))

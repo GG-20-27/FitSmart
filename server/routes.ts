@@ -8048,11 +8048,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const players = await Promise.all(members.map(async (m) => {
-        const [scores, meals, trainingSessions, checkins] = await Promise.all([
+        const isWhoop = m.dataSource === 'whoop';
+        const [scores, meals, trainingSessions, checkins, whoopEntries] = await Promise.all([
           storage.getFitScoresByUserAndWeek(m.userId, days[0], days[days.length - 1]),
           storage.getMealsByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
           storage.getTrainingDataByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
-          storage.getManualCheckins(m.userId, days[0], days[days.length - 1]),
+          isWhoop ? Promise.resolve([]) : storage.getManualCheckins(m.userId, days[0], days[days.length - 1]),
+          isWhoop ? storage.getWhoopDataByUserAndDateRange(m.userId, days[0], days[days.length - 1]) : Promise.resolve([]),
         ]);
         const scoresByDate: Record<string, { score: number; nutrition: number | null; training: number | null; recovery: number | null }> = {};
         for (const s of scores) {
@@ -8072,16 +8074,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         for (const c of checkins) {
           checkinByDate[c.date] = { recovery: c.recovery, energy: c.energy, sleepHours: c.sleepHours, sleepQuality: c.sleepQuality };
         }
+        const whoopByDate: Record<string, { recoveryScore: number; sleepScore: number; sleepHours: number | null; hrv: number | null }> = {};
+        for (const w of whoopEntries) {
+          whoopByDate[w.date] = { recoveryScore: w.recoveryScore, sleepScore: w.sleepScore, sleepHours: w.sleepHours ?? null, hrv: w.hrv ?? null };
+        }
         return {
           userId: m.userId,
           displayName: m.displayName ?? m.email.split('@')[0],
           role: m.role,
           groupName: m.groupName,
+          dataSource: m.dataSource,
           days,
           scoresByDate,
           mealsByDate,
           trainingByDate,
           checkinByDate,
+          whoopByDate,
         };
       }));
 
