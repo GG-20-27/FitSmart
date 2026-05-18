@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FitSmart Coach View</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #051824;
+      color: #ffffff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #162936;
+      padding: 16px 24px;
+      border-bottom: 1px solid #3B5265;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-left h1 { font-size: 20px; font-weight: 700; color: #27E9B5; }
+    .header-left p  { font-size: 12px; color: #B0C2CC; margin-top: 2px; }
+    .header-right   { font-size: 12px; color: #B0C2CC; }
+
+    .phase-badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .phase-assessment { background: #3B5265;    color: #B0C2CC; }
+    .phase-competing  { background: #27E9B530;  color: #27E9B5; }
+
+    main { padding: 24px; }
+
+    #error-msg {
+      background: #162936;
+      border: 1px solid #ff4444;
+      border-radius: 8px;
+      padding: 20px;
+      color: #ff8888;
+      margin-bottom: 20px;
+      display: none;
+    }
+
+    #loading { text-align: center; padding: 60px; color: #B0C2CC; }
+
+    .players-grid { display: flex; flex-direction: column; gap: 12px; }
+
+    /* ── Group separator ───────────────────────────────────────────────── */
+    .group-separator {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 4px 0;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #3B5265;
+    }
+    .group-separator::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #3B526550;
+    }
+
+    /* ── Player card ───────────────────────────────────────────────────── */
+    .player-card {
+      background: #162936;
+      border-radius: 12px;
+      border: 1px solid #3B5265;
+      overflow: hidden;
+    }
+    .player-card:hover { border-color: #27E9B540; }
+
+    .player-header {
+      display: flex;
+      align-items: center;
+      padding: 14px 16px;
+      gap: 12px;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .player-name {
+      flex: 1;
+      font-weight: 700;
+      font-size: 15px;
+    }
+
+    .group-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: #27E9B520;
+      color: #27E9B5;
+      font-weight: 600;
+    }
+
+    .chevron {
+      font-size: 11px;
+      color: #3B5265;
+      margin-left: 4px;
+      transition: transform 0.15s;
+    }
+    .player-card.open .chevron { transform: rotate(180deg); }
+
+    /* ── Score columns ─────────────────────────────────────────────────── */
+    .score-grid { display: flex; gap: 4px; align-items: center; }
+
+    .score-cell {
+      width: 56px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .score-cell .day-abbr {
+      font-size: 10px;
+      color: #3B5265;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .score-cell .day-date {
+      font-size: 9px;
+      color: #B0C2CC;
+      margin-bottom: 4px;
+      white-space: nowrap;
+    }
+    .cell-meals {
+      font-size: 10px;
+      color: #3B526580;
+      margin-top: 3px;
+      height: 13px;
+    }
+    .cell-meals.has-meals { color: #27E9B570; }
+
+    .score-pill {
+      height: 28px;
+      line-height: 28px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .score-high  { background: #10B98125; color: #10B981; }
+    .score-mid   { background: #F59E0B25; color: #F59E0B; }
+    .score-low   { background: #EF444425; color: #EF4444; }
+    .score-empty { background: #3B526530; color: #3B5265; }
+
+    /* ── Expanded detail ───────────────────────────────────────────────── */
+    .player-detail {
+      display: none;
+      border-top: 1px solid #3B526540;
+      padding: 16px;
+    }
+    .player-detail.open { display: block; }
+
+    .summary-row {
+      display: flex;
+      gap: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #3B526530;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .summary-stat { font-size: 12px; color: #B0C2CC; }
+    .summary-stat span { color: #27E9B5; font-weight: 700; }
+
+    /* ── Pillar sub-rows (N / T / R) ───────────────────────────────────── */
+    .pillar-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 16px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid #3B526530;
+    }
+
+    .pillar-row {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .pillar-label {
+      width: 64px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #3B5265;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      flex-shrink: 0;
+    }
+
+    .pillar-row .score-cell { width: 56px; }
+    .pillar-row .score-pill {
+      height: 22px;
+      line-height: 22px;
+      font-size: 11px;
+    }
+    .pillar-row .day-abbr { margin-bottom: 0; }
+    .pillar-row .day-date { margin-bottom: 0; }
+
+    /* ── Day cards ────────────────────────────────────────────────────────── */
+    .day-cards { display: flex; flex-direction: column; gap: 8px; }
+
+    .day-card {
+      background: #0E2231;
+      border-radius: 10px;
+      border: 1px solid #1E3A4A;
+      overflow: hidden;
+    }
+
+    .day-card-header {
+      display: flex;
+      align-items: center;
+      padding: 8px 14px;
+      background: #162936;
+      border-bottom: 1px solid #1E3A4A;
+      gap: 8px;
+    }
+    .day-card-dow {
+      font-size: 11px;
+      font-weight: 700;
+      color: #3B5265;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      width: 24px;
+      flex-shrink: 0;
+    }
+    .day-card-date {
+      font-size: 13px;
+      font-weight: 700;
+      color: #B0C2CC;
+      flex: 1;
+    }
+    .day-card-fitscore {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      color: #3B5265;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .day-card-score-pill {
+      height: 22px;
+      line-height: 22px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 0 8px;
+    }
+
+    .day-card-body {
+      padding: 10px 14px;
+      display: flex;
+      flex-direction: row;
+      gap: 0;
+    }
+
+    .day-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 0 12px;
+      border-right: 1px solid #1E3A4A;
+      min-width: 0;
+    }
+    .day-section:first-child { padding-left: 0; }
+    .day-section:last-child { border-right: none; padding-right: 0; }
+
+    .day-section-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .day-section-icon { font-size: 13px; flex-shrink: 0; }
+    .day-section-content { flex: 1; }
+    .day-section-label {
+      font-size: 9px;
+      font-weight: 700;
+      color: #3B5265;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+    .day-section-score {
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid #1E3A4A;
+      font-size: 10px;
+      color: #3B5265;
+    }
+    .day-section-score span { color: #27E9B5; font-weight: 700; }
+
+    /* Today indicator */
+    .score-cell.day-today {
+      background: #27E9B510;
+      border-radius: 6px;
+      padding: 2px 3px;
+    }
+    .score-cell.day-today .day-abbr { color: #27E9B5; }
+    .score-cell.day-today .day-date { color: #27E9B590; }
+
+    /* Check-in pills */
+    .checkin-pills { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+    .checkin-pill {
+      background: #162936;
+      border: 1px solid #1E3A4A;
+      border-radius: 7px;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #B0C2CC;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 6px;
+    }
+    .checkin-pill span { color: #E0EAF0; font-weight: 700; font-size: 12px; white-space: nowrap; }
+
+    /* Training entry */
+    .training-entry {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: #162936;
+      border: 1px solid #1E3A4A;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .training-name { font-size: 14px; font-weight: 700; color: #E0EAF0; }
+    .training-meta { color: #3B5265; font-size: 11px; }
+    .training-skipped { color: #3B5265; font-style: italic; font-size: 11px; }
+    .training-comment {
+      font-size: 11px;
+      color: #B0C2CC70;
+      font-style: italic;
+      padding-top: 6px;
+      border-top: 1px solid #1E3A4A;
+      margin-top: 2px;
+    }
+
+    /* Nutrition */
+    .meal-thumbs { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .meal-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 3px;
+      border-radius: 8px;
+      padding: 4px;
+      transition: background 0.1s;
+    }
+    .meal-item.has-details { cursor: pointer; }
+    .meal-item.has-details:hover { background: #ffffff0a; }
+    .meal-item.has-details .meal-thumb { border-color: #27E9B530; }
+    .meal-item.has-details.open .meal-thumb { border-color: #27E9B5; }
+
+    .meal-thumb {
+      width: 52px;
+      height: 52px;
+      border-radius: 6px;
+      object-fit: cover;
+      border: 1px solid #3B5265;
+      display: block;
+    }
+
+    .meal-label {
+      font-size: 10px;
+      color: #B0C2CC;
+      text-align: center;
+      max-width: 64px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .no-meals { font-size: 12px; color: #3B5265; font-style: italic; padding-top: 6px; }
+
+    /* ── Week navigation ──────────────────────────────────────────────────── */
+    .week-nav {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+      background: #162936;
+      border: 1px solid #3B5265;
+      border-radius: 12px;
+      padding: 12px 16px;
+    }
+    .week-nav-center {
+      flex: 1;
+      text-align: center;
+    }
+    .week-label {
+      font-size: 15px;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: -0.2px;
+    }
+    .week-nav-status {
+      font-size: 11px;
+      color: #3B5265;
+      margin-top: 3px;
+      min-height: 14px;
+    }
+    .week-nav-btn {
+      background: #0E2231;
+      border: 1px solid #3B5265;
+      border-radius: 8px;
+      color: #B0C2CC;
+      font-size: 20px;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      user-select: none;
+      flex-shrink: 0;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .week-nav-btn:hover:not(:disabled) { border-color: #27E9B570; color: #27E9B5; }
+    .week-nav-btn:disabled { opacity: 0.25; cursor: default; }
+
+    /* ── Meal item (collapsible detail) ──────────────────────────────────── */
+    .meal-tap-hint {
+      font-size: 9px;
+      color: #3B5265;
+      text-align: center;
+      letter-spacing: 0.3px;
+      margin-top: 1px;
+    }
+    .meal-item.has-details .meal-tap-hint { display: block; }
+    .meal-item.open .meal-tap-hint { display: none; }
+
+    .meal-detail {
+      display: none;
+      text-align: center;
+      padding-top: 3px;
+    }
+    .meal-item.open .meal-detail { display: block; }
+    .meal-detail-time {
+      font-size: 11px;
+      color: #27E9B5;
+      font-weight: 600;
+    }
+    .meal-detail-notes {
+      font-size: 10px;
+      color: #B0C2CC;
+      font-style: italic;
+      margin-top: 2px;
+      max-width: 96px;
+      white-space: normal;
+      word-break: break-word;
+      line-height: 1.3;
+    }
+
+
+    footer {
+      text-align: center;
+      padding: 24px;
+      color: #3B5265;
+      font-size: 12px;
+    }
+
+    /* ── Image lightbox ──────────────────────────────────────────────────── */
+    .img-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #000000dd;
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+    .img-modal.open { display: flex; }
+    .img-modal img {
+      max-width: 90vw;
+      max-height: 90vh;
+      border-radius: 10px;
+      object-fit: contain;
+      box-shadow: 0 8px 40px #000000aa;
+    }
+    .meal-thumb { cursor: zoom-in; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>FitSmart Coach View</h1>
+      <p id="team-name">Loading…</p>
+    </div>
+    <div class="header-right">
+      <span id="phase-badge" class="phase-badge">—</span>
+      &nbsp;·&nbsp;
+      <span id="refresh-label">Auto-refreshes every 5 min</span>
+    </div>
+  </header>
+
+  <main>
+    <div id="error-msg"></div>
+    <div id="loading">Loading team data…</div>
+    <div class="week-nav" id="week-nav" style="display:none">
+      <button class="week-nav-btn" id="btn-prev" title="Previous week">&#8249;</button>
+      <div class="week-nav-center">
+        <div class="week-label" id="week-label"></div>
+        <div class="week-nav-status" id="week-nav-status"></div>
+      </div>
+      <button class="week-nav-btn" id="btn-next" disabled title="Next week">&#8250;</button>
+    </div>
+    <div id="players-grid" class="players-grid" style="display:none"></div>
+  </main>
+
+  <div class="img-modal" id="img-modal">
+    <img id="img-modal-img" src="" alt="Meal photo" />
+  </div>
+
+  <footer>FitSmart · Coach access only · Do not share this URL</footer>
+
+  <script>
+    const API_BASE = window.location.origin;
+    const token = new URLSearchParams(window.location.search).get('token');
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    let weekOffset = 0; // 0 = current week, -1 = last week, etc.
+
+    function getWeekBounds(offset) {
+      const today = new Date();
+      const dow = today.getUTCDay(); // 0=Sun
+      const daysToMonday = dow === 0 ? -6 : 1 - dow;
+      const monday = new Date(today);
+      monday.setUTCDate(today.getUTCDate() + daysToMonday + offset * 7);
+      const sunday = new Date(monday);
+      sunday.setUTCDate(monday.getUTCDate() + 6);
+      const from = monday.toISOString().slice(0, 10);
+      const to = sunday.toISOString().slice(0, 10);
+      return { from, to };
+    }
+
+    function formatWeekLabel(from, to) {
+      const fmt = s => new Date(s + 'T12:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+      return `${fmt(from)} – ${fmt(to)}`;
+    }
+
+    document.getElementById('img-modal').addEventListener('click', () => {
+      document.getElementById('img-modal').classList.remove('open');
+    });
+
+    if (!token) {
+      document.getElementById('error-msg').style.display = 'block';
+      document.getElementById('error-msg').textContent = 'No token in URL. Use the link provided by the team creator.';
+      document.getElementById('loading').style.display = 'none';
+    } else {
+      document.getElementById('btn-prev').addEventListener('click', () => { weekOffset--; load(); });
+      document.getElementById('btn-next').addEventListener('click', () => { weekOffset++; load(); });
+      load();
+      setInterval(load, 5 * 60 * 1000);
+    }
+
+    function scoreClass(s) {
+      if (s == null) return 'score-empty';
+      if (s >= 7)  return 'score-high';
+      if (s >= 5)  return 'score-mid';
+      return 'score-low';
+    }
+
+    function shortDay(dateStr) {
+      const d = new Date(dateStr + 'T12:00:00Z');
+      return ['Su','Mo','Tu','We','Th','Fr','Sa'][d.getUTCDay()];
+    }
+
+    function fullDay(dateStr) {
+      const d = new Date(dateStr + 'T12:00:00Z');
+      return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getUTCDay()];
+    }
+
+    function monthAbbr(dateStr) {
+      const d = new Date(dateStr + 'T12:00:00Z');
+      return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()];
+    }
+
+    async function load() {
+      const grid = document.getElementById('players-grid');
+      const status = document.getElementById('week-nav-status');
+      const btnPrev = document.getElementById('btn-prev');
+      const btnNext = document.getElementById('btn-next');
+
+      btnPrev.disabled = true;
+      btnNext.disabled = true;
+      if (status) status.textContent = 'Loading…';
+      if (grid.style.display !== 'none') {
+        grid.style.opacity = '0.4';
+        grid.style.pointerEvents = 'none';
+      }
+
+      try {
+        const { from, to } = getWeekBounds(weekOffset);
+        const url = `${API_BASE}/api/coach/team?token=${encodeURIComponent(token)}&from=${from}&to=${to}`;
+        const res = await fetch(url, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+
+        document.getElementById('week-label').textContent = formatWeekLabel(from, to);
+        document.getElementById('week-nav').style.display = 'flex';
+        render(data);
+        const ts = 'Updated ' + new Date().toLocaleTimeString();
+        if (status) status.textContent = ts;
+        document.getElementById('refresh-label').textContent = ts;
+      } catch (e) {
+        document.getElementById('error-msg').style.display = 'block';
+        document.getElementById('error-msg').textContent = 'Error: ' + (e.message || e);
+        document.getElementById('loading').style.display = 'none';
+        if (status) status.textContent = 'Failed to load';
+      } finally {
+        btnPrev.disabled = false;
+        btnNext.disabled = weekOffset >= 0;
+        grid.style.opacity = '1';
+        grid.style.pointerEvents = '';
+      }
+    }
+
+    function render(data) {
+      document.getElementById('loading').style.display = 'none';
+
+      document.getElementById('team-name').textContent = `${data.team.name} · ${data.team.sport}`;
+      const badge = document.getElementById('phase-badge');
+      badge.textContent = data.team.phase;
+      badge.className = 'phase-badge ' + (data.team.phase === 'competing' ? 'phase-competing' : 'phase-assessment');
+
+      const grid = document.getElementById('players-grid');
+      grid.style.display = 'flex';
+      grid.innerHTML = '';
+
+      // Server already scopes to the requested date range — use as-is
+      const days = data.players[0]?.days ?? [];
+
+      // Column header row
+      const headerRow = document.createElement('div');
+      headerRow.style.cssText = 'display:flex;gap:4px;padding:0 16px;align-items:center;';
+      headerRow.innerHTML = `
+        <div style="flex:1;padding-bottom:4px;">
+          <span style="font-size:11px;color:#3B5265;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Player</span>
+        </div>
+        <span style="font-size:9px;color:#3B526570;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;padding-bottom:4px;padding-right:4px;">FitScore ▸</span>
+        ${days.map(d => `<div class="score-cell${d === todayStr ? ' day-today' : ''}">
+          <div class="day-abbr">${shortDay(d)}</div>
+          <div class="day-date">${monthAbbr(d)} ${String(parseInt(d.slice(8), 10))}</div>
+        </div>`).join('')}
+        <div style="width:18px;"></div>
+      `;
+      grid.appendChild(headerRow);
+
+      // Sort by group name (nulls last)
+      const sorted = [...data.players].sort((a, b) => {
+        if (!a.groupName && !b.groupName) return 0;
+        if (!a.groupName) return 1;
+        if (!b.groupName) return -1;
+        return a.groupName.localeCompare(b.groupName);
+      });
+
+      let currentGroup = undefined;
+
+      sorted.forEach((player) => {
+        // Group separator
+        if (player.groupName !== currentGroup) {
+          currentGroup = player.groupName;
+          const sep = document.createElement('div');
+          sep.className = 'group-separator';
+          sep.textContent = player.groupName ?? 'Ungrouped';
+          grid.appendChild(sep);
+        }
+
+        const card = document.createElement('div');
+        card.className = 'player-card';
+
+        const scoreCells = days.map(d => {
+          const s = player.scoresByDate[d];
+          const m = player.mealsByDate[d] ?? [];
+          const val = s ? s.score.toFixed(1) : '–';
+          const mealHint = m.length > 0
+            ? `<div class="cell-meals has-meals">${m.length} meal${m.length > 1 ? 's' : ''}</div>`
+            : `<div class="cell-meals">–</div>`;
+          return `<div class="score-cell">
+            <div class="score-pill ${scoreClass(s?.score)}">${val}</div>
+            ${mealHint}
+          </div>`;
+        }).join('');
+
+        card.innerHTML = `
+          <div class="player-header">
+            <div class="player-name">${escHtml(player.displayName)}</div>
+            <span style="font-size:9px;color:#3B526570;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;padding-right:4px;">FitScore ▸</span>
+            <div class="score-grid">${scoreCells}</div>
+            <div class="chevron">▼</div>
+          </div>
+          <div class="player-detail" id="detail-${player.userId}"></div>
+        `;
+
+        card.querySelector('.player-header').addEventListener('click', () => {
+          const detail = document.getElementById(`detail-${player.userId}`);
+          const isOpen = detail.classList.contains('open');
+          detail.classList.toggle('open', !isOpen);
+          card.classList.toggle('open', !isOpen);
+          if (!isOpen) renderDetail(detail, player, days);
+        });
+
+        grid.appendChild(card);
+      });
+    }
+
+    function renderDetail(el, player, days) {
+      el.innerHTML = '';
+
+      // Summary stats
+      const scores = Object.values(player.scoresByDate);
+      const avgScore = scores.length
+        ? (scores.reduce((a, b) => a + b.score, 0) / scores.length).toFixed(1)
+        : '—';
+      const totalMeals = Object.values(player.mealsByDate).reduce((a, b) => a + b.length, 0);
+
+      const summary = document.createElement('div');
+      summary.className = 'summary-row';
+      summary.innerHTML = `
+        <div class="summary-stat">Avg FitScore <span>${avgScore}</span></div>
+        <div class="summary-stat">Days logged <span>${scores.length}/${days.length}</span></div>
+        <div class="summary-stat">Meals logged <span>${totalMeals}</span></div>
+      `;
+      el.appendChild(summary);
+
+      // Week overview: pillar scores by day
+      const overviewLabel = document.createElement('div');
+      overviewLabel.style.cssText = 'font-size:9px;font-weight:700;color:#3B5265;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:3px;';
+      overviewLabel.textContent = 'Week Overview — Nutrition · Training · Recovery';
+      el.appendChild(overviewLabel);
+
+      const overviewInfo = document.createElement('div');
+      overviewInfo.style.cssText = 'font-size:11px;color:#3B526590;margin-bottom:10px;';
+      overviewInfo.textContent = 'Each pillar is scored 0–10. The daily FitScore is their average.';
+      el.appendChild(overviewInfo);
+
+      const pillars = [
+        { key: 'nutrition', label: 'Nutrition' },
+        { key: 'training',  label: 'Training'  },
+        { key: 'recovery',  label: 'Recovery'  },
+      ];
+      const pillarGrid = document.createElement('div');
+      pillarGrid.className = 'pillar-grid';
+
+      // Day header row inside the pillar grid
+      const headerRow = document.createElement('div');
+      headerRow.className = 'pillar-row';
+      const headerCells = days.map(d => `
+        <div class="score-cell${d === todayStr ? ' day-today' : ''}">
+          <div class="day-abbr">${shortDay(d)}</div>
+          <div class="day-date">${monthAbbr(d)} ${String(parseInt(d.slice(8), 10))}</div>
+        </div>`).join('');
+      headerRow.innerHTML = `<div class="pillar-label"></div>${headerCells}`;
+      pillarGrid.appendChild(headerRow);
+
+      pillars.forEach(({ key, label }) => {
+        const row = document.createElement('div');
+        row.className = 'pillar-row';
+        const cells = days.map(d => {
+          const s = player.scoresByDate[d];
+          const val = (s && s[key] != null) ? s[key].toFixed(1) : '–';
+          return `<div class="score-cell"><div class="score-pill ${scoreClass(s?.[key])}">${val}</div></div>`;
+        }).join('');
+        row.innerHTML = `<div class="pillar-label">${label}</div>${cells}`;
+        pillarGrid.appendChild(row);
+      });
+      el.appendChild(pillarGrid);
+
+      // Per-day cards
+      const dayCards = document.createElement('div');
+      dayCards.className = 'day-cards';
+
+      days.forEach(d => {
+        const mealList = player.mealsByDate[d] ?? [];
+        const trainingList = (player.trainingByDate ?? {})[d] ?? [];
+        const checkin = (player.checkinByDate ?? {})[d];
+        const scoreEntry = player.scoresByDate[d];
+        if (mealList.length === 0 && trainingList.length === 0 && !checkin && !scoreEntry) return;
+
+        const card = document.createElement('div');
+        card.className = 'day-card';
+
+        // ── Header: Weekday · Date · FitScore
+        const header = document.createElement('div');
+        header.className = 'day-card-header';
+        const dow = document.createElement('div');
+        dow.className = 'day-card-dow';
+        dow.textContent = shortDay(d);
+        const dateEl = document.createElement('div');
+        dateEl.className = 'day-card-date';
+        const [, mm, dd] = d.split('-');
+        dateEl.textContent = `${parseInt(mm, 10)}/${parseInt(dd, 10)}  ·  ${fullDay(d)}`;
+        header.appendChild(dow);
+        header.appendChild(dateEl);
+        if (scoreEntry) {
+          const fs = document.createElement('div');
+          fs.className = 'day-card-fitscore';
+          fs.innerHTML = `FitScore <span class="day-card-score-pill ${scoreClass(scoreEntry.score)}">${scoreEntry.score.toFixed(1)}</span>`;
+          header.appendChild(fs);
+        }
+        card.appendChild(header);
+
+        // ── Body: 3-column horizontal layout
+        const body = document.createElement('div');
+        body.className = 'day-card-body';
+
+        const makeSection = (icon, label) => {
+          const sec = document.createElement('div');
+          sec.className = 'day-section';
+          const hdr = document.createElement('div');
+          hdr.className = 'day-section-header';
+          hdr.innerHTML = `<span class="day-section-icon">${icon}</span><span class="day-section-label">${label}</span>`;
+          const content = document.createElement('div');
+          content.className = 'day-section-content';
+          sec.appendChild(hdr);
+          sec.appendChild(content);
+          return { sec, content };
+        };
+
+        // Nutrition column (leftmost — meals are primary visual)
+        {
+          const { sec, content } = makeSection('🍽️', 'Nutrition');
+          if (mealList.length > 0) {
+            const thumbs = document.createElement('div');
+            thumbs.className = 'meal-thumbs';
+            mealList.forEach(m => {
+              const hasDetails = !!(m.uploadedAt || m.mealNotes);
+              const item = document.createElement('div');
+              item.className = 'meal-item' + (hasDetails ? ' has-details' : '');
+
+              const img = document.createElement('img');
+              img.className = 'meal-thumb';
+              img.src = `${window.location.origin}/uploads/${m.filename}`;
+              img.alt = m.mealType || 'Meal';
+              img.onerror = () => { item.style.display = 'none'; };
+              img.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const modal = document.getElementById('img-modal');
+                document.getElementById('img-modal-img').src = img.src;
+                modal.classList.add('open');
+              });
+              item.appendChild(img);
+
+              if (m.mealType) {
+                const lbl = document.createElement('div');
+                lbl.className = 'meal-label';
+                lbl.textContent = m.mealType;
+                item.appendChild(lbl);
+              }
+              if (hasDetails) {
+                const hint = document.createElement('div');
+                hint.className = 'meal-tap-hint';
+                hint.textContent = 'tap ▾';
+                item.appendChild(hint);
+                const detail = document.createElement('div');
+                detail.className = 'meal-detail';
+                if (m.uploadedAt) {
+                  const t = document.createElement('div');
+                  t.className = 'meal-detail-time';
+                  t.textContent = new Date(m.uploadedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  detail.appendChild(t);
+                }
+                if (m.mealNotes) {
+                  const n = document.createElement('div');
+                  n.className = 'meal-detail-notes';
+                  n.textContent = m.mealNotes;
+                  detail.appendChild(n);
+                }
+                item.appendChild(detail);
+                item.addEventListener('click', (e) => { e.stopPropagation(); item.classList.toggle('open'); });
+              }
+              thumbs.appendChild(item);
+            });
+            content.appendChild(thumbs);
+          } else {
+            const noMeal = document.createElement('div');
+            noMeal.className = 'no-meals';
+            noMeal.textContent = 'No meals logged';
+            content.appendChild(noMeal);
+          }
+          if (scoreEntry?.nutrition != null) {
+            const scoreEl = document.createElement('div');
+            scoreEl.className = 'day-section-score';
+            scoreEl.innerHTML = `Nutrition score: <span>${scoreEntry.nutrition.toFixed(1)}</span>`;
+            sec.appendChild(scoreEl);
+          }
+          body.appendChild(sec);
+        }
+
+        // Training column
+        {
+          const { sec, content } = makeSection('🏋️', 'Training');
+          if (trainingList.length > 0) {
+            trainingList.forEach(t => {
+              if (t.skipped) {
+                const entry = document.createElement('div');
+                entry.className = 'training-skipped';
+                entry.textContent = `⏸ Skipped — ${t.type}`;
+                content.appendChild(entry);
+              } else {
+                const metaParts = [t.duration ? t.duration + 'min' : null, t.intensity].filter(Boolean).join(' · ');
+                const entry = document.createElement('div');
+                entry.className = 'training-entry';
+                const metaLine = metaParts ? `<div class="training-meta">${escHtml(metaParts)}</div>` : '';
+                const commentLine = t.comment ? `<div class="training-comment">${escHtml(t.comment)}</div>` : '';
+                entry.innerHTML = `<span class="training-name">${escHtml(t.type)}</span>${metaLine}${commentLine}`;
+                content.appendChild(entry);
+              }
+            });
+          } else {
+            content.innerHTML = `<span style="font-size:11px;color:#3B5265;font-style:italic;">—</span>`;
+          }
+          if (scoreEntry?.training != null) {
+            const scoreEl = document.createElement('div');
+            scoreEl.className = 'day-section-score';
+            scoreEl.innerHTML = `Training score: <span>${scoreEntry.training.toFixed(1)}</span>`;
+            sec.appendChild(scoreEl);
+          }
+          body.appendChild(sec);
+        }
+
+        // Recovery column (rightmost)
+        {
+          const { sec, content } = makeSection('💤', 'Recovery');
+          if (checkin) {
+            content.innerHTML = `<div class="checkin-pills">
+              <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Recovery</span><span>${checkin.recovery}/10</span></div>
+              <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Energy</span><span>${checkin.energy}/10</span></div>
+              <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Sleep</span><span>${escHtml(String(checkin.sleepHours))}h</span></div>
+              <div class="checkin-pill"><span style="color:#B0C2CC;font-size:12px;">Sleep quality</span><span>${escHtml(checkin.sleepQuality)}</span></div>
+            </div>`;
+          } else {
+            content.innerHTML = `<span style="font-size:11px;color:#3B5265;font-style:italic;">—</span>`;
+          }
+          if (scoreEntry?.recovery != null) {
+            const scoreEl = document.createElement('div');
+            scoreEl.className = 'day-section-score';
+            scoreEl.innerHTML = `Recovery score: <span>${scoreEntry.recovery.toFixed(1)}</span>`;
+            sec.appendChild(scoreEl);
+          }
+          body.appendChild(sec);
+        }
+
+        card.appendChild(body);
+        dayCards.appendChild(card);
+      });
+
+      el.appendChild(dayCards);
+    }
+
+    function escHtml(str) {
+      return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+  </script>
+</body>
+</html>

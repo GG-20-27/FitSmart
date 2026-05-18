@@ -209,6 +209,68 @@ export const manualCheckins = pgTable("manual_checkins", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// ── TEAM COMPETITION ──────────────────────────────────────────────────────────
+
+export const teams = pgTable("teams", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  sport: text("sport").notNull(),
+  joinCode: text("join_code").notNull().unique(),
+  coachToken: text("coach_token").notNull().unique(),
+  phase: text("phase").notNull().default("assessment"), // "assessment" | "competing"
+  weekStart: text("week_start"),                       // YYYY-MM-DD Monday when competition started
+  createdBy: text("created_by").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const teamMembers = pgTable("team_members", {
+  id: serial("id").primaryKey(),
+  teamId: integer("team_id").notNull().references(() => teams.id, { onDelete: 'cascade' }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  role: text("role").notNull().default("member"),      // "owner" | "coach" | "member"
+  groupName: text("group_name"),                       // null during assessment, set after split
+  joinedAt: timestamp("joined_at").defaultNow().notNull(),
+});
+
+export const cheatDays = pgTable("cheat_days", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: 'cascade' }),
+  teamId: integer("team_id").notNull().references(() => teams.id, { onDelete: 'cascade' }),
+  weekStart: text("week_start").notNull(),
+  cheatDate: text("cheat_date"),                       // first missed day, excluded from avg
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Coach-prescribed training plan per day per team
+export const teamTrainingPlan = pgTable("team_training_plan", {
+  id: serial("id").primaryKey(),
+  teamId: integer("team_id").notNull().references(() => teams.id, { onDelete: 'cascade' }),
+  planDate: text("plan_date").notNull(),               // YYYY-MM-DD
+  sessionTitle: text("session_title").notNull(),        // e.g. "Upper Body Strength"
+  type: text("type").notNull(),                        // e.g. "strength" | "cardio" | "technique" | "rest"
+  durationMinutes: integer("duration_minutes"),         // prescribed duration in minutes
+  intensity: text("intensity"),                        // "low" | "moderate" | "high"
+  description: text("description"),                    // coach's detailed session notes
+  coachNotes: text("coach_notes"),                     // extra tips / motivation from coach
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertTeamSchema = createInsertSchema(teams).omit({ id: true, createdAt: true });
+export const insertTeamMemberSchema = createInsertSchema(teamMembers).omit({ id: true, joinedAt: true });
+export const insertCheatDaySchema = createInsertSchema(cheatDays).omit({ id: true, createdAt: true });
+export const insertTeamTrainingPlanSchema = createInsertSchema(teamTrainingPlan).omit({ id: true, createdAt: true });
+
+export type Team = typeof teams.$inferSelect;
+export type InsertTeam = z.infer<typeof insertTeamSchema>;
+export type TeamMember = typeof teamMembers.$inferSelect;
+export type InsertTeamMember = z.infer<typeof insertTeamMemberSchema>;
+export type CheatDay = typeof cheatDays.$inferSelect;
+export type InsertCheatDay = z.infer<typeof insertCheatDaySchema>;
+export type TeamTrainingPlan = typeof teamTrainingPlan.$inferSelect;
+export type InsertTeamTrainingPlan = z.infer<typeof insertTeamTrainingPlanSchema>;
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const userContext = pgTable("user_context", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().unique().references(() => users.id, { onDelete: 'cascade' }),

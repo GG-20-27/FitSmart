@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiRequest, clearAuthToken } from '../api/client';
+import { getMyTeam, joinTeam, leaveTeam } from '../api/teams';
 import { colors, spacing, radii, typography, shadows, state } from '../theme';
 
 type WhoopStatus = {
@@ -41,6 +42,10 @@ export default function ProfileScreen() {
   const [icsUrlError, setIcsUrlError] = useState('');
   const [fitRoastEnabled, setFitRoastEnabled] = useState(true);
   const [roastIntensity, setRoastIntensity] = useState<'Light' | 'Spicy' | 'Savage'>('Spicy');
+  const [teamName, setTeamName] = useState<string | null>(null);
+  const [joinCodeInput, setJoinCodeInput] = useState('');
+  const [joinDisplayName, setJoinDisplayName] = useState('');
+  const [teamActionLoading, setTeamActionLoading] = useState(false);
 
   // Load FitRoast settings — default ON / Spicy if never set
   useFocusEffect(useCallback(() => {
@@ -75,6 +80,12 @@ export default function ProfileScreen() {
         setCalendars(calendarData || []);
       } catch {
         setCalendars([]);
+      }
+      try {
+        const { team } = await getMyTeam();
+        setTeamName(team?.name ?? null);
+      } catch {
+        setTeamName(null);
       }
     } catch (error) {
       console.error('Failed to load profile:', error);
@@ -130,6 +141,59 @@ export default function ProfileScreen() {
             Alert.alert('Error', 'Failed to remove calendar. Please try again.');
           } finally {
             setLoading(false);
+          }
+        },
+      },
+    ]);
+  };
+
+  const handleJoinTeam = async () => {
+    const code = joinCodeInput.trim().toUpperCase();
+    if (code.length !== 6) {
+      Alert.alert('Invalid code', 'Enter the 6-character code from your coach.');
+      return;
+    }
+    setTeamActionLoading(true);
+    try {
+      const name = joinDisplayName.trim();
+      if (name) {
+        await apiRequest('/api/auth/me', { method: 'PATCH', body: JSON.stringify({ displayName: name }) });
+      }
+      const { team } = await joinTeam(code);
+      setTeamName(team.name);
+      setJoinCodeInput('');
+      setJoinDisplayName('');
+      if ((global as any).refreshTeamStatus) await (global as any).refreshTeamStatus();
+    } catch (err: any) {
+      const msg = err.message || '';
+      if (msg.includes('404') || msg.includes('not found')) {
+        Alert.alert('Code not found', 'Check the code and try again.');
+      } else if (msg.includes('409') || msg.includes('Already')) {
+        Alert.alert('Already on a team', 'You are already a member of a team.');
+      } else {
+        Alert.alert('Error', msg || 'Could not join team.');
+      }
+    } finally {
+      setTeamActionLoading(false);
+    }
+  };
+
+  const handleLeaveTeam = () => {
+    Alert.alert('Leave Team', 'Are you sure you want to leave your team?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Leave',
+        style: 'destructive',
+        onPress: async () => {
+          setTeamActionLoading(true);
+          try {
+            await leaveTeam();
+            setTeamName(null);
+            if ((global as any).refreshTeamStatus) await (global as any).refreshTeamStatus();
+          } catch {
+            Alert.alert('Error', 'Could not leave team.');
+          } finally {
+            setTeamActionLoading(false);
           }
         },
       },
@@ -261,6 +325,57 @@ export default function ProfileScreen() {
           </View>
         </View>
 
+        {/* Team */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Team</Text>
+          {teamName ? (
+            <View style={styles.card}>
+              <View style={styles.statusRow}>
+                <Text style={styles.rowLabel}>Team</Text>
+                <Text style={[styles.rowValue, { color: colors.accent }]}>{teamName}</Text>
+              </View>
+              <View style={styles.teamDivider} />
+              <TouchableOpacity onPress={handleLeaveTeam} disabled={teamActionLoading}>
+                <Text style={styles.leaveTeamText}>
+                  {teamActionLoading ? 'Leaving…' : 'Leave team'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.card}>
+              <Text style={styles.inputLabel}>Your name</Text>
+              <TextInput
+                style={styles.textInput}
+                value={joinDisplayName}
+                onChangeText={setJoinDisplayName}
+                placeholder="First name or nickname"
+                placeholderTextColor={colors.surfaceMute}
+                autoCorrect={false}
+              />
+              <Text style={[styles.inputLabel, { marginTop: spacing.md }]}>Team code</Text>
+              <TextInput
+                style={styles.teamCodeInput}
+                value={joinCodeInput}
+                onChangeText={t => setJoinCodeInput(t.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                placeholder="ABC123"
+                placeholderTextColor={colors.surfaceMute}
+                maxLength={6}
+                autoCapitalize="characters"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.accentButton, (joinCodeInput.trim().length !== 6 || teamActionLoading) && styles.accentButtonDisabled]}
+                onPress={handleJoinTeam}
+                disabled={joinCodeInput.trim().length !== 6 || teamActionLoading}
+              >
+                <Text style={styles.accentButtonText}>
+                  {teamActionLoading ? 'Joining…' : 'Join Team'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
         {/* Logout */}
         <View style={styles.section}>
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -370,6 +485,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
     ...typography.body,
+    letterSpacing: 0,
     borderWidth: 1,
     borderColor: colors.surfaceMute,
     marginBottom: spacing.md,
@@ -449,6 +565,31 @@ const styles = StyleSheet.create({
   },
   intensityOptionTextActive: {
     color: colors.accent,
+  },
+  teamCodeInput: {
+    backgroundColor: colors.bgPrimary,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    color: colors.accent,
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 6,
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+    marginBottom: spacing.md,
+  },
+  teamDivider: {
+    height: 1,
+    backgroundColor: colors.surfaceMute + '40',
+    marginVertical: spacing.md,
+  },
+  leaveTeamText: {
+    fontSize: 13,
+    color: colors.textMuted,
+    fontWeight: '500',
+    textAlign: 'center',
   },
   logoutButton: {
     flexDirection: 'row',

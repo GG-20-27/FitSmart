@@ -34,6 +34,7 @@ import {
   type CoachSlide,
   type StoredFitScore,
   type WaterIntakeBand,
+  type AlcoholBand,
   type WhoopWorkout,
 } from '../api/fitscore';
 import {
@@ -53,6 +54,7 @@ import {
   type PlanContent,
   type TodayPlanHabit,
 } from '../api/improvementPlan';
+import { getTodayTeamTrainingPlan, type TeamTrainingPlan } from '../api/teams';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const MODAL_HEIGHT = SCREEN_HEIGHT * 0.92;
@@ -966,6 +968,9 @@ export default function FitScoreScreen() {
   const [trainingComment, setTrainingComment] = useState('');
   const [trainingSkipped, setTrainingSkipped] = useState(false);
 
+  // Team prescribed session (null = no team or no plan today)
+  const [prescribedSession, setPrescribedSession] = useState<TeamTrainingPlan | null>(null);
+
   // WHOOP import modal
   const [showWhoopImport, setShowWhoopImport] = useState(false);
   const [whoopWorkouts, setWhoopWorkouts] = useState<WhoopWorkout[]>([]);
@@ -973,6 +978,7 @@ export default function FitScoreScreen() {
 
   // Hydration picker — stored per date in AsyncStorage
   const [waterIntakeBand, setWaterIntakeBand] = useState<WaterIntakeBand | null>(null);
+  const [alcoholBand, setAlcoholBand] = useState<AlcoholBand | null>(null);
 
   // Daily habits check-in — loaded from goals, persisted per-date locally
   type DailyHabit = { text: string; goalTitle: string; done: boolean };
@@ -1418,14 +1424,14 @@ export default function FitScoreScreen() {
     };
   }, [triangleAnimating]);
 
-  // Compute weak link whenever FitScore result, meals, training sessions, or water intake change
+  // Compute weak link whenever FitScore result, meals, training sessions, water or alcohol intake change
   useEffect(() => {
     if (fitScoreResult) {
       setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions, waterIntakeBand, macroTargets));
     } else {
       setWeakLink(null);
     }
-  }, [fitScoreResult, meals, trainingSessions, waterIntakeBand]);
+  }, [fitScoreResult, meals, trainingSessions, waterIntakeBand, alcoholBand]);
 
   // Load meals and training data when date changes
   useEffect(() => {
@@ -1441,14 +1447,19 @@ export default function FitScoreScreen() {
     setMeals([]);
     setTrainingSessions([]);
     setWaterIntakeBand(null);
+    setAlcoholBand(null);
     setLoading(true);
 
     const dateStr = formatDate(selectedDate);
 
-    // Restore persisted water intake for this date
+    // Restore persisted water + alcohol intake for this date
     try {
       const stored = await AsyncStorage.getItem(`waterIntake_${dateStr}`);
       if (stored) setWaterIntakeBand(stored as WaterIntakeBand);
+    } catch { /* graceful */ }
+    try {
+      const stored = await AsyncStorage.getItem(`alcoholIntake_${dateStr}`);
+      if (stored) setAlcoholBand(stored as AlcoholBand);
     } catch { /* graceful */ }
     const today = new Date();
     const yest = new Date(); yest.setDate(yest.getDate() - 1);
@@ -1523,6 +1534,13 @@ export default function FitScoreScreen() {
         setMeals(mealsData);
         setTrainingSessions(trainingData);
         console.log(`Loaded ${mealsData.length} meals and ${trainingData.length} training sessions for ${dateStr}`);
+
+        // Fetch team prescribed session for today (only for today, silently)
+        if (!isDatePast) {
+          getTodayTeamTrainingPlan().then(setPrescribedSession).catch(() => setPrescribedSession(null));
+        } else {
+          setPrescribedSession(null);
+        }
         if (trainingData.length > 0) {
           console.log('[TRAINING DATA] First session breakdown:', trainingData[0].breakdown);
         }
@@ -1582,7 +1600,7 @@ export default function FitScoreScreen() {
       const dateStr = formatDate(selectedDate);
       console.log(`[FITSCORE] Calculating FitScore for ${dateStr}`);
 
-      const result = await calculateFitScore(dateStr, waterIntakeBand);
+      const result = await calculateFitScore(dateStr, waterIntakeBand, alcoholBand);
 
       console.log(`[FITSCORE] Result received: ${result.fitScore}/10`);
       setFitScoreResult(result);
@@ -1659,6 +1677,7 @@ export default function FitScoreScreen() {
         dateLabel: getDateLabel(),
         timingSignals: fitScoreData.timingSignals,
         waterIntakeBand: fitScoreData.waterIntakeBand ?? waterIntakeBand ?? null,
+        alcoholBand: fitScoreData.alcoholBand ?? alcoholBand ?? null,
         dailyHabits: habitsContext,
         advancedRecoverySignals: fitScoreData.advancedRecoverySignals,
         sleepDebtMinutes: fitScoreData.sleepDebtMinutes,
@@ -1732,6 +1751,19 @@ export default function FitScoreScreen() {
         await AsyncStorage.setItem(`waterIntake_${dateStr}`, newBand);
       } else {
         await AsyncStorage.removeItem(`waterIntake_${dateStr}`);
+      }
+    } catch { /* graceful */ }
+  };
+
+  const handleAlcoholPick = async (band: AlcoholBand) => {
+    const newBand = alcoholBand === band ? null : band; // tap again to deselect
+    setAlcoholBand(newBand);
+    const dateStr = formatDate(selectedDate);
+    try {
+      if (newBand) {
+        await AsyncStorage.setItem(`alcoholIntake_${dateStr}`, newBand);
+      } else {
+        await AsyncStorage.removeItem(`alcoholIntake_${dateStr}`);
       }
     } catch { /* graceful */ }
   };
@@ -2490,6 +2522,33 @@ export default function FitScoreScreen() {
         </View>
       )}
 
+      {/* Alcohol picker — below water, today/yesterday only */}
+      {!isPastDate && !showFitScoreResult && (
+        <View style={styles.waterSection}>
+          <View style={styles.waterHeader}>
+            <Ionicons name="beer-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Alcohol today?</Text>
+            {alcoholBand && alcoholBand !== '0' && (
+              <Text style={styles.waterSelected}>{alcoholBand} drinks</Text>
+            )}
+          </View>
+          <View style={styles.waterChips}>
+            {(['0', '1–2', '3–4', '5+'] as AlcoholBand[]).map((band) => (
+              <TouchableOpacity
+                key={band}
+                style={[styles.waterChip, alcoholBand === band && styles.waterChipActive]}
+                onPress={() => handleAlcoholPick(band)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.waterChipText, alcoholBand === band && styles.waterChipTextActive]}>
+                  {band === '0' ? 'None' : band}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+
       {/* Daily Habits Check-in — today/yesterday only */}
       {!isPastDate && !showFitScoreResult && (
         <View style={styles.habitsSection}>
@@ -2656,6 +2715,50 @@ export default function FitScoreScreen() {
                 </TouchableOpacity>
               )}
             </View>
+          )}
+
+          {/* Prescribed session banner — shown when team plan exists for today */}
+          {prescribedSession && isToday && !showFitScoreResult && (
+            <TouchableOpacity
+              style={styles.prescribedSessionCard}
+              onPress={() => {
+                setTrainingType(prescribedSession.sessionTitle);
+                setTrainingGoal('');
+                setTrainingIntensity(
+                  prescribedSession.intensity
+                    ? prescribedSession.intensity.charAt(0).toUpperCase() + prescribedSession.intensity.slice(1)
+                    : ''
+                );
+                setTrainingComment(prescribedSession.description || prescribedSession.coachNotes || '');
+                if (prescribedSession.durationMinutes) {
+                  setTrainingDurationHours(Math.floor(prescribedSession.durationMinutes / 60));
+                  setTrainingDurationMinutes(prescribedSession.durationMinutes % 60);
+                }
+                setTrainingSkipped(false);
+                setTrainingEditing(true);
+              }}
+              activeOpacity={0.75}
+            >
+              <View style={styles.prescribedSessionHeader}>
+                <Ionicons name="clipboard-outline" size={16} color={colors.accent} />
+                <Text style={styles.prescribedSessionLabel}>Today's session from your coach</Text>
+              </View>
+              <Text style={styles.prescribedSessionTitle}>{prescribedSession.sessionTitle}</Text>
+              {(prescribedSession.durationMinutes || prescribedSession.intensity) && (
+                <Text style={styles.prescribedSessionMeta}>
+                  {prescribedSession.durationMinutes ? `${prescribedSession.durationMinutes} min` : ''}
+                  {prescribedSession.durationMinutes && prescribedSession.intensity ? '  ·  ' : ''}
+                  {prescribedSession.intensity ? prescribedSession.intensity.charAt(0).toUpperCase() + prescribedSession.intensity.slice(1) : ''}
+                </Text>
+              )}
+              {prescribedSession.description && (
+                <Text style={styles.prescribedSessionDescription} numberOfLines={2}>{prescribedSession.description}</Text>
+              )}
+              <View style={styles.prescribedSessionCta}>
+                <Text style={styles.prescribedSessionCtaText}>Tap to pre-fill</Text>
+                <Ionicons name="arrow-forward" size={14} color={colors.accent} />
+              </View>
+            </TouchableOpacity>
           )}
 
           {!hasTraining && !trainingEditing ? (
@@ -4907,6 +5010,52 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.accent + '40',
     borderStyle: 'dashed',
+  },
+  prescribedSessionCard: {
+    backgroundColor: colors.accent + '12',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.accent + '35',
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: spacing.xs,
+  },
+  prescribedSessionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  prescribedSessionLabel: {
+    fontSize: 11,
+    color: colors.accent,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  prescribedSessionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  prescribedSessionMeta: {
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  prescribedSessionDescription: {
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
+  prescribedSessionCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: spacing.xs,
+  },
+  prescribedSessionCtaText: {
+    fontSize: 13,
+    color: colors.accent,
+    fontWeight: '600',
   },
   mealsGrid: {
     flexDirection: 'row',

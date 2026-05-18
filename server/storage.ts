@@ -1,4 +1,4 @@
-import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, improvementPlans, planHabits, habitCheckins, manualCheckins, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext, type ImprovementPlan, type PlanHabit, type HabitCheckin, type ManualCheckin, type InsertManualCheckin } from "@shared/schema";
+import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, improvementPlans, planHabits, habitCheckins, manualCheckins, teams, teamMembers, cheatDays, fitScores, teamTrainingPlan, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext, type ImprovementPlan, type PlanHabit, type HabitCheckin, type ManualCheckin, type InsertManualCheckin, type Team, type TeamMember, type CheatDay, type FitScore, type TeamTrainingPlan } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, ne, sql } from "drizzle-orm";
 
@@ -18,6 +18,7 @@ export interface IStorage {
   // Training data operations
   createTrainingData(data: InsertTrainingData): Promise<TrainingData>;
   getTrainingDataByUserAndDate(userId: string, date: string): Promise<TrainingData[]>;
+  getTrainingDataByUserAndDateRange(userId: string, from: string, to: string): Promise<TrainingData[]>;
   updateTrainingData(id: number, data: Partial<InsertTrainingData>): Promise<TrainingData>;
   deleteTrainingData(id: number): Promise<void>;
 
@@ -76,6 +77,29 @@ export interface IStorage {
 
   // User list
   getAllUsers(): Promise<User[]>;
+
+  // Team operations
+  createTeam(data: { name: string; sport: string; joinCode: string; coachToken: string; createdBy: string }): Promise<Team>;
+  getTeamByJoinCode(code: string): Promise<Team | undefined>;
+  getTeamByCoachToken(token: string): Promise<Team | undefined>;
+  getTeamById(id: number): Promise<Team | undefined>;
+  addTeamMember(teamId: number, userId: string, role?: string): Promise<TeamMember>;
+  getTeamMembers(teamId: number): Promise<(TeamMember & { displayName: string | null; email: string })[]>;
+  getTeamMembership(userId: string): Promise<{ team: Team; member: TeamMember } | undefined>;
+  isTeamMember(teamId: number, userId: string): Promise<boolean>;
+  updateTeamMemberGroup(teamId: number, userId: string, groupName: string): Promise<void>;
+  updateTeamPhase(teamId: number, phase: string, weekStart?: string): Promise<void>;
+  removeTeamMember(teamId: number, userId: string): Promise<void>;
+  getCheatDay(userId: string, teamId: number, weekStart: string): Promise<CheatDay | undefined>;
+  upsertCheatDay(userId: string, teamId: number, weekStart: string, cheatDate: string): Promise<CheatDay>;
+  getFitScoresByUserAndWeek(userId: string, weekStart: string, weekEnd: string): Promise<FitScore[]>;
+  getMealsByUserAndDateRange(userId: string, from: string, to: string): Promise<Meal[]>;
+
+  // Team training plan operations
+  upsertTeamTrainingPlan(teamId: number, planDate: string, data: { sessionTitle: string; type: string; durationMinutes?: number; intensity?: string; description?: string; coachNotes?: string }): Promise<TeamTrainingPlan>;
+  getTeamTrainingPlanForDate(teamId: number, planDate: string): Promise<TeamTrainingPlan | undefined>;
+  getTeamTrainingPlanForWeek(teamId: number, weekStart: string): Promise<TeamTrainingPlan[]>;
+  deleteTeamTrainingPlan(teamId: number, planDate: string): Promise<void>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -143,6 +167,12 @@ export class DatabaseStorage implements IStorage {
   async getTrainingDataByUserAndDate(userId: string, date: string): Promise<TrainingData[]> {
     return await db.select().from(trainingData)
       .where(and(eq(trainingData.userId, userId), eq(trainingData.date, date)));
+  }
+
+  async getTrainingDataByUserAndDateRange(userId: string, from: string, to: string): Promise<TrainingData[]> {
+    return await db.select().from(trainingData)
+      .where(and(eq(trainingData.userId, userId), sql`${trainingData.date} >= ${from} AND ${trainingData.date} <= ${to}`))
+      .orderBy(trainingData.date);
   }
 
   async updateTrainingData(id: number, data: Partial<InsertTrainingData>): Promise<TrainingData> {
@@ -400,6 +430,151 @@ export class DatabaseStorage implements IStorage {
 
   async getAllUsers(): Promise<User[]> {
     return db.select().from(users);
+  }
+
+  // ── TEAM OPERATIONS ──────────────────────────────────────────────────────────
+
+  async createTeam(data: { name: string; sport: string; joinCode: string; coachToken: string; createdBy: string }): Promise<Team> {
+    const [team] = await db.insert(teams).values(data).returning();
+    return team;
+  }
+
+  async getTeamByJoinCode(code: string): Promise<Team | undefined> {
+    const [team] = await db.select().from(teams).where(eq(teams.joinCode, code));
+    return team || undefined;
+  }
+
+  async getTeamByCoachToken(token: string): Promise<Team | undefined> {
+    const [team] = await db.select().from(teams).where(eq(teams.coachToken, token));
+    return team || undefined;
+  }
+
+  async getTeamById(id: number): Promise<Team | undefined> {
+    const [team] = await db.select().from(teams).where(eq(teams.id, id));
+    return team || undefined;
+  }
+
+  async addTeamMember(teamId: number, userId: string, role = 'member'): Promise<TeamMember> {
+    const [member] = await db.insert(teamMembers).values({ teamId, userId, role }).returning();
+    return member;
+  }
+
+  async getTeamMembers(teamId: number): Promise<(TeamMember & { displayName: string | null; email: string })[]> {
+    const rows = await db
+      .select({
+        id: teamMembers.id,
+        teamId: teamMembers.teamId,
+        userId: teamMembers.userId,
+        role: teamMembers.role,
+        groupName: teamMembers.groupName,
+        joinedAt: teamMembers.joinedAt,
+        displayName: users.displayName,
+        email: users.email,
+      })
+      .from(teamMembers)
+      .innerJoin(users, eq(teamMembers.userId, users.id))
+      .where(eq(teamMembers.teamId, teamId));
+    return rows;
+  }
+
+  async getTeamMembership(userId: string): Promise<{ team: Team; member: TeamMember } | undefined> {
+    const [row] = await db
+      .select({ team: teams, member: teamMembers })
+      .from(teamMembers)
+      .innerJoin(teams, eq(teamMembers.teamId, teams.id))
+      .where(eq(teamMembers.userId, userId));
+    return row || undefined;
+  }
+
+  async isTeamMember(teamId: number, userId: string): Promise<boolean> {
+    const [row] = await db.select({ id: teamMembers.id })
+      .from(teamMembers)
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+    return !!row;
+  }
+
+  async updateTeamMemberGroup(teamId: number, userId: string, groupName: string): Promise<void> {
+    await db.update(teamMembers)
+      .set({ groupName })
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+  }
+
+  async updateTeamPhase(teamId: number, phase: string, weekStart?: string): Promise<void> {
+    await db.update(teams)
+      .set({ phase, ...(weekStart ? { weekStart } : {}) })
+      .where(eq(teams.id, teamId));
+  }
+
+  async removeTeamMember(teamId: number, userId: string): Promise<void> {
+    await db.delete(teamMembers)
+      .where(and(eq(teamMembers.teamId, teamId), eq(teamMembers.userId, userId)));
+  }
+
+  async getCheatDay(userId: string, teamId: number, weekStart: string): Promise<CheatDay | undefined> {
+    const [row] = await db.select().from(cheatDays)
+      .where(and(eq(cheatDays.userId, userId), eq(cheatDays.teamId, teamId), eq(cheatDays.weekStart, weekStart)));
+    return row || undefined;
+  }
+
+  async upsertCheatDay(userId: string, teamId: number, weekStart: string, cheatDate: string): Promise<CheatDay> {
+    const [row] = await db.insert(cheatDays)
+      .values({ userId, teamId, weekStart, cheatDate })
+      .onConflictDoUpdate({ target: [cheatDays.userId, cheatDays.teamId, cheatDays.weekStart], set: { cheatDate } })
+      .returning();
+    return row;
+  }
+
+  async getFitScoresByUserAndWeek(userId: string, weekStart: string, weekEnd: string): Promise<FitScore[]> {
+    return db.select().from(fitScores)
+      .where(and(
+        eq(fitScores.userId, userId),
+        sql`${fitScores.date} >= ${weekStart} AND ${fitScores.date} <= ${weekEnd}`,
+      ));
+  }
+
+  async getMealsByUserAndDateRange(userId: string, from: string, to: string): Promise<Meal[]> {
+    return db.select().from(meals)
+      .where(and(
+        eq(meals.userId, userId),
+        sql`${meals.date} >= ${from} AND ${meals.date} <= ${to}`,
+      ))
+      .orderBy(meals.date);
+  }
+
+  async upsertTeamTrainingPlan(teamId: number, planDate: string, data: { sessionTitle: string; type: string; durationMinutes?: number; intensity?: string; description?: string; coachNotes?: string }): Promise<TeamTrainingPlan> {
+    const [row] = await db.insert(teamTrainingPlan)
+      .values({ teamId, planDate, ...data })
+      .onConflictDoUpdate({
+        target: [teamTrainingPlan.teamId, teamTrainingPlan.planDate],
+        set: { sessionTitle: data.sessionTitle, type: data.type, durationMinutes: data.durationMinutes ?? null, intensity: data.intensity ?? null, description: data.description ?? null, coachNotes: data.coachNotes ?? null },
+      })
+      .returning();
+    return row;
+  }
+
+  async getTeamTrainingPlanForDate(teamId: number, planDate: string): Promise<TeamTrainingPlan | undefined> {
+    const [row] = await db.select().from(teamTrainingPlan)
+      .where(and(eq(teamTrainingPlan.teamId, teamId), eq(teamTrainingPlan.planDate, planDate)));
+    return row;
+  }
+
+  async getTeamTrainingPlanForWeek(teamId: number, weekStart: string): Promise<TeamTrainingPlan[]> {
+    const weekEnd = (() => {
+      const d = new Date(weekStart);
+      d.setDate(d.getDate() + 6);
+      return d.toISOString().slice(0, 10);
+    })();
+    return db.select().from(teamTrainingPlan)
+      .where(and(
+        eq(teamTrainingPlan.teamId, teamId),
+        sql`${teamTrainingPlan.planDate} >= ${weekStart} AND ${teamTrainingPlan.planDate} <= ${weekEnd}`,
+      ))
+      .orderBy(teamTrainingPlan.planDate);
+  }
+
+  async deleteTeamTrainingPlan(teamId: number, planDate: string): Promise<void> {
+    await db.delete(teamTrainingPlan)
+      .where(and(eq(teamTrainingPlan.teamId, teamId), eq(teamTrainingPlan.planDate, planDate)));
   }
 }
 

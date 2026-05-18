@@ -74,7 +74,9 @@ export default function OnboardingEmailAuth() {
       await setAuthToken(data.token);
       console.log(`[EMAIL AUTH] ${mode === 'register' ? 'Registered' : 'Signed in'}: ${data.userId}`);
 
-      if (global.refreshOnboardingStatus) {
+      if (route.params?.joinTeam) {
+        navigation.navigate('JoinTeamOnboarding');
+      } else if (global.refreshOnboardingStatus) {
         global.refreshOnboardingStatus();
       }
     } catch (error) {

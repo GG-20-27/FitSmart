@@ -2064,7 +2064,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // POST /api/auth/register — create an email/password account (manual-mode user)
   app.post('/api/auth/register', async (req, res) => {
     try {
-      const { email, password } = req.body ?? {};
+      const { email, password, displayName } = req.body ?? {};
       if (!email || !password) {
         return res.status(400).json({ error: 'email and password are required' });
       }
@@ -2092,6 +2092,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         authProvider: 'email',
         dataSource: 'manual',
         passwordHash,
+        ...(displayName ? { displayName: displayName.trim() } : {}),
       });
       console.log(`[EMAIL AUTH] New user registered: ${userId}`);
 
@@ -2162,6 +2163,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       res.status(500).json({ error: 'Failed to fetch user', details: message });
+    }
+  });
+
+  // PATCH /api/auth/me — update own display name
+  app.patch('/api/auth/me', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      const { displayName } = req.body ?? {};
+      if (displayName && typeof displayName === 'string') {
+        await db.update(users).set({ displayName: displayName.trim() }).where(eq(users.id, userId));
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to update profile' });
     }
   });
 
@@ -5106,7 +5122,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/fitscore/calculate', requireJWTAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req);
-      const { date, waterIntakeBand } = req.body;
+      const { date, waterIntakeBand, alcoholBand } = req.body;
       const tz = process.env.USER_TZ || 'Europe/Zurich';
       const targetDate = date || todayKey(tz);
       const fitscoreDataSource = (req as any).dataSource || 'whoop';
@@ -5414,6 +5430,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         );
         if (lateMealFlag) nutritionScore -= 0.5;
 
+        // Alcohol penalty
+        if (alcoholBand === '1–2') nutritionScore -= 0.5;
+        else if (alcoholBand === '3–4') nutritionScore -= 2.0;
+        else if (alcoholBand === '5+') nutritionScore -= 3.0;
+
         // Clamp [1, 10]
         nutritionScore = Math.max(1, Math.min(10, nutritionScore));
 
@@ -5546,6 +5567,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timingSignals,
         nutritionDayContext,
         waterIntakeBand: (waterIntakeBand as string) || null,
+        alcoholBand: (alcoholBand as string) || null,
         timestamp: new Date().toISOString(),
       };
 
@@ -5623,6 +5645,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dateLabel, // e.g. "today", "yesterday", "Feb 21"
         timingSignals,
         waterIntakeBand,
+        alcoholBand,
         dailyHabits, // { total, completed, completedList, missingList }
         advancedRecoverySignals,
         sleepDebtMinutes,
@@ -5776,6 +5799,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dateLabel: dateLabel || 'today',
         timingSignals: timingSignals || undefined,
         waterIntakeBand: waterIntakeBand || undefined,
+        alcoholBand: alcoholBand || undefined,
         dailyHabits: dailyHabits || undefined,
         advancedRecoverySignals: advancedRecoverySignals || undefined,
         sleepDebtMinutes: sleepDebtMinutes ?? undefined,
@@ -6085,6 +6109,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } catch { /* graceful */ }
 
+      // Check if user is on a team with a prescribed session for today
+      let prescribedSession: import('./services/openAiService').FitLookGenerationInput['prescribedSession'] = null;
+      try {
+        const membership = await storage.getTeamMembership(userId);
+        if (membership) {
+          const plan = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal);
+          if (plan) {
+            prescribedSession = {
+              sessionTitle: plan.sessionTitle,
+              type: plan.type,
+              durationMinutes: plan.durationMinutes,
+              intensity: plan.intensity,
+              description: plan.description,
+              coachNotes: plan.coachNotes,
+            };
+            console.log(`[FITLOOK] Prescribed session found for team ${membership.team.id}: ${plan.sessionTitle}`);
+          }
+        }
+      } catch { /* graceful — don't block FitLook if team lookup fails */ }
+
       // Generate via AI
       const payload = await openAIService.generateFitLook({
         dateLocal: todayLocal,
@@ -6098,12 +6142,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         yesterdayFitScore,
         yesterdayBreakdown,
         pillarPattern7d,
-        plannedTraining,
+        plannedTraining: prescribedSession ? undefined : plannedTraining, // prescribed overrides calendar
         userGoalTitle,
         injuryNotes,
         userContextSummary: fitlookContextSummary,
         advancedRecoverySignals: fitlookDataSource !== 'manual' ? fitlookAdvancedSignals : undefined,
         sleepDebtMinutes: fitlookDataSource !== 'manual' ? fitlookSleepDebtMinutes : undefined,
+        prescribedSession,
       });
 
       // Store immutably
@@ -7770,8 +7815,465 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ── TEAM COMPETITION ─────────────────────────────────────────────────────────
+
+  function generateJoinCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  }
+
+  // Monday of the week containing `date` (YYYY-MM-DD)
+  function getWeekStart(date: Date): string {
+    const d = new Date(date);
+    const day = d.getUTCDay(); // 0=Sun, 1=Mon...
+    const diff = (day === 0 ? -6 : 1 - day);
+    d.setUTCDate(d.getUTCDate() + diff);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function getWeekEnd(weekStart: string): string {
+    const d = new Date(weekStart + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 6);
+    return d.toISOString().slice(0, 10);
+  }
+
+  // Compute week average for a member, handling cheat day logic.
+  // First missed day → cheat (excluded, divides by 6). Second+ missed → 0 in avg.
+  async function computeWeekAvg(userId: string, teamId: number, weekStart: string): Promise<{ avg: number; daysLogged: number; cheatUsed: boolean }> {
+    const weekEnd = getWeekEnd(weekStart);
+    const scores = await storage.getFitScoresByUserAndWeek(userId, weekStart, weekEnd);
+    const scoresByDate: Record<string, number> = {};
+    for (const s of scores) scoresByDate[s.date] = s.score;
+
+    const days: string[] = [];
+    const start = new Date(weekStart + 'T00:00:00Z');
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setUTCDate(d.getUTCDate() + i);
+      days.push(d.toISOString().slice(0, 10));
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    // Only consider days up to and including today
+    const pastDays = days.filter(d => d <= today);
+
+    let cheatUsed = false;
+    let cheatDate: string | undefined;
+    const existingCheat = await storage.getCheatDay(userId, teamId, weekStart);
+    if (existingCheat?.cheatDate) {
+      cheatUsed = true;
+      cheatDate = existingCheat.cheatDate;
+    }
+
+    let sum = 0;
+    let missedCount = 0;
+    let daysLogged = 0;
+
+    for (const day of pastDays) {
+      if (scoresByDate[day] != null) {
+        sum += scoresByDate[day];
+        daysLogged++;
+      } else {
+        // Missed day
+        if (!cheatUsed) {
+          // First miss → assign as cheat day
+          cheatUsed = true;
+          cheatDate = day;
+          await storage.upsertCheatDay(userId, teamId, weekStart, day);
+          // Cheat day excluded from numerator and denominator
+        } else if (day !== cheatDate) {
+          // Second+ miss → counts as 0
+          missedCount++;
+        }
+      }
+    }
+
+    // Denominator: pastDays count minus cheat day (if used and cheat day is in pastDays)
+    const cheatInPast = cheatDate && pastDays.includes(cheatDate);
+    const denominator = pastDays.length - (cheatInPast ? 1 : 0);
+    const avg = denominator > 0 ? sum / denominator : 0;
+
+    return { avg: Math.round(avg * 10) / 10, daysLogged, cheatUsed };
+  }
+
+  // POST /api/teams/create
+  app.post('/api/teams/create', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const { name, sport } = req.body;
+      if (!name || !sport) return res.status(400).json({ error: 'name and sport required' });
+
+      // Ensure user isn't already on a team
+      const existing = await storage.getTeamMembership(userId);
+      if (existing) return res.status(409).json({ error: 'Already on a team' });
+
+      const joinCode = generateJoinCode();
+      const coachToken = crypto.randomUUID();
+      const team = await storage.createTeam({ name, sport, joinCode, coachToken, createdBy: userId });
+      await storage.addTeamMember(team.id, userId, 'owner');
+
+      res.json({ team, joinCode, coachToken });
+    } catch (err) {
+      console.error('[Teams] create error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/teams/join
+  app.post('/api/teams/join', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const { joinCode } = req.body;
+      if (!joinCode) return res.status(400).json({ error: 'joinCode required' });
+
+      const existing = await storage.getTeamMembership(userId);
+      if (existing) return res.status(409).json({ error: 'Already on a team' });
+
+      const team = await storage.getTeamByJoinCode(joinCode.toUpperCase());
+      if (!team) return res.status(404).json({ error: 'Team not found' });
+
+      const member = await storage.addTeamMember(team.id, userId, 'member');
+      res.json({ team, member });
+    } catch (err) {
+      console.error('[Teams] join error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/teams/my-team
+  app.get('/api/teams/my-team', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const membership = await storage.getTeamMembership(userId);
+      if (!membership) return res.json({ team: null, member: null });
+      res.json(membership);
+    } catch (err) {
+      console.error('[Teams] my-team error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/teams/:teamId/leaderboard
+  app.get('/api/teams/:teamId/leaderboard', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const teamId = parseInt(req.params.teamId, 10);
+
+      const isMember = await storage.isTeamMember(teamId, userId);
+      if (!isMember) return res.status(403).json({ error: 'Not a member of this team' });
+
+      const team = await storage.getTeamById(teamId);
+      if (!team) return res.status(404).json({ error: 'Team not found' });
+
+      const members = await storage.getTeamMembers(teamId);
+
+      // Determine current week start
+      const weekStart = team.weekStart ?? getWeekStart(new Date());
+
+      // During assessment — return presence data only (how many days logged per player)
+      if (team.phase === 'assessment') {
+        const weekEnd = getWeekEnd(weekStart);
+        const today = new Date().toISOString().slice(0, 10);
+        const weekStartDate = new Date(weekStart + 'T00:00:00Z');
+        const daysElapsed = Math.min(7, Math.max(0, Math.floor((new Date(today).getTime() - weekStartDate.getTime()) / 86400000) + 1));
+        const daysRemaining = Math.max(0, 7 - daysElapsed);
+
+        const progress = await Promise.all(members.map(async (m) => {
+          const scores = await storage.getFitScoresByUserAndWeek(m.userId, weekStart, weekEnd);
+          return { userId: m.userId, displayName: m.displayName ?? m.email, daysLogged: scores.length };
+        }));
+
+        return res.json({ phase: 'assessment', daysRemaining, weekStart, progress });
+      }
+
+      // Competing phase — compute scores per group
+      const myMembership = members.find(m => m.userId === userId);
+      const myGroup = myMembership?.groupName;
+
+      // Only show members in same group
+      const groupMembers = myGroup ? members.filter(m => m.groupName === myGroup) : members;
+
+      const scored = await Promise.all(groupMembers.map(async (m) => {
+        const { avg, daysLogged, cheatUsed } = await computeWeekAvg(m.userId, teamId, weekStart);
+        const cheatDay = await storage.getCheatDay(m.userId, teamId, weekStart);
+        return {
+          userId: m.userId,
+          displayName: m.displayName ?? m.email,
+          weekAvg: avg,
+          daysLogged,
+          cheatUsed,
+          cheatDate: cheatDay?.cheatDate ?? null,
+          isYou: m.userId === userId,
+        };
+      }));
+
+      scored.sort((a, b) => b.weekAvg - a.weekAvg);
+      const ranked = scored.map((s, i) => ({ ...s, rank: i + 1 }));
+
+      res.json({ phase: 'competing', groupName: myGroup, weekStart, leaderboard: ranked });
+    } catch (err) {
+      console.error('[Teams] leaderboard error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/coach/team?token=XXX  (no JWT — coach access via secret token)
+  app.get('/api/coach/team', async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.status(400).json({ error: 'token required' });
+
+      const team = await storage.getTeamByCoachToken(token);
+      if (!team) return res.status(404).json({ error: 'Team not found' });
+
+      const members = await storage.getTeamMembers(team.id);
+      const weekStart = team.weekStart ?? getWeekStart(new Date());
+      const weekEnd = getWeekEnd(weekStart);
+
+      // Build display window — use client-provided from/to, or fall back to last 7 days
+      const fromParam = req.query.from as string | undefined;
+      const toParam = req.query.to as string | undefined;
+      const days: string[] = [];
+      if (fromParam && toParam && /^\d{4}-\d{2}-\d{2}$/.test(fromParam) && /^\d{4}-\d{2}-\d{2}$/.test(toParam)) {
+        const cur = new Date(fromParam + 'T00:00:00Z');
+        const end = new Date(toParam + 'T00:00:00Z');
+        while (cur <= end) {
+          days.push(cur.toISOString().slice(0, 10));
+          cur.setUTCDate(cur.getUTCDate() + 1);
+        }
+      } else {
+        const today = new Date();
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(today);
+          d.setUTCDate(d.getUTCDate() - i);
+          days.push(d.toISOString().slice(0, 10));
+        }
+      }
+
+      const players = await Promise.all(members.map(async (m) => {
+        const [scores, meals, trainingSessions, checkins] = await Promise.all([
+          storage.getFitScoresByUserAndWeek(m.userId, days[0], days[days.length - 1]),
+          storage.getMealsByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
+          storage.getTrainingDataByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
+          storage.getManualCheckins(m.userId, days[0], days[days.length - 1]),
+        ]);
+        const scoresByDate: Record<string, { score: number; nutrition: number | null; training: number | null; recovery: number | null }> = {};
+        for (const s of scores) {
+          scoresByDate[s.date] = { score: s.score, nutrition: s.nutritionScore ?? null, training: s.trainingScore ?? null, recovery: s.recoveryScore ?? null };
+        }
+        const mealsByDate: Record<string, { filename: string; mealType: string | null; mealNotes: string | null; uploadedAt: string | null }[]> = {};
+        for (const meal of meals) {
+          if (!mealsByDate[meal.date]) mealsByDate[meal.date] = [];
+          mealsByDate[meal.date].push({ filename: meal.filename, mealType: meal.mealType, mealNotes: meal.mealNotes, uploadedAt: meal.uploadedAt?.toISOString() ?? null });
+        }
+        const trainingByDate: Record<string, { type: string; duration: number; intensity: string | null; score: number | null; skipped: boolean; comment: string | null }[]> = {};
+        for (const t of trainingSessions) {
+          if (!trainingByDate[t.date]) trainingByDate[t.date] = [];
+          trainingByDate[t.date].push({ type: t.type, duration: t.duration, intensity: t.intensity, score: t.trainingScore ?? null, skipped: t.skipped, comment: t.comment ?? null });
+        }
+        const checkinByDate: Record<string, { recovery: number; energy: number; sleepHours: number; sleepQuality: string }> = {};
+        for (const c of checkins) {
+          checkinByDate[c.date] = { recovery: c.recovery, energy: c.energy, sleepHours: c.sleepHours, sleepQuality: c.sleepQuality };
+        }
+        return {
+          userId: m.userId,
+          displayName: m.displayName ?? m.email.split('@')[0],
+          role: m.role,
+          groupName: m.groupName,
+          days,
+          scoresByDate,
+          mealsByDate,
+          trainingByDate,
+          checkinByDate,
+        };
+      }));
+
+      res.json({ team: { id: team.id, name: team.name, sport: team.sport, phase: team.phase, weekStart }, players });
+    } catch (err) {
+      console.error('[Teams] coach endpoint error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/admin/teams/:teamId/assign-groups  (admin only, manual curl)
+  app.post('/api/admin/teams/:teamId/assign-groups', requireAdmin, async (req, res) => {
+    try {
+      const teamId = parseInt(req.params.teamId, 10);
+      const { groups, weekStart } = req.body as {
+        groups: { name: string; userIds: string[] }[];
+        weekStart: string;
+      };
+      if (!groups || !weekStart) return res.status(400).json({ error: 'groups and weekStart required' });
+
+      for (const group of groups) {
+        for (const uid of group.userIds) {
+          await storage.updateTeamMemberGroup(teamId, uid, group.name);
+        }
+      }
+      await storage.updateTeamPhase(teamId, 'competing', weekStart);
+      res.json({ ok: true, teamId, phase: 'competing', weekStart });
+    } catch (err) {
+      console.error('[Teams] assign-groups error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/admin/teams/:teamId/start-now  (admin or coach-token)
+  // Skips assessment — immediately flips to competing with all current members in one group.
+  // Use for friendly competitions where no performance-based group split is needed.
+  // Optional body: { groupName: "All" }  (defaults to "All")
+  app.post('/api/admin/teams/:teamId/start-now', async (req, res) => {
+    try {
+      const teamId = parseInt(req.params.teamId, 10);
+      const team = await storage.getTeamById(teamId);
+      if (!team) return res.status(404).json({ error: 'Team not found' });
+
+      // Auth: admin JWT or coach token
+      const coachToken = req.query.token as string | undefined;
+      if (coachToken) {
+        if (coachToken !== team.coachToken) return res.status(403).json({ error: 'Invalid coach token' });
+      } else {
+        const userId = (req as any).userId as string | undefined;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const user = await storage.getUser(userId);
+        if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+      }
+
+      const groupName = (req.body?.groupName as string | undefined) ?? 'All';
+      const tz = 'Europe/Zurich';
+      const today = new Date().toLocaleDateString('sv-SE', { timeZone: tz });
+      // Find Monday of current week
+      const d = new Date(today);
+      const day = d.getDay();
+      const diff = day === 0 ? -6 : 1 - day;
+      d.setDate(d.getDate() + diff);
+      const weekStart = d.toISOString().slice(0, 10);
+
+      const members = await storage.getTeamMembers(teamId);
+      for (const m of members) {
+        await storage.updateTeamMemberGroup(teamId, m.userId, groupName);
+      }
+      await storage.updateTeamPhase(teamId, 'competing', weekStart);
+
+      res.json({ ok: true, teamId, phase: 'competing', weekStart, groupName, membersUpdated: members.length });
+    } catch (err) {
+      console.error('[Teams] start-now error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // DELETE /api/teams/leave
+  app.delete('/api/teams/leave', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const membership = await storage.getTeamMembership(userId);
+      if (!membership) return res.status(404).json({ error: 'Not on a team' });
+      await storage.removeTeamMember(membership.team.id, userId);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[Teams] leave error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/admin/teams/:teamId/training-plan  (admin or coach-token)
+  // Accepts a week's worth of sessions — upserts each date.
+  // Body: { weekPlan: [{ date, sessionTitle, type, durationMinutes?, intensity?, description?, coachNotes? }] }
+  // Also accepts a coach token via query: ?token=XXX (no JWT required in that case)
+  app.post('/api/admin/teams/:teamId/training-plan', async (req, res) => {
+    try {
+      const teamId = parseInt(req.params.teamId, 10);
+      const team = await storage.getTeamById(teamId);
+      if (!team) return res.status(404).json({ error: 'Team not found' });
+
+      // Auth: admin JWT OR valid coach token
+      const coachToken = req.query.token as string | undefined;
+      if (coachToken) {
+        if (coachToken !== team.coachToken) return res.status(403).json({ error: 'Invalid coach token' });
+      } else {
+        // Fall through to admin check
+        const userId = (req as any).userId as string | undefined;
+        if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+        const user = await storage.getUser(userId);
+        if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+      }
+
+      const { weekPlan } = req.body as { weekPlan: { date: string; sessionTitle: string; type: string; durationMinutes?: number; intensity?: string; description?: string; coachNotes?: string }[] };
+      if (!Array.isArray(weekPlan) || weekPlan.length === 0) {
+        return res.status(400).json({ error: 'weekPlan array required' });
+      }
+
+      const results = [];
+      for (const session of weekPlan) {
+        if (!session.date || !session.sessionTitle || !session.type) {
+          return res.status(400).json({ error: 'Each session needs date, sessionTitle, type' });
+        }
+        const row = await storage.upsertTeamTrainingPlan(teamId, session.date, {
+          sessionTitle: session.sessionTitle,
+          type: session.type,
+          durationMinutes: session.durationMinutes,
+          intensity: session.intensity,
+          description: session.description,
+          coachNotes: session.coachNotes,
+        });
+        results.push(row);
+      }
+      res.json({ ok: true, saved: results.length, sessions: results });
+    } catch (err) {
+      console.error('[Teams] training-plan upsert error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/teams/training-plan/today  (JWT — team member)
+  // Returns today's prescribed session for the caller's team, or null
+  app.get('/api/teams/training-plan/today', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const membership = await storage.getTeamMembership(userId);
+      if (!membership) return res.json({ session: null });
+
+      const tz = 'Europe/Zurich';
+      const todayLocal = new Date().toLocaleDateString('sv-SE', { timeZone: tz });
+      const session = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal);
+      res.json({ session: session ?? null });
+    } catch (err) {
+      console.error('[Teams] training-plan/today error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/teams/training-plan/week?date=YYYY-MM-DD  (JWT — team member or coach token)
+  app.get('/api/teams/training-plan/week', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const membership = await storage.getTeamMembership(userId);
+      if (!membership) return res.json({ sessions: [] });
+
+      const dateParam = (req.query.date as string) || new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zurich' });
+      const weekStart = (() => {
+        const d = new Date(dateParam);
+        const day = d.getDay();
+        const diff = (day === 0 ? -6 : 1 - day);
+        d.setDate(d.getDate() + diff);
+        return d.toISOString().slice(0, 10);
+      })();
+      const sessions = await storage.getTeamTrainingPlanForWeek(membership.team.id, weekStart);
+      res.json({ sessions, weekStart });
+    } catch (err) {
+      console.error('[Teams] training-plan/week error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
   // Static file serving
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+  app.use('/coach', express.static(path.join(process.cwd(), 'public/coach')));
+  app.get('/coach', (req, res) => {
+    res.sendFile(path.join(process.cwd(), 'public/coach/index.html'));
+  });
 
   // ── FitRoast Sunday auto-generation cron ──────────────────────────────────
   // Runs every Sunday at 23:59 Zurich time — fallback for users who forgot

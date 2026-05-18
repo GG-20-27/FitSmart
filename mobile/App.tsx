@@ -10,8 +10,10 @@ import ProfileScreen from './src/screens/ProfileScreen';
 import GoalsScreen from './src/screens/GoalsScreen';
 import OnboardingNavigator from './src/navigation/OnboardingNavigator';
 import InsightsNavigator from './src/navigation/InsightsNavigator';
+import TeamsNavigator from './src/navigation/TeamsNavigator';
 import MorningCheckInScreen from './src/screens/MorningCheckInScreen';
 import { API_BASE_URL, setAuthToken, hasUserToken, getDataSource, apiRequest } from './src/api/client';
+import { getMyTeam } from './src/api/teams';
 import { navigationTheme } from './src/ui/navigationTheme';
 import { colors, spacing, radii, typography } from './src/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -158,7 +160,7 @@ const networkBannerStyles = StyleSheet.create({
 
 const Tab = createBottomTabNavigator();
 
-function MainTabs() {
+function MainTabs({ hasTeam }: { hasTeam: boolean }) {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -185,6 +187,8 @@ function MainTabs() {
             iconName = focused ? 'bulb' : 'bulb-outline';
           } else if (route.name === 'Calendar') {
             iconName = focused ? 'calendar' : 'calendar-outline';
+          } else if (route.name === 'Teams') {
+            iconName = focused ? 'people' : 'people-outline';
           } else if (route.name === 'FitCoach') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           }
@@ -196,7 +200,8 @@ function MainTabs() {
       <Tab.Screen name="Home" component={DashboardScreen} />
       <Tab.Screen name="Goals" component={GoalsScreen} />
       <Tab.Screen name="Insights" component={InsightsNavigator} />
-      <Tab.Screen name="Calendar" component={CalendarScreen} />
+      <Tab.Screen name="Teams" component={TeamsNavigator} />
+      {!hasTeam && <Tab.Screen name="Calendar" component={CalendarScreen} />}
       <Tab.Screen name="FitCoach" component={ChatScreen} />
       <Tab.Screen
         name="Profile"
@@ -212,6 +217,7 @@ export default function App() {
   const [onboardingComplete, setOnboardingComplete] = useState(false);
   const [showCheckin, setShowCheckin] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [hasTeam, setHasTeam] = useState(false);
 
   // Handle deep links (WHOOP OAuth callback only — password reset is now web-based)
   const handleDeepLink = async (url: string) => {
@@ -289,6 +295,7 @@ export default function App() {
             console.warn('[APP] Could not fetch check-in status, proceeding to main app', e);
           }
         }
+        try { const { team } = await getMyTeam(); setHasTeam(!!team); } catch { setHasTeam(false); }
         setOnboardingComplete(true);
         setShowCheckin(false);
         setLoading(false);
@@ -314,6 +321,15 @@ export default function App() {
   global.refreshOnboardingStatus = () => {
     console.log('[APP] Refreshing onboarding status...');
     setRefreshKey(prev => prev + 1);
+  };
+
+  global.refreshTeamStatus = async () => {
+    try {
+      const { team } = await getMyTeam();
+      setHasTeam(!!team);
+    } catch {
+      setHasTeam(false);
+    }
   };
 
   if (loading) {
@@ -343,7 +359,7 @@ export default function App() {
       <View style={{ flex: 1 }}>
         <NavigationContainer theme={navigationTheme}>
           {onboardingComplete
-            ? <MainTabs />
+            ? <MainTabs hasTeam={hasTeam} />
             : <OnboardingNavigator />}
         </NavigationContainer>
         <NetworkErrorBanner />

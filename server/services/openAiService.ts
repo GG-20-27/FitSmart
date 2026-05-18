@@ -555,6 +555,14 @@ export interface FitLookGenerationInput {
   sleepDebtMinutes?: number;
   sleepNeededMinutes?: number;
   actualSleepMinutes?: number;
+  prescribedSession?: {
+    sessionTitle: string;
+    type: string;
+    durationMinutes?: number | null;
+    intensity?: string | null;
+    description?: string | null;
+    coachNotes?: string | null;
+  } | null;
 }
 
 // ── Deterministic meal score computation ──────────────────────────────────────
@@ -1238,6 +1246,7 @@ Return valid JSON only — no score.`;
       late_meal_time?: string; // HH:MM
     };
     waterIntakeBand?: string; // '<1L' | '1–2L' | '2–3L' | '3L+' — only advise hydration when low
+    alcoholBand?: string;    // '0' | '1–2' | '3–4' | '5+' — factor into recovery context
     dailyHabits?: {
       total: number;
       completed: number;
@@ -1394,6 +1403,19 @@ Return valid JSON only — no score.`;
           contextParts.push(`💧 Hydration: User reported 1–2L water. Borderline given ${highStrain ? 'high strain' : `feeling ${params.todayFeeling}`} — a brief mention may help.`);
         }
         // 2–3L or 3L+: do NOT mention hydration at all
+      }
+
+      // Alcohol (factor into recovery context when non-zero)
+      if (params.alcoholBand && params.alcoholBand !== '0') {
+        const heavy = params.alcoholBand === '5+';
+        const moderate = params.alcoholBand === '3–4';
+        if (heavy) {
+          contextParts.push(`🍺 Alcohol: User reported 5+ drinks today. Expect reduced recovery tomorrow — factor this into any training or sleep advice.`);
+        } else if (moderate) {
+          contextParts.push(`🍺 Alcohol: User reported 3–4 drinks today. May affect sleep quality and tomorrow's recovery.`);
+        } else {
+          contextParts.push(`🍺 Alcohol: User reported 1–2 drinks today.`);
+        }
       }
 
       // Daily habits accountability (one sentence max, no shaming)
@@ -1625,7 +1647,21 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
         parts.push(`Use these patterns in your reasoning sentence and plan — name the weak pillar specifically (e.g. "nutrition has been consistently below target this week").`);
       }
 
-      if (input.plannedTraining) {
+      if (input.prescribedSession) {
+        const s = input.prescribedSession;
+        const parts2 = [`Coach-prescribed session for today: "${s.sessionTitle}" (${s.type}`];
+        if (s.durationMinutes) parts2.push(`, ${s.durationMinutes} min`);
+        if (s.intensity) parts2.push(`, ${s.intensity} intensity`);
+        parts2.push(')');
+        if (s.description) parts2.push(`\nSession details: ${s.description}`);
+        if (s.coachNotes) parts2.push(`\nCoach notes: ${s.coachNotes}`);
+        parts.push(
+          parts2.join('') +
+          '\nIMPORTANT: The athlete MUST do this session — it was prescribed by their coach. ' +
+          'Your job is to contextualise HOW to approach it given today\'s recovery state (e.g. adjust warm-up, manage intensity within the session, recovery cues). ' +
+          'Do NOT suggest skipping or replacing it. Only flag genuine red flags (injury risk, very low recovery) as a caution, not a reason to skip.'
+        );
+      } else if (input.plannedTraining) {
         parts.push(`Today's planned training: ${input.plannedTraining}`);
       } else {
         parts.push('No planned training session detected for today');
