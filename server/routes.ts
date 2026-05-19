@@ -7838,7 +7838,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   }
 
   // Compute week average for a member, handling cheat day logic.
-  // First missed day → cheat (excluded, divides by 6). Second+ missed → 0 in avg.
+  // First missed COMPLETED day → cheat (excluded from denominator). Second+ → 0 in avg.
+  // Today is never penalised — user still has time to log.
   async function computeWeekAvg(userId: string, teamId: number, weekStart: string): Promise<{ avg: number; daysLogged: number; cheatUsed: boolean }> {
     const weekEnd = getWeekEnd(weekStart);
     const scores = await storage.getFitScoresByUserAndWeek(userId, weekStart, weekEnd);
@@ -7853,44 +7854,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       days.push(d.toISOString().slice(0, 10));
     }
 
-    const today = new Date().toISOString().slice(0, 10);
-    // Only consider days up to and including today
-    const pastDays = days.filter(d => d <= today);
+    // Use Zurich time for today — never penalise for missing today's log
+    const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zurich' });
+    // completedDays = strictly before today; these can be missed
+    const completedDays = days.filter(d => d < today && d <= weekEnd);
+    // todayInWeek = today if it falls within this week
+    const todayInWeek = days.includes(today) ? today : null;
 
+    // Load existing cheat day — only honour it if the user genuinely missed that day
+    const existingCheat = await storage.getCheatDay(userId, teamId, weekStart);
     let cheatUsed = false;
     let cheatDate: string | undefined;
-    const existingCheat = await storage.getCheatDay(userId, teamId, weekStart);
-    if (existingCheat?.cheatDate) {
+    if (existingCheat?.cheatDate && scoresByDate[existingCheat.cheatDate] == null) {
       cheatUsed = true;
       cheatDate = existingCheat.cheatDate;
     }
+    // If the existing cheat day now has a score (retroactive log), ignore it
 
     let sum = 0;
-    let missedCount = 0;
     let daysLogged = 0;
 
-    for (const day of pastDays) {
+    // Score completed days
+    for (const day of completedDays) {
       if (scoresByDate[day] != null) {
         sum += scoresByDate[day];
         daysLogged++;
       } else {
-        // Missed day
+        // Genuinely missed completed day
         if (!cheatUsed) {
-          // First miss → assign as cheat day
           cheatUsed = true;
           cheatDate = day;
           await storage.upsertCheatDay(userId, teamId, weekStart, day);
-          // Cheat day excluded from numerator and denominator
-        } else if (day !== cheatDate) {
-          // Second+ miss → counts as 0
-          missedCount++;
         }
+        // Second+ miss = 0 (already excluded from sum)
       }
     }
 
-    // Denominator: pastDays count minus cheat day (if used and cheat day is in pastDays)
-    const cheatInPast = cheatDate && pastDays.includes(cheatDate);
-    const denominator = pastDays.length - (cheatInPast ? 1 : 0);
+    // Add today's score if already logged (bonus — doesn't affect cheat logic)
+    if (todayInWeek && scoresByDate[todayInWeek] != null) {
+      sum += scoresByDate[todayInWeek];
+      daysLogged++;
+    }
+
+    // Denominator = completed days that count + today if scored
+    const todayScored = todayInWeek && scoresByDate[todayInWeek] != null ? 1 : 0;
+    const cheatExcluded = cheatUsed && cheatDate && completedDays.includes(cheatDate) ? 1 : 0;
+    const denominator = completedDays.length - cheatExcluded + todayScored;
     const avg = denominator > 0 ? sum / denominator : 0;
 
     return { avg: Math.round(avg * 10) / 10, daysLogged, cheatUsed };
@@ -8049,13 +8058,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[Coach] members:', members.map(m => ({ userId: m.userId, dataSource: m.dataSource })));
       const players = await Promise.all(members.map(async (m) => {
-        const isWhoop = m.dataSource === 'whoop';
         const [scores, meals, trainingSessions, checkins, whoopEntries] = await Promise.all([
           storage.getFitScoresByUserAndWeek(m.userId, days[0], days[days.length - 1]),
           storage.getMealsByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
           storage.getTrainingDataByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
-          isWhoop ? Promise.resolve([]) : storage.getManualCheckins(m.userId, days[0], days[days.length - 1]),
-          isWhoop ? storage.getWhoopDataByUserAndDateRange(m.userId, days[0], days[days.length - 1]) : Promise.resolve([]),
+          storage.getManualCheckins(m.userId, days[0], days[days.length - 1]),
+          storage.getWhoopDataByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
         ]);
         const scoresByDate: Record<string, { score: number; nutrition: number | null; training: number | null; recovery: number | null }> = {};
         for (const s of scores) {
