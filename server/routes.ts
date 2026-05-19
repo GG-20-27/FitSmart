@@ -8094,7 +8094,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       }));
 
-      console.log('[Coach] whoopByDate per player:', players.map(p => ({ userId: p.userId, dataSource: p.dataSource, whoopDays: Object.keys(p.whoopByDate) })));
+      console.log('[Coach] data per player:', players.map(p => ({
+        userId: p.userId,
+        dataSource: p.dataSource,
+        mealDays: Object.keys(p.mealsByDate),
+        checkinDays: Object.keys(p.checkinByDate),
+        whoopDays: Object.keys(p.whoopByDate),
+      })));
       res.json({ team: { id: team.id, name: team.name, sport: team.sport, phase: team.phase, weekStart }, players });
     } catch (err) {
       console.error('[Teams] coach endpoint error:', err);
