@@ -855,7 +855,7 @@
 
               const img = document.createElement('img');
               img.className = 'meal-thumb';
-              img.src = `${window.location.origin}/uploads/${m.filename}`;
+              img.src = m.filename.startsWith('http') ? m.filename : `${window.location.origin}/uploads/${m.filename}`;
               img.alt = m.mealType || 'Meal';
               img.onerror = () => {
                 img.style.display = 'none';

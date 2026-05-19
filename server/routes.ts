@@ -27,27 +27,17 @@ import type { UserGoal, FitScore } from '@shared/schema';
 import { eq, desc, sql, and, gte, lt } from 'drizzle-orm';
 import { Resend } from 'resend';
 import cron from 'node-cron';
+import { uploadMealImage, resolveImageUrl } from './supabaseStorage';
 
-// Ensure uploads directory exists
+// Ensure uploads directory exists (legacy — kept for backward compatibility)
 const uploadsDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Configure multer for file uploads
-const storage_multer = multer.diskStorage({
-  destination: (req: Request, file: Express.Multer.File, cb: (error: Error | null, destination: string) => void) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req: Request, file: Express.Multer.File, cb: (error: Error | null, filename: string) => void) => {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const ext = path.extname(file.originalname);
-    cb(null, `meal_${timestamp}${ext}`);
-  }
-});
-
+// Configure multer for file uploads — memory storage, then pushed to Supabase Storage
 const upload = multer({
-  storage: storage_multer,
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 10 * 1024 * 1024, // 10MB limit
   },
@@ -4433,9 +4423,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req) || 'default-user';
       const uploadDate = date || getTodayDate();
 
+      // Upload to Supabase Storage for persistent storage across deploys
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const ext = path.extname(file.originalname) || '.jpg';
+      const storageFilename = `meal_${timestamp}${ext}`;
+      const imageUrl = await uploadMealImage(file.buffer, storageFilename, file.mimetype);
+
       const meal = await storage.createMeal({
         userId: userId,
-        filename: file.filename,
+        filename: imageUrl, // Store full public URL — survives deploys
         originalName: file.originalname,
         mimetype: file.mimetype,
         size: file.size,
@@ -4445,10 +4441,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         analysisResult: null, // Will be populated below
       });
 
-      console.log(`Uploaded meal: ${mealType} for date ${uploadDate}`);
-
-      const baseUrl = req.protocol + '://' + req.get('host');
-      const imageUrl = `${baseUrl}/uploads/${meal.filename}`;
+      console.log(`Uploaded meal: ${mealType} for date ${uploadDate} → ${imageUrl}`);
 
       // Fetch user's diet phase for goal-aligned scoring
       let dietPhase: string | undefined;
@@ -4590,7 +4583,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Return full URLs including domain
       const baseUrl = req.protocol + '://' + req.get('host');
-      const mealUrls = meals.map(meal => `${baseUrl}/uploads/${meal.filename}`);
+      const mealUrls = meals.map(meal => resolveImageUrl(meal.filename, baseUrl));
 
       console.log(`Found ${meals.length} meals for today`);
       res.json(mealUrls);
@@ -4613,7 +4606,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Return full URLs including domain
       const baseUrl = req.protocol + '://' + req.get('host');
-      const mealUrls = meals.map(meal => `${baseUrl}/uploads/${meal.filename}`);
+      const mealUrls = meals.map(meal => resolveImageUrl(meal.filename, baseUrl));
 
       console.log(`Found ${meals.length} meals for yesterday (${yesterdayStr})`);
       res.json(mealUrls);
@@ -4668,7 +4661,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           id: meal.id,
           mealType: meal.mealType,
           mealNotes: meal.mealNotes,
-          imageUri: meal.filename === 'text-only' ? null : `${baseUrl}/uploads/${meal.filename}`,
+          imageUri: meal.filename === 'text-only' ? null : resolveImageUrl(meal.filename, baseUrl),
           date: meal.date,
           uploadedAt: meal.uploadedAt,
           nutritionScore,
