@@ -1,6 +1,6 @@
 import { users, meals, trainingData, whoopData, userCalendars, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, improvementPlans, planHabits, habitCheckins, manualCheckins, teams, teamMembers, cheatDays, fitScores, teamTrainingPlan, type User, type InsertUser, type Meal, type InsertMeal, type TrainingData, type InsertTrainingData, type WhoopData, type InsertWhoopData, type UserCalendar, type InsertUserCalendar, type FitlookDaily, type InsertFitlookDaily, type DailyCheckin, type InsertDailyCheckin, type FitroastWeekly, type InsertFitroastWeekly, type UserContext, type InsertUserContext, type ImprovementPlan, type PlanHabit, type HabitCheckin, type ManualCheckin, type InsertManualCheckin, type Team, type TeamMember, type CheatDay, type FitScore, type TeamTrainingPlan } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, ne, sql } from "drizzle-orm";
+import { eq, and, desc, ne, sql, or, isNull } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -98,7 +98,7 @@ export interface IStorage {
 
   // Team training plan operations
   upsertTeamTrainingPlan(teamId: number, planDate: string, data: { sessionTitle: string; type: string; durationMinutes?: number; intensity?: string; description?: string; coachNotes?: string }): Promise<TeamTrainingPlan>;
-  getTeamTrainingPlanForDate(teamId: number, planDate: string): Promise<TeamTrainingPlan | undefined>;
+  getTeamTrainingPlanForDate(teamId: number, planDate: string, userId?: string): Promise<TeamTrainingPlan | undefined>;
   getTeamTrainingPlanForWeek(teamId: number, weekStart: string): Promise<TeamTrainingPlan[]>;
   deleteTeamTrainingPlan(teamId: number, planDate: string): Promise<void>;
 }
@@ -565,9 +565,15 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async getTeamTrainingPlanForDate(teamId: number, planDate: string): Promise<TeamTrainingPlan | undefined> {
+  async getTeamTrainingPlanForDate(teamId: number, planDate: string, userId?: string): Promise<TeamTrainingPlan | undefined> {
     const [row] = await db.select().from(teamTrainingPlan)
-      .where(and(eq(teamTrainingPlan.teamId, teamId), eq(teamTrainingPlan.planDate, planDate)));
+      .where(and(
+        eq(teamTrainingPlan.teamId, teamId),
+        eq(teamTrainingPlan.planDate, planDate),
+        userId
+          ? or(isNull(teamTrainingPlan.userId), eq(teamTrainingPlan.userId, userId))
+          : isNull(teamTrainingPlan.userId),
+      ));
     return row;
   }
 

@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, SafeAreaView } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { getMyTeam } from '../../api/teams';
 import { colors, spacing, radii, typography } from '../../theme';
 
@@ -8,13 +8,16 @@ export default function TeamLandingScreen() {
   const navigation = useNavigation<any>();
   const [checking, setChecking] = useState(true);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    setChecking(true);
     getMyTeam().then(({ team, member }) => {
       if (team && member) {
         navigation.replace('TeamMain', { teamId: team.id });
+      } else {
+        setChecking(false);
       }
-    }).catch(() => {}).finally(() => setChecking(false));
-  }, []);
+    }).catch(() => setChecking(false));
+  }, []));
 
   if (checking) {
     return (

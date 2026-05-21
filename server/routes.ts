@@ -6107,7 +6107,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const membership = await storage.getTeamMembership(userId);
         if (membership) {
-          const plan = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal);
+          const plan = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal, userId);
           if (plan) {
             prescribedSession = {
               sessionTitle: plan.sessionTitle,
@@ -8249,7 +8249,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const tz = 'Europe/Zurich';
       const todayLocal = new Date().toLocaleDateString('sv-SE', { timeZone: tz });
-      const session = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal);
+      const session = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal, userId);
       res.json({ session: session ?? null });
     } catch (err) {
       console.error('[Teams] training-plan/today error:', err);

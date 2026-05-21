@@ -188,7 +188,7 @@ function MainTabs({ hasTeam }: { hasTeam: boolean }) {
           } else if (route.name === 'Calendar') {
             iconName = focused ? 'calendar' : 'calendar-outline';
           } else if (route.name === 'Teams') {
-            iconName = focused ? 'people' : 'people-outline';
+            iconName = focused ? 'podium' : 'podium-outline';
           } else if (route.name === 'FitCoach') {
             iconName = focused ? 'chatbubbles' : 'chatbubbles-outline';
           }

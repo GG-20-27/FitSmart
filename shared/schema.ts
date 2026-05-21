@@ -245,6 +245,7 @@ export const cheatDays = pgTable("cheat_days", {
 export const teamTrainingPlan = pgTable("team_training_plan", {
   id: serial("id").primaryKey(),
   teamId: integer("team_id").notNull().references(() => teams.id, { onDelete: 'cascade' }),
+  userId: text("user_id").references(() => users.id, { onDelete: 'cascade' }), // null = all members, set = individual only
   planDate: text("plan_date").notNull(),               // YYYY-MM-DD
   sessionTitle: text("session_title").notNull(),        // e.g. "Upper Body Strength"
   type: text("type").notNull(),                        // e.g. "strength" | "cardio" | "technique" | "rest"
