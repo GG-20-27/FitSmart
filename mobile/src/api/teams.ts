@@ -95,9 +95,9 @@ export interface TeamTrainingPlan {
   createdAt: string;
 }
 
-export async function getTodayTeamTrainingPlan(): Promise<TeamTrainingPlan | null> {
-  const data = await apiRequest<{ session: TeamTrainingPlan | null }>('/api/teams/training-plan/today');
-  return data.session;
+export async function getTodayTeamTrainingPlan(): Promise<TeamTrainingPlan[]> {
+  const data = await apiRequest<{ sessions: TeamTrainingPlan[] }>('/api/teams/training-plan/today');
+  return data.sessions ?? [];
 }
 
 export async function getWeekTeamTrainingPlan(date?: string): Promise<{ sessions: TeamTrainingPlan[]; weekStart: string }> {

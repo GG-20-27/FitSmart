@@ -169,8 +169,9 @@ export interface FitScoreResponse {
     lateMealFlag: boolean;
     onlyMealIsPureJunk: boolean;
   };
-  waterIntakeBand?: '<1L' | '1–2L' | '2–3L' | '3L+' | null;
-  alcoholBand?: '0' | '1–2' | '3–4' | '5+' | null;
+  waterLiters?: number | null;
+  alcoholCount?: number | null;
+  sodaCount?: number | null;
   advancedRecoverySignals?: {
     respiratoryRate?: number;
     respiratoryRateDelta?: number;
@@ -183,9 +184,6 @@ export interface FitScoreResponse {
   sleepDebtMinutes?: number;
   timestamp: string;
 }
-
-export type WaterIntakeBand = '<1L' | '1–2L' | '2–3L' | '3L+';
-export type AlcoholBand = '0' | '1–2' | '3–4' | '5+';
 
 /**
  * Upload a meal with image, type, and optional notes
@@ -395,8 +393,9 @@ export function formatDate(date: Date): string {
  */
 export async function calculateFitScore(
   date?: string,
-  waterIntakeBand?: WaterIntakeBand | null,
-  alcoholBand?: AlcoholBand | null,
+  waterLiters?: number,
+  alcoholCount?: number,
+  sodaCount?: number,
   coffeeCount?: number,
   energyDrinkCount?: number,
   proteinSuppGrams?: number,
@@ -410,8 +409,9 @@ export async function calculateFitScore(
       method: 'POST',
       body: JSON.stringify({
         date,
-        waterIntakeBand: waterIntakeBand ?? null,
-        alcoholBand: alcoholBand ?? null,
+        waterLiters: waterLiters ?? 0,
+        alcoholCount: alcoholCount ?? 0,
+        sodaCount: sodaCount ?? 0,
         coffeeCount: coffeeCount ?? 0,
         energyDrinkCount: energyDrinkCount ?? 0,
         proteinSuppGrams: proteinSuppGrams ?? 0,
@@ -494,8 +494,9 @@ export async function getCoachSummary(params: {
     long_gap_window?: string;
     late_meal_time?: string;
   };
-  waterIntakeBand?: WaterIntakeBand | null;
-  alcoholBand?: AlcoholBand | null;
+  waterLiters?: number | null;
+  alcoholCount?: number | null;
+  sodaCount?: number | null;
   dailyHabits?: {
     total: number;
     completed: number;

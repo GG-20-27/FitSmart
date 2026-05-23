@@ -5115,7 +5115,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/fitscore/calculate', requireJWTAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req);
-      const { date, waterIntakeBand, alcoholBand, coffeeCount, energyDrinkCount, proteinSuppGrams, creatineTaken } = req.body;
+      const { date, waterLiters, alcoholCount, sodaCount, coffeeCount, energyDrinkCount, proteinSuppGrams, creatineTaken } = req.body;
+      const water = Math.max(0, Math.min(5, Number(waterLiters) || 0));
+      const alcohol = Math.max(0, Math.min(15, Number(alcoholCount) || 0));
+      const sodas = Math.max(0, Math.min(10, Number(sodaCount) || 0));
       const coffees = Math.max(0, Math.min(8, Number(coffeeCount) || 0));
       const energyDrinks = Math.max(0, Math.min(5, Number(energyDrinkCount) || 0));
       const proteinSupp = Math.max(0, Math.min(100, Number(proteinSuppGrams) || 0));
@@ -5428,9 +5431,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (lateMealFlag) nutritionScore -= 0.5;
 
         // Alcohol penalty
-        if (alcoholBand === '1–2') nutritionScore -= 0.5;
-        else if (alcoholBand === '3–4') nutritionScore -= 2.0;
-        else if (alcoholBand === '5+') nutritionScore -= 3.0;
+        if (alcohol >= 1 && alcohol <= 2) nutritionScore -= 0.5;
+        else if (alcohol >= 3 && alcohol <= 4) nutritionScore -= 2.0;
+        else if (alcohol >= 5) nutritionScore -= 3.0;
+
+        // Soda penalty
+        if (sodas >= 1) nutritionScore -= sodas * 0.2;
 
         // Coffee penalty: 4+ cups = -0.2
         if (coffees >= 4) nutritionScore -= 0.2;
@@ -5576,8 +5582,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   getNutritionZone(nutritionScore) === 'green',
         timingSignals,
         nutritionDayContext,
-        waterIntakeBand: (waterIntakeBand as string) || null,
-        alcoholBand: (alcoholBand as string) || null,
+        waterLiters: water || null,
+        alcoholCount: alcohol || null,
+        sodaCount: sodas || null,
         coffeeCount: coffees,
         energyDrinkCount: energyDrinks,
         proteinSuppGrams: proteinSupp,
@@ -5658,8 +5665,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nutritionBreakdownScore,
         dateLabel, // e.g. "today", "yesterday", "Feb 21"
         timingSignals,
-        waterIntakeBand,
-        alcoholBand,
+        waterLiters,
+        alcoholCount,
+        sodaCount,
         dailyHabits, // { total, completed, completedList, missingList }
         advancedRecoverySignals,
         sleepDebtMinutes,
@@ -5812,8 +5820,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         userContextSummary: coachContextSummary,
         dateLabel: dateLabel || 'today',
         timingSignals: timingSignals || undefined,
-        waterIntakeBand: waterIntakeBand || undefined,
-        alcoholBand: alcoholBand || undefined,
+        waterLiters: waterLiters != null ? Number(waterLiters) : undefined,
+        alcoholCount: alcoholCount != null ? Number(alcoholCount) : undefined,
+        sodaCount: sodaCount != null ? Number(sodaCount) : undefined,
         coffeeCount: req.body.coffeeCount != null ? Number(req.body.coffeeCount) : undefined,
         energyDrinkCount: req.body.energyDrinkCount != null ? Number(req.body.energyDrinkCount) : undefined,
         proteinSuppGrams: req.body.proteinSuppGrams != null ? Number(req.body.proteinSuppGrams) : undefined,
@@ -6132,17 +6141,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const membership = await storage.getTeamMembership(userId);
         if (membership) {
-          const plan = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal, userId);
-          if (plan) {
+          const plans = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal, userId);
+          if (plans.length > 0) {
+            const primary = plans[0];
             prescribedSession = {
-              sessionTitle: plan.sessionTitle,
-              type: plan.type,
-              durationMinutes: plan.durationMinutes,
-              intensity: plan.intensity,
-              description: plan.description,
-              coachNotes: plan.coachNotes,
+              sessionTitle: plans.length > 1
+                ? plans.map(p => p.sessionTitle).join(' + ')
+                : primary.sessionTitle,
+              type: primary.type,
+              durationMinutes: primary.durationMinutes,
+              intensity: primary.intensity,
+              description: plans.map(p => p.description).filter(Boolean).join(' | ') || primary.description,
+              coachNotes: primary.coachNotes,
             };
-            console.log(`[FITLOOK] Prescribed session found for team ${membership.team.id}: ${plan.sessionTitle}`);
+            console.log(`[FITLOOK] Prescribed sessions found for team ${membership.team.id}: ${plans.map(p => p.sessionTitle).join(', ')}`);
           }
         }
       } catch { /* graceful — don't block FitLook if team lookup fails */ }
@@ -8274,8 +8286,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const tz = 'Europe/Zurich';
       const todayLocal = new Date().toLocaleDateString('sv-SE', { timeZone: tz });
-      const session = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal, userId);
-      res.json({ session: session ?? null });
+      const sessions = await storage.getTeamTrainingPlanForDate(membership.team.id, todayLocal, userId);
+      res.json({ sessions });
     } catch (err) {
       console.error('[Teams] training-plan/today error:', err);
       res.status(500).json({ error: 'Internal server error' });

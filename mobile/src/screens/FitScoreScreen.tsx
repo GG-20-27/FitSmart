@@ -33,8 +33,6 @@ import {
   type CoachSummaryResponse,
   type CoachSlide,
   type StoredFitScore,
-  type WaterIntakeBand,
-  type AlcoholBand,
   type WhoopWorkout,
 } from '../api/fitscore';
 import {
@@ -668,7 +666,7 @@ function getWorstMealFactor(mealList: MealData[]): string | null {
   return labels[top[0]] ?? null;
 }
 
-function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[], waterBand?: WaterIntakeBand | null, macroTargets?: { calorieTarget: number | null; proteinTarget: number | null }): WeakLinkResult {
+function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[], waterLiters?: number, macroTargets?: { calorieTarget: number | null; proteinTarget: number | null }): WeakLinkResult {
   const nutRaw = result.breakdown.nutrition.score;
   const traRaw = result.breakdown.training.score;
   const recRaw = result.breakdown.recovery.score;
@@ -851,7 +849,7 @@ function computeWeakLink(result: FitScoreResponse, mealList: MealData[], session
     }
   }
 
-  if (waterBand === '<1L') {
+  if (waterLiters !== undefined && waterLiters > 0 && waterLiters < 1) {
     msgParts.push('Hydration: Less than 1L of water today — flagged as very low.');
   }
 
@@ -969,16 +967,17 @@ export default function FitScoreScreen() {
   const [trainingSkipped, setTrainingSkipped] = useState(false);
 
   // Team prescribed session (null = no team or no plan today)
-  const [prescribedSession, setPrescribedSession] = useState<TeamTrainingPlan | null>(null);
+  const [prescribedSessions, setPrescribedSessions] = useState<TeamTrainingPlan[]>([]);
 
   // WHOOP import modal
   const [showWhoopImport, setShowWhoopImport] = useState(false);
   const [whoopWorkouts, setWhoopWorkouts] = useState<WhoopWorkout[]>([]);
   const [loadingWhoopWorkouts, setLoadingWhoopWorkouts] = useState(false);
 
-  // Hydration picker — stored per date in AsyncStorage
-  const [waterIntakeBand, setWaterIntakeBand] = useState<WaterIntakeBand | null>(null);
-  const [alcoholBand, setAlcoholBand] = useState<AlcoholBand | null>(null);
+  // Hydration + alcohol — stored per date in AsyncStorage
+  const [waterLiters, setWaterLiters] = useState(0);
+  const [alcoholCount, setAlcoholCount] = useState(0);
+  const [sodaCount, setSodaCount] = useState(0);
 
   // Drinks & supplements — stored per date in AsyncStorage
   const [coffeeCount, setCoffeeCount] = useState(0);
@@ -1433,11 +1432,11 @@ export default function FitScoreScreen() {
   // Compute weak link whenever FitScore result, meals, training sessions, water or alcohol intake change
   useEffect(() => {
     if (fitScoreResult) {
-      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions, waterIntakeBand, macroTargets));
+      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions, waterLiters, macroTargets));
     } else {
       setWeakLink(null);
     }
-  }, [fitScoreResult, meals, trainingSessions, waterIntakeBand, alcoholBand]);
+  }, [fitScoreResult, meals, trainingSessions, waterLiters, alcoholCount, sodaCount]);
 
   // Load meals and training data when date changes
   useEffect(() => {
@@ -1452,8 +1451,9 @@ export default function FitScoreScreen() {
     setCoachSummary(null);
     setMeals([]);
     setTrainingSessions([]);
-    setWaterIntakeBand(null);
-    setAlcoholBand(null);
+    setWaterLiters(0);
+    setAlcoholCount(0);
+    setSodaCount(0);
     setCoffeeCount(0);
     setEnergyDrinkCount(0);
     setProteinSuppGrams(0);
@@ -1464,12 +1464,16 @@ export default function FitScoreScreen() {
 
     // Restore persisted water + alcohol intake for this date
     try {
-      const stored = await AsyncStorage.getItem(`waterIntake_${dateStr}`);
-      if (stored) setWaterIntakeBand(stored as WaterIntakeBand);
+      const stored = await AsyncStorage.getItem(`waterLiters_${dateStr}`);
+      if (stored) setWaterLiters(parseFloat(stored));
     } catch { /* graceful */ }
     try {
-      const stored = await AsyncStorage.getItem(`alcoholIntake_${dateStr}`);
-      if (stored) setAlcoholBand(stored as AlcoholBand);
+      const stored = await AsyncStorage.getItem(`alcoholCount_${dateStr}`);
+      if (stored) setAlcoholCount(parseInt(stored, 10));
+    } catch { /* graceful */ }
+    try {
+      const stored = await AsyncStorage.getItem(`sodaCount_${dateStr}`);
+      if (stored) setSodaCount(parseInt(stored, 10));
     } catch { /* graceful */ }
     try {
       const stored = await AsyncStorage.getItem(`coffeeCount_${dateStr}`);
@@ -1563,9 +1567,9 @@ export default function FitScoreScreen() {
 
         // Fetch team prescribed session for today (only for today, silently)
         if (!isDatePast) {
-          getTodayTeamTrainingPlan().then(setPrescribedSession).catch(() => setPrescribedSession(null));
+          getTodayTeamTrainingPlan().then(setPrescribedSessions).catch(() => setPrescribedSessions([]));
         } else {
-          setPrescribedSession(null);
+          setPrescribedSessions([]);
         }
         if (trainingData.length > 0) {
           console.log('[TRAINING DATA] First session breakdown:', trainingData[0].breakdown);
@@ -1626,7 +1630,7 @@ export default function FitScoreScreen() {
       const dateStr = formatDate(selectedDate);
       console.log(`[FITSCORE] Calculating FitScore for ${dateStr}`);
 
-      const result = await calculateFitScore(dateStr, waterIntakeBand, alcoholBand, coffeeCount, energyDrinkCount, proteinSuppGrams, creatineTaken);
+      const result = await calculateFitScore(dateStr, waterLiters, alcoholCount, sodaCount, coffeeCount, energyDrinkCount, proteinSuppGrams, creatineTaken);
 
       console.log(`[FITSCORE] Result received: ${result.fitScore}/10`);
       setFitScoreResult(result);
@@ -1702,8 +1706,9 @@ export default function FitScoreScreen() {
         nutritionBreakdownScore: fitScoreData.breakdown.nutrition.score,
         dateLabel: getDateLabel(),
         timingSignals: fitScoreData.timingSignals,
-        waterIntakeBand: fitScoreData.waterIntakeBand ?? waterIntakeBand ?? null,
-        alcoholBand: fitScoreData.alcoholBand ?? alcoholBand ?? null,
+        waterLiters: waterLiters > 0 ? waterLiters : undefined,
+        alcoholCount: alcoholCount > 0 ? alcoholCount : undefined,
+        sodaCount: sodaCount > 0 ? sodaCount : undefined,
         dailyHabits: habitsContext,
         advancedRecoverySignals: fitScoreData.advancedRecoverySignals,
         sleepDebtMinutes: fitScoreData.sleepDebtMinutes,
@@ -1768,29 +1773,33 @@ export default function FitScoreScreen() {
     } catch { /* graceful */ }
   };
 
-  const handleWaterPick = async (band: WaterIntakeBand) => {
-    const newBand = waterIntakeBand === band ? null : band; // tap again to deselect
-    setWaterIntakeBand(newBand);
+  const handleWaterChange = async (delta: number) => {
+    const next = Math.round(Math.max(0, Math.min(5, waterLiters + delta)) * 10) / 10;
+    setWaterLiters(next);
     const dateStr = formatDate(selectedDate);
     try {
-      if (newBand) {
-        await AsyncStorage.setItem(`waterIntake_${dateStr}`, newBand);
-      } else {
-        await AsyncStorage.removeItem(`waterIntake_${dateStr}`);
-      }
+      if (next > 0) await AsyncStorage.setItem(`waterLiters_${dateStr}`, String(next));
+      else await AsyncStorage.removeItem(`waterLiters_${dateStr}`);
     } catch { /* graceful */ }
   };
 
-  const handleAlcoholPick = async (band: AlcoholBand) => {
-    const newBand = alcoholBand === band ? null : band; // tap again to deselect
-    setAlcoholBand(newBand);
+  const handleAlcoholChange = async (delta: number) => {
+    const next = Math.max(0, Math.min(15, alcoholCount + delta));
+    setAlcoholCount(next);
     const dateStr = formatDate(selectedDate);
     try {
-      if (newBand) {
-        await AsyncStorage.setItem(`alcoholIntake_${dateStr}`, newBand);
-      } else {
-        await AsyncStorage.removeItem(`alcoholIntake_${dateStr}`);
-      }
+      if (next > 0) await AsyncStorage.setItem(`alcoholCount_${dateStr}`, String(next));
+      else await AsyncStorage.removeItem(`alcoholCount_${dateStr}`);
+    } catch { /* graceful */ }
+  };
+
+  const handleSodaChange = async (delta: number) => {
+    const next = Math.max(0, Math.min(10, sodaCount + delta));
+    setSodaCount(next);
+    const dateStr = formatDate(selectedDate);
+    try {
+      if (next > 0) await AsyncStorage.setItem(`sodaCount_${dateStr}`, String(next));
+      else await AsyncStorage.removeItem(`sodaCount_${dateStr}`);
     } catch { /* graceful */ }
   };
 
@@ -2561,65 +2570,29 @@ export default function FitScoreScreen() {
         )}
       </View>)}
 
-      {/* Hydration picker — optional, below Meals, today/yesterday only */}
-      {!isPastDate && !showFitScoreResult && (
-        <View style={styles.waterSection}>
-          <View style={styles.waterHeader}>
-            <Ionicons name="water-outline" size={15} color={colors.textMuted} />
-            <Text style={styles.waterLabel}>Water intake today?</Text>
-            {waterIntakeBand && (
-              <Text style={styles.waterSelected}>{waterIntakeBand}</Text>
-            )}
-          </View>
-          <View style={styles.waterChips}>
-            {(['<1L', '1–2L', '2–3L', '3L+'] as WaterIntakeBand[]).map((band) => (
-              <TouchableOpacity
-                key={band}
-                style={[styles.waterChip, waterIntakeBand === band && styles.waterChipActive]}
-                onPress={() => handleWaterPick(band)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.waterChipText, waterIntakeBand === band && styles.waterChipTextActive]}>
-                  {band}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
-
-      {/* Alcohol picker — below water, today/yesterday only */}
-      {!isPastDate && !showFitScoreResult && (
-        <View style={styles.waterSection}>
-          <View style={styles.waterHeader}>
-            <Ionicons name="beer-outline" size={15} color={colors.textMuted} />
-            <Text style={styles.waterLabel}>Alcohol today?</Text>
-            {alcoholBand && alcoholBand !== '0' && (
-              <Text style={styles.waterSelected}>{alcoholBand} drinks</Text>
-            )}
-          </View>
-          <View style={styles.waterChips}>
-            {(['0', '1–2', '3–4', '5+'] as AlcoholBand[]).map((band) => (
-              <TouchableOpacity
-                key={band}
-                style={[styles.waterChip, alcoholBand === band && styles.waterChipActive]}
-                onPress={() => handleAlcoholPick(band)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.waterChipText, alcoholBand === band && styles.waterChipTextActive]}>
-                  {band === '0' ? 'None' : band}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      )}
-
       {/* Drinks & Supplements — today/yesterday only */}
       {!isPastDate && !showFitScoreResult && (
         <View style={styles.waterSection}>
-          {/* Coffee */}
+          {/* Water */}
           <View style={styles.waterHeader}>
+            <Ionicons name="water-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Water</Text>
+            {waterLiters > 0 && (
+              <Text style={styles.waterSelected}>{waterLiters}L</Text>
+            )}
+          </View>
+          <View style={styles.stepperRow}>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleWaterChange(-0.5)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.stepperValue}>{waterLiters > 0 ? `${waterLiters}L` : '0L'}</Text>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleWaterChange(0.5)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Coffee */}
+          <View style={[styles.waterHeader, { marginTop: spacing.md }]}>
             <Ionicons name="cafe-outline" size={15} color={colors.textMuted} />
             <Text style={styles.waterLabel}>Coffee</Text>
             {coffeeCount > 0 && (
@@ -2654,6 +2627,42 @@ export default function FitScoreScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Soda */}
+          <View style={[styles.waterHeader, { marginTop: spacing.md }]}>
+            <Ionicons name="wine-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Soda</Text>
+            {sodaCount > 0 && (
+              <Text style={styles.waterSelected}>{sodaCount}</Text>
+            )}
+          </View>
+          <View style={styles.stepperRow}>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleSodaChange(-1)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.stepperValue}>{sodaCount}</Text>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleSodaChange(1)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Alcohol */}
+          <View style={[styles.waterHeader, { marginTop: spacing.md }]}>
+            <Ionicons name="beer-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Alcohol</Text>
+            {alcoholCount > 0 && (
+              <Text style={styles.waterSelected}>{alcoholCount} drink{alcoholCount !== 1 ? 's' : ''}</Text>
+            )}
+          </View>
+          <View style={styles.stepperRow}>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleAlcoholChange(-1)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.stepperValue}>{alcoholCount}</Text>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleAlcoholChange(1)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* Protein Supplements */}
           <View style={[styles.waterHeader, { marginTop: spacing.md }]}>
             <Ionicons name="barbell-outline" size={15} color={colors.textMuted} />
@@ -2673,18 +2682,18 @@ export default function FitScoreScreen() {
           </View>
 
           {/* Creatine */}
-          <View style={[styles.waterHeader, { marginTop: spacing.md }]}>
-            <Ionicons name="fitness-outline" size={15} color={colors.textMuted} />
-            <Text style={styles.waterLabel}>Creatine</Text>
-          </View>
           <TouchableOpacity
-            style={[styles.waterChip, creatineTaken && styles.waterChipActive]}
+            style={styles.creatineRow}
             onPress={handleCreatineToggle}
             activeOpacity={0.7}
           >
-            <Text style={[styles.waterChipText, creatineTaken && styles.waterChipTextActive]}>
-              {creatineTaken ? 'Taken ✓' : 'Not taken'}
-            </Text>
+            <View style={styles.creatineLeft}>
+              <Ionicons name="flask-outline" size={15} color={colors.textMuted} />
+              <Text style={styles.waterLabel}>Creatine</Text>
+            </View>
+            <View style={[styles.creatineCheckbox, creatineTaken && styles.creatineCheckboxChecked]}>
+              {creatineTaken && <Ionicons name="checkmark" size={14} color="#fff" />}
+            </View>
           </TouchableOpacity>
         </View>
       )}
@@ -2857,22 +2866,23 @@ export default function FitScoreScreen() {
             </View>
           )}
 
-          {/* Prescribed session banner — shown when team plan exists for today */}
-          {prescribedSession && isToday && !showFitScoreResult && (
+          {/* Prescribed session cards — one per session when team plan exists for today */}
+          {prescribedSessions.length > 0 && isToday && !showFitScoreResult && prescribedSessions.map((session, idx) => (
             <TouchableOpacity
+              key={session.id}
               style={styles.prescribedSessionCard}
               onPress={() => {
-                setTrainingType(prescribedSession.sessionTitle);
+                setTrainingType(session.sessionTitle);
                 setTrainingGoal('');
                 setTrainingIntensity(
-                  prescribedSession.intensity
-                    ? prescribedSession.intensity.charAt(0).toUpperCase() + prescribedSession.intensity.slice(1)
+                  session.intensity
+                    ? session.intensity.charAt(0).toUpperCase() + session.intensity.slice(1)
                     : ''
                 );
-                setTrainingComment(prescribedSession.description || prescribedSession.coachNotes || '');
-                if (prescribedSession.durationMinutes) {
-                  setTrainingDurationHours(Math.floor(prescribedSession.durationMinutes / 60));
-                  setTrainingDurationMinutes(prescribedSession.durationMinutes % 60);
+                setTrainingComment(session.description || session.coachNotes || '');
+                if (session.durationMinutes) {
+                  setTrainingDurationHours(Math.floor(session.durationMinutes / 60));
+                  setTrainingDurationMinutes(session.durationMinutes % 60);
                 }
                 setTrainingSkipped(false);
                 setTrainingEditing(true);
@@ -2881,25 +2891,27 @@ export default function FitScoreScreen() {
             >
               <View style={styles.prescribedSessionHeader}>
                 <Ionicons name="clipboard-outline" size={16} color={colors.accent} />
-                <Text style={styles.prescribedSessionLabel}>Today's session from your coach</Text>
+                <Text style={styles.prescribedSessionLabel}>
+                  {prescribedSessions.length > 1 ? `Session ${idx + 1} of ${prescribedSessions.length}` : "Today's session from your coach"}
+                </Text>
               </View>
-              <Text style={styles.prescribedSessionTitle}>{prescribedSession.sessionTitle}</Text>
-              {(prescribedSession.durationMinutes || prescribedSession.intensity) && (
+              <Text style={styles.prescribedSessionTitle}>{session.sessionTitle}</Text>
+              {(session.durationMinutes || session.intensity) && (
                 <Text style={styles.prescribedSessionMeta}>
-                  {prescribedSession.durationMinutes ? `${prescribedSession.durationMinutes} min` : ''}
-                  {prescribedSession.durationMinutes && prescribedSession.intensity ? '  ·  ' : ''}
-                  {prescribedSession.intensity ? prescribedSession.intensity.charAt(0).toUpperCase() + prescribedSession.intensity.slice(1) : ''}
+                  {session.durationMinutes ? `${session.durationMinutes} min` : ''}
+                  {session.durationMinutes && session.intensity ? '  ·  ' : ''}
+                  {session.intensity ? session.intensity.charAt(0).toUpperCase() + session.intensity.slice(1) : ''}
                 </Text>
               )}
-              {prescribedSession.description && (
-                <Text style={styles.prescribedSessionDescription} numberOfLines={2}>{prescribedSession.description}</Text>
+              {session.description && (
+                <Text style={styles.prescribedSessionDescription} numberOfLines={2}>{session.description}</Text>
               )}
               <View style={styles.prescribedSessionCta}>
                 <Text style={styles.prescribedSessionCtaText}>Tap to pre-fill</Text>
                 <Ionicons name="arrow-forward" size={14} color={colors.accent} />
               </View>
             </TouchableOpacity>
-          )}
+          ))}
 
           {!hasTraining && !trainingEditing ? (
             <View style={styles.emptyState}>
@@ -6912,6 +6924,32 @@ const styles = StyleSheet.create({
     minWidth: 40,
     textAlign: 'center',
     fontWeight: '600',
+  },
+  creatineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.md,
+    paddingVertical: 4,
+  },
+  creatineLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  creatineCheckbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    borderColor: colors.surfaceMute,
+    backgroundColor: colors.bgSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  creatineCheckboxChecked: {
+    borderColor: colors.accent,
+    backgroundColor: colors.accent,
   },
 
   // Daily Habits Check-in block

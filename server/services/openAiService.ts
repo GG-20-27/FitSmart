@@ -1245,8 +1245,9 @@ Return valid JSON only — no score.`;
       timing_flag_late_meal: boolean;
       late_meal_time?: string; // HH:MM
     };
-    waterIntakeBand?: string; // '<1L' | '1–2L' | '2–3L' | '3L+' — only advise hydration when low
-    alcoholBand?: string;    // '0' | '1–2' | '3–4' | '5+' — factor into recovery context
+    waterLiters?: number;
+    alcoholCount?: number;
+    sodaCount?: number;
     coffeeCount?: number;
     energyDrinkCount?: number;
     proteinSuppGrams?: number;
@@ -1396,30 +1397,32 @@ Return valid JSON only — no score.`;
       }
 
       // Hydration (only advise if data is present and indicates low intake)
-      if (params.waterIntakeBand) {
-        const isLow = params.waterIntakeBand === '<1L';
-        const isBorderline = params.waterIntakeBand === '1–2L';
+      if (params.waterLiters != null && params.waterLiters > 0) {
         const highStrain = params.strainScore != null && params.strainScore >= 14;
         const tiredOrStressed = params.todayFeeling === 'tired' || params.todayFeeling === 'stressed';
-        if (isLow) {
-          contextParts.push(`💧 Hydration: User reported <1L water today — low. Mention hydration briefly as a recovery lever.`);
-        } else if (isBorderline && (highStrain || tiredOrStressed)) {
-          contextParts.push(`💧 Hydration: User reported 1–2L water. Borderline given ${highStrain ? 'high strain' : `feeling ${params.todayFeeling}`} — a brief mention may help.`);
+        if (params.waterLiters < 1) {
+          contextParts.push(`💧 Hydration: User reported ${params.waterLiters}L water today — low. Mention hydration briefly as a recovery lever.`);
+        } else if (params.waterLiters < 2 && (highStrain || tiredOrStressed)) {
+          contextParts.push(`💧 Hydration: User reported ${params.waterLiters}L water. Borderline given ${highStrain ? 'high strain' : `feeling ${params.todayFeeling}`} — a brief mention may help.`);
         }
-        // 2–3L or 3L+: do NOT mention hydration at all
+        // 2L+: do NOT mention hydration at all
       }
 
       // Alcohol (factor into recovery context when non-zero)
-      if (params.alcoholBand && params.alcoholBand !== '0') {
-        const heavy = params.alcoholBand === '5+';
-        const moderate = params.alcoholBand === '3–4';
-        if (heavy) {
-          contextParts.push(`🍺 Alcohol: User reported 5+ drinks today. Expect reduced recovery tomorrow — factor this into any training or sleep advice.`);
-        } else if (moderate) {
-          contextParts.push(`🍺 Alcohol: User reported 3–4 drinks today. May affect sleep quality and tomorrow's recovery.`);
+      if ((params.alcoholCount ?? 0) > 0) {
+        const drinks = params.alcoholCount!;
+        if (drinks >= 5) {
+          contextParts.push(`🍺 Alcohol: User reported ${drinks} drinks today. Expect reduced recovery tomorrow — factor this into any training or sleep advice.`);
+        } else if (drinks >= 3) {
+          contextParts.push(`🍺 Alcohol: User reported ${drinks} drinks today. May affect sleep quality and tomorrow's recovery.`);
         } else {
-          contextParts.push(`🍺 Alcohol: User reported 1–2 drinks today.`);
+          contextParts.push(`🍺 Alcohol: User reported ${drinks} drink${drinks !== 1 ? 's' : ''} today.`);
         }
+      }
+
+      // Soda
+      if ((params.sodaCount ?? 0) > 0) {
+        contextParts.push(`🥤 Soda: User had ${params.sodaCount} soda${params.sodaCount !== 1 ? 's' : ''} today (added sugar load).`);
       }
 
       // Caffeine & supplements context

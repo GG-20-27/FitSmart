@@ -98,7 +98,7 @@ export interface IStorage {
 
   // Team training plan operations
   upsertTeamTrainingPlan(teamId: number, planDate: string, data: { sessionTitle: string; type: string; durationMinutes?: number; intensity?: string; description?: string; coachNotes?: string }): Promise<TeamTrainingPlan>;
-  getTeamTrainingPlanForDate(teamId: number, planDate: string, userId?: string): Promise<TeamTrainingPlan | undefined>;
+  getTeamTrainingPlanForDate(teamId: number, planDate: string, userId?: string): Promise<TeamTrainingPlan[]>;
   getTeamTrainingPlanForWeek(teamId: number, weekStart: string): Promise<TeamTrainingPlan[]>;
   deleteTeamTrainingPlan(teamId: number, planDate: string): Promise<void>;
 }
@@ -565,16 +565,16 @@ export class DatabaseStorage implements IStorage {
     return row;
   }
 
-  async getTeamTrainingPlanForDate(teamId: number, planDate: string, userId?: string): Promise<TeamTrainingPlan | undefined> {
-    const [row] = await db.select().from(teamTrainingPlan)
+  async getTeamTrainingPlanForDate(teamId: number, planDate: string, userId?: string): Promise<TeamTrainingPlan[]> {
+    return db.select().from(teamTrainingPlan)
       .where(and(
         eq(teamTrainingPlan.teamId, teamId),
         eq(teamTrainingPlan.planDate, planDate),
         userId
           ? or(isNull(teamTrainingPlan.userId), eq(teamTrainingPlan.userId, userId))
           : isNull(teamTrainingPlan.userId),
-      ));
-    return row;
+      ))
+      .orderBy(teamTrainingPlan.id);
   }
 
   async getTeamTrainingPlanForWeek(teamId: number, weekStart: string): Promise<TeamTrainingPlan[]> {
