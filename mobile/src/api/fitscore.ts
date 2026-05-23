@@ -393,14 +393,30 @@ export function formatDate(date: Date): string {
  * Calculate FitScore for a specific date
  * Combines Recovery, Training, and Nutrition scores
  */
-export async function calculateFitScore(date?: string, waterIntakeBand?: WaterIntakeBand | null, alcoholBand?: AlcoholBand | null): Promise<FitScoreResponse> {
+export async function calculateFitScore(
+  date?: string,
+  waterIntakeBand?: WaterIntakeBand | null,
+  alcoholBand?: AlcoholBand | null,
+  coffeeCount?: number,
+  energyDrinkCount?: number,
+  proteinSuppGrams?: number,
+  creatineTaken?: boolean,
+): Promise<FitScoreResponse> {
   console.log(`[API] Calculating FitScore for date: ${date || 'today'}`);
 
   const response = await apiRequest<FitScoreResponse>(
     '/api/fitscore/calculate',
     {
       method: 'POST',
-      body: JSON.stringify({ date, waterIntakeBand: waterIntakeBand ?? null, alcoholBand: alcoholBand ?? null }),
+      body: JSON.stringify({
+        date,
+        waterIntakeBand: waterIntakeBand ?? null,
+        alcoholBand: alcoholBand ?? null,
+        coffeeCount: coffeeCount ?? 0,
+        energyDrinkCount: energyDrinkCount ?? 0,
+        proteinSuppGrams: proteinSuppGrams ?? 0,
+        creatineTaken: creatineTaken ?? false,
+      }),
     }
   );
 

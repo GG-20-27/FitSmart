@@ -1247,6 +1247,10 @@ Return valid JSON only — no score.`;
     };
     waterIntakeBand?: string; // '<1L' | '1–2L' | '2–3L' | '3L+' — only advise hydration when low
     alcoholBand?: string;    // '0' | '1–2' | '3–4' | '5+' — factor into recovery context
+    coffeeCount?: number;
+    energyDrinkCount?: number;
+    proteinSuppGrams?: number;
+    creatineTaken?: boolean;
     dailyHabits?: {
       total: number;
       completed: number;
@@ -1416,6 +1420,21 @@ Return valid JSON only — no score.`;
         } else {
           contextParts.push(`🍺 Alcohol: User reported 1–2 drinks today.`);
         }
+      }
+
+      // Caffeine & supplements context
+      if ((params.coffeeCount ?? 0) > 0 || (params.energyDrinkCount ?? 0) > 0) {
+        const parts: string[] = [];
+        if ((params.coffeeCount ?? 0) > 0) parts.push(`${params.coffeeCount} coffee${params.coffeeCount !== 1 ? 's' : ''}`);
+        if ((params.energyDrinkCount ?? 0) > 0) parts.push(`${params.energyDrinkCount} energy drink${params.energyDrinkCount !== 1 ? 's' : ''}`);
+        const heavyCaffeine = (params.coffeeCount ?? 0) >= 4 || ((params.coffeeCount ?? 0) >= 2 && (params.energyDrinkCount ?? 0) >= 1);
+        contextParts.push(`☕ Caffeine: ${parts.join(' + ')} today.${heavyCaffeine ? ' High caffeine load — consider sleep timing impact.' : ''}`);
+      }
+      if ((params.proteinSuppGrams ?? 0) > 0) {
+        contextParts.push(`💪 Protein supplements: ${params.proteinSuppGrams}g today (shakes/bars).`);
+      }
+      if (params.creatineTaken) {
+        contextParts.push(`🧪 Creatine: taken today.`);
       }
 
       // Daily habits accountability (one sentence max, no shaming)

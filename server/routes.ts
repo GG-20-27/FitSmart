@@ -5115,7 +5115,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/fitscore/calculate', requireJWTAuth, async (req, res) => {
     try {
       const userId = getCurrentUserId(req);
-      const { date, waterIntakeBand, alcoholBand } = req.body;
+      const { date, waterIntakeBand, alcoholBand, coffeeCount, energyDrinkCount, proteinSuppGrams, creatineTaken } = req.body;
+      const coffees = Math.max(0, Math.min(8, Number(coffeeCount) || 0));
+      const energyDrinks = Math.max(0, Math.min(5, Number(energyDrinkCount) || 0));
+      const proteinSupp = Math.max(0, Math.min(100, Number(proteinSuppGrams) || 0));
+      const creatine = Boolean(creatineTaken);
       const tz = process.env.USER_TZ || 'Europe/Zurich';
       const targetDate = date || todayKey(tz);
       const fitscoreDataSource = (req as any).dataSource || 'whoop';
@@ -5428,6 +5432,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         else if (alcoholBand === '3–4') nutritionScore -= 2.0;
         else if (alcoholBand === '5+') nutritionScore -= 3.0;
 
+        // Coffee penalty: 4+ cups = -0.2
+        if (coffees >= 4) nutritionScore -= 0.2;
+
+        // Energy drink penalty: depends on total caffeine load
+        // 0-1 coffees + 1 energy drink = neutral; more = -0.3 per extra
+        if (energyDrinks > 0) {
+          const excessEnergyDrinks = coffees <= 1 ? Math.max(0, energyDrinks - 1) : energyDrinks;
+          nutritionScore -= excessEnergyDrinks * 0.3;
+        }
+
+        // Protein supplement bonus: hitting 30g+ is a positive habit signal
+        if (proteinSupp >= 30) nutritionScore += 0.2;
+
         // Clamp [1, 10]
         nutritionScore = Math.max(1, Math.min(10, nutritionScore));
 
@@ -5561,6 +5578,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         nutritionDayContext,
         waterIntakeBand: (waterIntakeBand as string) || null,
         alcoholBand: (alcoholBand as string) || null,
+        coffeeCount: coffees,
+        energyDrinkCount: energyDrinks,
+        proteinSuppGrams: proteinSupp,
+        creatineTaken: creatine,
         timestamp: new Date().toISOString(),
       };
 
@@ -5793,6 +5814,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timingSignals: timingSignals || undefined,
         waterIntakeBand: waterIntakeBand || undefined,
         alcoholBand: alcoholBand || undefined,
+        coffeeCount: req.body.coffeeCount != null ? Number(req.body.coffeeCount) : undefined,
+        energyDrinkCount: req.body.energyDrinkCount != null ? Number(req.body.energyDrinkCount) : undefined,
+        proteinSuppGrams: req.body.proteinSuppGrams != null ? Number(req.body.proteinSuppGrams) : undefined,
+        creatineTaken: req.body.creatineTaken != null ? Boolean(req.body.creatineTaken) : undefined,
         dailyHabits: dailyHabits || undefined,
         advancedRecoverySignals: advancedRecoverySignals || undefined,
         sleepDebtMinutes: sleepDebtMinutes ?? undefined,

@@ -980,6 +980,12 @@ export default function FitScoreScreen() {
   const [waterIntakeBand, setWaterIntakeBand] = useState<WaterIntakeBand | null>(null);
   const [alcoholBand, setAlcoholBand] = useState<AlcoholBand | null>(null);
 
+  // Drinks & supplements — stored per date in AsyncStorage
+  const [coffeeCount, setCoffeeCount] = useState(0);
+  const [energyDrinkCount, setEnergyDrinkCount] = useState(0);
+  const [proteinSuppGrams, setProteinSuppGrams] = useState(0);
+  const [creatineTaken, setCreatineTaken] = useState(false);
+
   // Daily habits check-in — loaded from goals, persisted per-date locally
   type DailyHabit = { text: string; goalTitle: string; done: boolean };
   const [dailyHabits, setDailyHabits] = useState<DailyHabit[]>([]);
@@ -1448,6 +1454,10 @@ export default function FitScoreScreen() {
     setTrainingSessions([]);
     setWaterIntakeBand(null);
     setAlcoholBand(null);
+    setCoffeeCount(0);
+    setEnergyDrinkCount(0);
+    setProteinSuppGrams(0);
+    setCreatineTaken(false);
     setLoading(true);
 
     const dateStr = formatDate(selectedDate);
@@ -1460,6 +1470,22 @@ export default function FitScoreScreen() {
     try {
       const stored = await AsyncStorage.getItem(`alcoholIntake_${dateStr}`);
       if (stored) setAlcoholBand(stored as AlcoholBand);
+    } catch { /* graceful */ }
+    try {
+      const stored = await AsyncStorage.getItem(`coffeeCount_${dateStr}`);
+      if (stored) setCoffeeCount(parseInt(stored, 10));
+    } catch { /* graceful */ }
+    try {
+      const stored = await AsyncStorage.getItem(`energyDrinkCount_${dateStr}`);
+      if (stored) setEnergyDrinkCount(parseInt(stored, 10));
+    } catch { /* graceful */ }
+    try {
+      const stored = await AsyncStorage.getItem(`proteinSuppGrams_${dateStr}`);
+      if (stored) setProteinSuppGrams(parseInt(stored, 10));
+    } catch { /* graceful */ }
+    try {
+      const stored = await AsyncStorage.getItem(`creatineTaken_${dateStr}`);
+      if (stored) setCreatineTaken(stored === 'true');
     } catch { /* graceful */ }
     const today = new Date();
     const yest = new Date(); yest.setDate(yest.getDate() - 1);
@@ -1600,7 +1626,7 @@ export default function FitScoreScreen() {
       const dateStr = formatDate(selectedDate);
       console.log(`[FITSCORE] Calculating FitScore for ${dateStr}`);
 
-      const result = await calculateFitScore(dateStr, waterIntakeBand, alcoholBand);
+      const result = await calculateFitScore(dateStr, waterIntakeBand, alcoholBand, coffeeCount, energyDrinkCount, proteinSuppGrams, creatineTaken);
 
       console.log(`[FITSCORE] Result received: ${result.fitScore}/10`);
       setFitScoreResult(result);
@@ -1765,6 +1791,46 @@ export default function FitScoreScreen() {
       } else {
         await AsyncStorage.removeItem(`alcoholIntake_${dateStr}`);
       }
+    } catch { /* graceful */ }
+  };
+
+  const handleCoffeeChange = async (delta: number) => {
+    const next = Math.max(0, Math.min(8, coffeeCount + delta));
+    setCoffeeCount(next);
+    const dateStr = formatDate(selectedDate);
+    try {
+      if (next > 0) await AsyncStorage.setItem(`coffeeCount_${dateStr}`, String(next));
+      else await AsyncStorage.removeItem(`coffeeCount_${dateStr}`);
+    } catch { /* graceful */ }
+  };
+
+  const handleEnergyDrinkChange = async (delta: number) => {
+    const next = Math.max(0, Math.min(5, energyDrinkCount + delta));
+    setEnergyDrinkCount(next);
+    const dateStr = formatDate(selectedDate);
+    try {
+      if (next > 0) await AsyncStorage.setItem(`energyDrinkCount_${dateStr}`, String(next));
+      else await AsyncStorage.removeItem(`energyDrinkCount_${dateStr}`);
+    } catch { /* graceful */ }
+  };
+
+  const handleProteinSuppChange = async (delta: number) => {
+    const next = Math.max(0, Math.min(100, proteinSuppGrams + delta));
+    setProteinSuppGrams(next);
+    const dateStr = formatDate(selectedDate);
+    try {
+      if (next > 0) await AsyncStorage.setItem(`proteinSuppGrams_${dateStr}`, String(next));
+      else await AsyncStorage.removeItem(`proteinSuppGrams_${dateStr}`);
+    } catch { /* graceful */ }
+  };
+
+  const handleCreatineToggle = async () => {
+    const next = !creatineTaken;
+    setCreatineTaken(next);
+    const dateStr = formatDate(selectedDate);
+    try {
+      if (next) await AsyncStorage.setItem(`creatineTaken_${dateStr}`, 'true');
+      else await AsyncStorage.removeItem(`creatineTaken_${dateStr}`);
     } catch { /* graceful */ }
   };
 
@@ -2546,6 +2612,80 @@ export default function FitScoreScreen() {
               </TouchableOpacity>
             ))}
           </View>
+        </View>
+      )}
+
+      {/* Drinks & Supplements — today/yesterday only */}
+      {!isPastDate && !showFitScoreResult && (
+        <View style={styles.waterSection}>
+          {/* Coffee */}
+          <View style={styles.waterHeader}>
+            <Ionicons name="cafe-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Coffee</Text>
+            {coffeeCount > 0 && (
+              <Text style={styles.waterSelected}>{coffeeCount} cup{coffeeCount !== 1 ? 's' : ''}</Text>
+            )}
+          </View>
+          <View style={styles.stepperRow}>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleCoffeeChange(-1)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.stepperValue}>{coffeeCount}</Text>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleCoffeeChange(1)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Energy Drinks */}
+          <View style={[styles.waterHeader, { marginTop: spacing.md }]}>
+            <Ionicons name="flash-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Energy drinks</Text>
+            {energyDrinkCount > 0 && (
+              <Text style={styles.waterSelected}>{energyDrinkCount}</Text>
+            )}
+          </View>
+          <View style={styles.stepperRow}>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleEnergyDrinkChange(-1)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.stepperValue}>{energyDrinkCount}</Text>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleEnergyDrinkChange(1)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Protein Supplements */}
+          <View style={[styles.waterHeader, { marginTop: spacing.md }]}>
+            <Ionicons name="barbell-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Protein supplements</Text>
+            {proteinSuppGrams > 0 && (
+              <Text style={styles.waterSelected}>{proteinSuppGrams}g</Text>
+            )}
+          </View>
+          <View style={styles.stepperRow}>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleProteinSuppChange(-10)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>−</Text>
+            </TouchableOpacity>
+            <Text style={styles.stepperValue}>{proteinSuppGrams}g</Text>
+            <TouchableOpacity style={styles.stepperBtn} onPress={() => handleProteinSuppChange(10)} activeOpacity={0.7}>
+              <Text style={styles.stepperBtnText}>+</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Creatine */}
+          <View style={[styles.waterHeader, { marginTop: spacing.md }]}>
+            <Ionicons name="fitness-outline" size={15} color={colors.textMuted} />
+            <Text style={styles.waterLabel}>Creatine</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.waterChip, creatineTaken && styles.waterChipActive]}
+            onPress={handleCreatineToggle}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.waterChipText, creatineTaken && styles.waterChipTextActive]}>
+              {creatineTaken ? 'Taken ✓' : 'Not taken'}
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -6743,6 +6883,34 @@ const styles = StyleSheet.create({
   },
   waterChipTextActive: {
     color: colors.accent,
+    fontWeight: '600',
+  },
+  stepperRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginTop: 4,
+  },
+  stepperBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.bgSecondary,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepperBtnText: {
+    color: colors.accent,
+    fontSize: 20,
+    fontWeight: '500',
+    lineHeight: 24,
+  },
+  stepperValue: {
+    ...typography.body,
+    minWidth: 40,
+    textAlign: 'center',
     fontWeight: '600',
   },
 
