@@ -909,6 +909,27 @@
             noMeal.textContent = 'No meals logged';
             content.appendChild(noMeal);
           }
+          const macroDay = (player.macrosByDate ?? {})[d];
+          if (macroDay && (macroDay.calories > 0 || macroDay.protein > 0)) {
+            const macroEl = document.createElement('div');
+            macroEl.className = 'day-section-score';
+            const calTarget = player.calorieTarget;
+            const protTarget = player.proteinTarget;
+            const calColor = calTarget
+              ? (macroDay.calories >= calTarget * 0.85 ? '#27E9B5' : macroDay.calories >= calTarget * 0.65 ? '#F59E0B' : '#EF4444')
+              : '#27E9B5';
+            const protColor = protTarget
+              ? (macroDay.protein >= protTarget * 0.85 ? '#27E9B5' : macroDay.protein >= protTarget * 0.65 ? '#F59E0B' : '#EF4444')
+              : '#27E9B5';
+            const calStr = calTarget
+              ? `<span style="color:${calColor}">${Math.round(macroDay.calories)}</span> / ${calTarget} kcal`
+              : `<span style="color:${calColor}">${Math.round(macroDay.calories)} kcal</span>`;
+            const protStr = protTarget
+              ? `<span style="color:${protColor}">${Math.round(macroDay.protein)}</span> / ${protTarget}g protein`
+              : `<span style="color:${protColor}">${Math.round(macroDay.protein)}g protein</span>`;
+            macroEl.innerHTML = `${calStr}<br>${protStr}`;
+            sec.appendChild(macroEl);
+          }
           if (scoreEntry?.nutrition != null) {
             const scoreEl = document.createElement('div');
             scoreEl.className = 'day-section-score';
@@ -986,6 +1007,114 @@
       });
 
       el.appendChild(dayCards);
+
+      // ── Goals & Context collapsible panel ──────────────────────────────
+      const gcToggle = document.createElement('button');
+      gcToggle.style.cssText = 'display:block;width:100%;text-align:left;padding:10px 0;background:none;border:none;border-top:1px solid #3B526530;color:#3B5265;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;cursor:pointer;margin-top:12px;';
+      gcToggle.textContent = '▸ Goals & Context';
+      const gcPanel = document.createElement('div');
+      gcPanel.style.display = 'none';
+      gcPanel.style.paddingBottom = '4px';
+
+      // Goals list
+      if (player.goals && player.goals.length > 0) {
+        const goalsTitle = document.createElement('div');
+        goalsTitle.style.cssText = 'font-size:10px;font-weight:700;color:#3B5265;text-transform:uppercase;letter-spacing:0.8px;margin:10px 0 6px;';
+        goalsTitle.textContent = 'Goals';
+        gcPanel.appendChild(goalsTitle);
+
+        const goalsList = document.createElement('div');
+        goalsList.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-bottom:10px;';
+        player.goals.forEach(g => {
+          const goalEl = document.createElement('div');
+          goalEl.style.cssText = 'display:flex;align-items:center;gap:8px;background:#0E2231;border-radius:6px;padding:7px 10px;';
+          goalEl.innerHTML = `<span style="font-size:15px;">${escHtml(g.emoji)}</span><span style="flex:1;font-size:12px;font-weight:600;color:#E0EAF0;">${escHtml(g.title)}</span><span style="font-size:10px;color:#3B5265;text-transform:uppercase;letter-spacing:0.3px;">${escHtml(g.category)}</span><span style="font-size:12px;font-weight:700;color:#27E9B5;margin-left:8px;">${g.progress}%</span>`;
+          goalsList.appendChild(goalEl);
+        });
+        gcPanel.appendChild(goalsList);
+      }
+
+      // Context fields
+      if (player.playerContext) {
+        const ctx = player.playerContext;
+        const ctxTitle = document.createElement('div');
+        ctxTitle.style.cssText = 'font-size:10px;font-weight:700;color:#3B5265;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;';
+        ctxTitle.textContent = 'Context';
+        gcPanel.appendChild(ctxTitle);
+
+        const ctxItems = [
+          { label: 'Goal', value: ctx.tier1Goal },
+          { label: 'Phase', value: ctx.tier2Phase },
+          ctx.injuryType ? { label: 'Injury', value: ctx.injuryType } : null,
+          ctx.rehabStage ? { label: 'Rehab stage', value: ctx.rehabStage } : null,
+          ctx.sportSpecific ? { label: 'Sport', value: ctx.sportSpecific } : null,
+          ctx.trainingSessionsPerWeek ? { label: 'Sessions / week', value: ctx.trainingSessionsPerWeek } : null,
+          ctx.weightKg ? { label: 'Weight', value: ctx.weightKg + ' kg' } : null,
+          ctx.calorieTarget ? { label: 'Calorie target', value: ctx.calorieTarget + ' kcal' } : null,
+          ctx.proteinTarget ? { label: 'Protein target', value: ctx.proteinTarget + 'g' } : null,
+        ].filter(Boolean);
+
+        const ctxGrid = document.createElement('div');
+        ctxGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:10px;';
+        ctxItems.forEach(item => {
+          const el2 = document.createElement('div');
+          el2.style.cssText = 'background:#0E2231;border-radius:6px;padding:6px 8px;';
+          el2.innerHTML = `<div style="font-size:10px;color:#3B5265;">${escHtml(item.label)}</div><div style="font-size:12px;font-weight:600;color:#E0EAF0;">${escHtml(String(item.value))}</div>`;
+          ctxGrid.appendChild(el2);
+        });
+        gcPanel.appendChild(ctxGrid);
+      }
+
+      // Weekly macro summary
+      const calTarget = player.calorieTarget;
+      const protTarget = player.proteinTarget;
+      const daysWithMacros = days.filter(d => {
+        const m = (player.macrosByDate ?? {})[d];
+        return m && (m.calories > 0 || m.protein > 0);
+      });
+      if (daysWithMacros.length > 0) {
+        const macroTitle = document.createElement('div');
+        macroTitle.style.cssText = 'font-size:10px;font-weight:700;color:#3B5265;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px;';
+        macroTitle.textContent = 'Weekly Calories & Protein';
+        gcPanel.appendChild(macroTitle);
+
+        // Header row
+        const macroHeader = document.createElement('div');
+        macroHeader.style.cssText = 'display:flex;gap:12px;padding:0 10px;margin-bottom:3px;';
+        macroHeader.innerHTML = `<span style="font-size:10px;color:#3B5265;width:52px;flex-shrink:0;">Day</span><span style="font-size:10px;color:#3B5265;flex:1;">Calories${calTarget ? ' / target' : ''}</span><span style="font-size:10px;color:#3B5265;flex:1;">Protein${protTarget ? ' / target' : ''}</span>`;
+        gcPanel.appendChild(macroHeader);
+
+        const macroTable = document.createElement('div');
+        macroTable.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
+        daysWithMacros.forEach(d => {
+          const macro = player.macrosByDate[d];
+          const [, mm, dd] = d.split('-');
+          const dateLabel = `${shortDay(d)} ${parseInt(mm)}.${parseInt(dd)}`;
+          const calColor = calTarget
+            ? (macro.calories >= calTarget * 0.85 ? '#27E9B5' : macro.calories >= calTarget * 0.65 ? '#F59E0B' : '#EF4444')
+            : '#E0EAF0';
+          const protColor = protTarget
+            ? (macro.protein >= protTarget * 0.85 ? '#27E9B5' : macro.protein >= protTarget * 0.65 ? '#F59E0B' : '#EF4444')
+            : '#E0EAF0';
+          const calStr = calTarget ? `${Math.round(macro.calories)} / ${calTarget} kcal` : `${Math.round(macro.calories)} kcal`;
+          const protStr = protTarget ? `${Math.round(macro.protein)} / ${protTarget}g` : `${Math.round(macro.protein)}g`;
+
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;gap:12px;background:#0E2231;border-radius:6px;padding:5px 10px;';
+          row.innerHTML = `<span style="font-size:11px;color:#3B5265;width:52px;flex-shrink:0;">${escHtml(dateLabel)}</span><span style="font-size:11px;color:${calColor};flex:1;">${escHtml(calStr)}</span><span style="font-size:11px;color:${protColor};flex:1;">${escHtml(protStr)}</span>`;
+          macroTable.appendChild(row);
+        });
+        gcPanel.appendChild(macroTable);
+      }
+
+      gcToggle.addEventListener('click', () => {
+        const isOpen = gcPanel.style.display !== 'none';
+        gcPanel.style.display = isOpen ? 'none' : 'block';
+        gcToggle.textContent = (isOpen ? '▸' : '▾') + ' Goals & Context';
+      });
+
+      el.appendChild(gcToggle);
+      el.appendChild(gcPanel);
     }
 
     function escHtml(str) {

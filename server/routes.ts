@@ -217,8 +217,9 @@ async function buildAndStoreFitRoast(
 ): Promise<{ payload: any; record: any }> {
   const tz = opts?.tz || 'Europe/Zurich';
   const zurichNow = DateTime.now().setZone(tz);
-  const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
-  const weekStart = zurichNow.startOf('week').toISODate()!;
+  // FitRoast is generated on Monday and covers the completed Mon–Sun week
+  const weekEnd = zurichNow.startOf('week').minus({ days: 1 }).toISODate()!;   // last Sunday
+  const weekStart = zurichNow.startOf('week').minus({ days: 7 }).toISODate()!; // last Monday
 
   let avgFitScore: number | undefined;
   let bestDayScore: number | undefined;
@@ -5675,6 +5676,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         waterLiters,
         alcoholCount,
         sodaCount,
+        coffeeCount,
+        energyDrinkCount,
+        proteinSuppGrams,
+        creatineTaken,
         dailyHabits, // { total, completed, completedList, missingList }
         advancedRecoverySignals,
         sleepDebtMinutes,
@@ -5770,9 +5775,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         if (hasCalorie || hasProtein) {
           const ctx = await storage.getUserContext(userId);
+          const suppProtein = Number(proteinSuppGrams) || 0;
           mealMacros = {
             totalCalories: hasCalorie ? totalCal : null,
-            totalProtein: hasProtein ? totalProt : null,
+            totalProtein: hasProtein ? totalProt + suppProtein : (suppProtein > 0 ? suppProtein : null),
             calorieTarget: ctx?.calorieTarget ?? null,
             proteinTarget: ctx?.proteinTarget ?? null,
           };
@@ -5830,10 +5836,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         waterLiters: waterLiters != null ? Number(waterLiters) : undefined,
         alcoholCount: alcoholCount != null ? Number(alcoholCount) : undefined,
         sodaCount: sodaCount != null ? Number(sodaCount) : undefined,
-        coffeeCount: req.body.coffeeCount != null ? Number(req.body.coffeeCount) : undefined,
-        energyDrinkCount: req.body.energyDrinkCount != null ? Number(req.body.energyDrinkCount) : undefined,
-        proteinSuppGrams: req.body.proteinSuppGrams != null ? Number(req.body.proteinSuppGrams) : undefined,
-        creatineTaken: req.body.creatineTaken != null ? Boolean(req.body.creatineTaken) : undefined,
+        coffeeCount: coffeeCount != null ? Number(coffeeCount) : undefined,
+        energyDrinkCount: energyDrinkCount != null ? Number(energyDrinkCount) : undefined,
+        proteinSuppGrams: proteinSuppGrams != null ? Number(proteinSuppGrams) : undefined,
+        creatineTaken: creatineTaken != null ? Boolean(creatineTaken) : undefined,
         dailyHabits: dailyHabits || undefined,
         advancedRecoverySignals: advancedRecoverySignals || undefined,
         sleepDebtMinutes: sleepDebtMinutes ?? undefined,
@@ -6240,11 +6246,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tz = (rawTz && DateTime.now().setZone(rawTz).isValid) ? rawTz : 'Europe/Zurich';
       console.log(`[FITROAST] GET current user=${userId} tz=${tz}${rawTz !== tz ? ` (fallback from "${rawTz}")` : ''}`);
       const zurichNow = DateTime.now().setZone(tz);
-      // Week: Monday–Sunday
-      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
-      const weekStart = zurichNow.startOf('week').toISODate()!;
+      // FitRoast covers the completed Mon–Sun week; generated on Monday
+      const weekEnd = zurichNow.startOf('week').minus({ days: 1 }).toISODate()!;   // last Sunday
+      const weekStart = zurichNow.startOf('week').minus({ days: 7 }).toISODate()!; // last Monday
 
-      // Check cache for this week first — always serve if present
+      // Check cache for last completed week first — always serve if present
       const existing = await storage.getFitroastByUserAndWeek(userId, weekEnd);
       if (existing) {
         console.log(`[FITROAST] Serving cached roast for user=${userId} week=${weekEnd}`);
@@ -6255,9 +6261,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // No roast for this week yet — if it's not Sunday, serve last week's roast so
-      // users can still read it Mon–Sat while the new week builds up
-      if (zurichNow.weekday !== 7) {
+      // No roast for last week yet — if it's not Monday, serve the most recent roast
+      // so users can still read it Tue–Sun while waiting for next Monday's generation
+      if (zurichNow.weekday !== 1) {
         const latest = await storage.getLatestFitroast(userId);
         if (latest) {
           console.log(`[FITROAST] Serving previous roast (${latest.weekEnd}) for user=${userId} on weekday=${zurichNow.weekday}`);
@@ -6270,17 +6276,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // No roast yet — eligibility is Sunday only (no active-day requirement for now)
-      const isSunday = zurichNow.weekday === 7; // Luxon: 1=Mon … 7=Sun
-      const eligible = isSunday;
+      // No roast yet — eligibility is Monday only
+      const isMonday = zurichNow.weekday === 1; // Luxon: 1=Mon … 7=Sun
+      const eligible = isMonday;
 
-      console.log(`[FITROAST] No roast yet for user=${userId}: isSunday=${isSunday}, eligible=${eligible}`);
+      console.log(`[FITROAST] No roast yet for user=${userId}: isMonday=${isMonday}, eligible=${eligible}`);
 
       return res.status(404).json({
         error: 'No roast for this week yet',
         needs_generate: eligible,
         eligible,
-        is_sunday: isSunday,
+        is_monday: isMonday,
         active_days: 7, // not used for gating anymore — report full week so mobile shows unlocked pips
         week_start: weekStart,
         week_end: weekEnd,
@@ -6302,7 +6308,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = getCurrentUserId(req);
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
       const zurichNow = DateTime.now().setZone('Europe/Zurich');
-      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      const weekEnd = zurichNow.startOf('week').minus({ days: 1 }).toISODate()!; // last Sunday
       await storage.deleteFitroastByUserAndWeek(userId, weekEnd);
       const roastDataSource = (req as any).dataSource || 'whoop';
       const { payload, record } = await buildAndStoreFitRoast(userId, roastDataSource);
@@ -6325,9 +6331,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = (req.query.userId as string) || getCurrentUserId(req);
       if (!userId) return res.status(400).json({ error: 'userId query param required' });
       const zurichNow = DateTime.now().setZone('Europe/Zurich');
-      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      const weekEnd = zurichNow.startOf('week').minus({ days: 1 }).toISODate()!; // last Sunday
       await storage.deleteFitroastByUserAndWeek(userId, weekEnd);
-      console.log(`[FITROAST-DEV] Deleted current week's roast for user=${userId} week=${weekEnd}`);
+      console.log(`[FITROAST-DEV] Deleted last week's roast for user=${userId} week=${weekEnd}`);
       res.json({ success: true, week_end: weekEnd });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -6346,20 +6352,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tz = (rawTz && DateTime.now().setZone(rawTz).isValid) ? rawTz : 'Europe/Zurich';
       console.log(`[FITROAST] POST generate user=${userId} tz=${tz}${rawTz !== tz ? ` (fallback from "${rawTz}")` : ''}`);
       const zurichNow = DateTime.now().setZone(tz);
-      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      // FitRoast covers the completed Mon–Sun week; generated on Monday
+      const weekEnd = zurichNow.startOf('week').minus({ days: 1 }).toISODate()!; // last Sunday
 
-      // Eligibility check: Sunday only
-      const isSunday = zurichNow.weekday === 7;
-      if (!isSunday) {
-        console.log(`[FITROAST] Not eligible for user=${userId}: not Sunday (weekday=${zurichNow.weekday})`);
+      // Eligibility check: Monday only
+      const isMonday = zurichNow.weekday === 1;
+      if (!isMonday) {
+        console.log(`[FITROAST] Not eligible for user=${userId}: not Monday (weekday=${zurichNow.weekday})`);
         return res.status(403).json({
-          error: 'FitRoast is generated every Sunday based on your weekly performance.',
-          is_sunday: false,
+          error: 'FitRoast is generated every Monday once your full week is complete.',
+          is_monday: false,
           eligible: false,
         });
       }
 
-      // Delete existing roast for this week (allow regeneration on Sunday)
+      // Delete existing roast for last week (allow regeneration on Monday)
       await storage.deleteFitroastByUserAndWeek(userId, weekEnd);
 
       const roastDataSource = (req as any).dataSource || 'whoop';
@@ -8095,21 +8102,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log('[Coach] members:', members.map(m => ({ userId: m.userId, dataSource: m.dataSource })));
       const players = await Promise.all(members.map(async (m) => {
-        const [scores, meals, trainingSessions, checkins, whoopEntries] = await Promise.all([
+        const [scores, meals, trainingSessions, checkins, whoopEntries, ctx, goals] = await Promise.all([
           storage.getFitScoresByUserAndWeek(m.userId, days[0], days[days.length - 1]),
           storage.getMealsByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
           storage.getTrainingDataByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
           storage.getManualCheckins(m.userId, days[0], days[days.length - 1]),
           storage.getWhoopDataByUserAndDateRange(m.userId, days[0], days[days.length - 1]),
+          storage.getUserContext(m.userId),
+          db.select().from(userGoals).where(eq(userGoals.userId, m.userId)).orderBy(desc(userGoals.createdAt)),
         ]);
         const scoresByDate: Record<string, { score: number; nutrition: number | null; training: number | null; recovery: number | null }> = {};
         for (const s of scores) {
           scoresByDate[s.date] = { score: s.score, nutrition: s.nutritionScore ?? null, training: s.trainingScore ?? null, recovery: s.recoveryScore ?? null };
         }
         const mealsByDate: Record<string, { filename: string; mealType: string | null; mealNotes: string | null; uploadedAt: string | null }[]> = {};
+        const macrosByDate: Record<string, { calories: number; protein: number }> = {};
         for (const meal of meals) {
           if (!mealsByDate[meal.date]) mealsByDate[meal.date] = [];
           mealsByDate[meal.date].push({ filename: meal.filename, mealType: meal.mealType, mealNotes: meal.mealNotes, uploadedAt: meal.uploadedAt?.toISOString() ?? null });
+          if (meal.analysisResult) {
+            try {
+              const parsed = JSON.parse(meal.analysisResult);
+              const cal = typeof parsed.estimated_calories === 'number' ? parsed.estimated_calories : 0;
+              const prot = typeof parsed.estimated_protein === 'number' ? parsed.estimated_protein : 0;
+              if (!macrosByDate[meal.date]) macrosByDate[meal.date] = { calories: 0, protein: 0 };
+              macrosByDate[meal.date].calories += cal;
+              macrosByDate[meal.date].protein += prot;
+            } catch {}
+          }
         }
         const trainingByDate: Record<string, { type: string; duration: number; intensity: string | null; score: number | null; skipped: boolean; comment: string | null }[]> = {};
         for (const t of trainingSessions) {
@@ -8133,9 +8153,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           days,
           scoresByDate,
           mealsByDate,
+          macrosByDate,
           trainingByDate,
           checkinByDate,
           whoopByDate,
+          calorieTarget: ctx?.calorieTarget ?? null,
+          proteinTarget: ctx?.proteinTarget ?? null,
+          goals: goals.map(g => ({ emoji: g.emoji, title: g.title, category: g.category, progress: g.progress })),
+          playerContext: ctx ? {
+            tier1Goal: ctx.tier1Goal,
+            tier2Phase: ctx.tier2Phase,
+            injuryType: ctx.injuryType ?? null,
+            rehabStage: ctx.rehabStage ?? null,
+            sportSpecific: ctx.sportSpecific ?? null,
+            trainingSessionsPerWeek: ctx.trainingSessionsPerWeek ?? null,
+            weightKg: ctx.weightKg ?? null,
+            calorieTarget: ctx.calorieTarget ?? null,
+            proteinTarget: ctx.proteinTarget ?? null,
+          } : null,
         };
       }));
 
@@ -8333,14 +8368,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.sendFile(path.join(process.cwd(), 'public/coach/index.html'));
   });
 
-  // ── FitRoast Sunday auto-generation cron ──────────────────────────────────
-  // Runs every Sunday at 23:59 Zurich time — fallback for users who forgot
-  // to generate their FitRoast all Sunday (preserves the goal-check flow for active users).
-  cron.schedule('59 23 * * 0', async () => {
+  // ── FitRoast Monday auto-generation cron ──────────────────────────────────
+  // Runs every Monday at 06:00 Zurich time — generates roast for the just-completed week
+  // (Mon–Sun) for users who haven't manually triggered it.
+  cron.schedule('0 6 * * 1', async () => {
     console.log('[Cron] FitRoast auto-generation starting...');
     try {
       const zurichNow = DateTime.now().setZone('Europe/Zurich');
-      const weekEnd = zurichNow.startOf('week').plus({ days: 6 }).toISODate()!;
+      const weekEnd = zurichNow.startOf('week').minus({ days: 1 }).toISODate()!; // last Sunday
       const allUsers = await storage.getAllUsers();
       let generated = 0;
       let skipped = 0;
