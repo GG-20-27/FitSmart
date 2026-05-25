@@ -973,6 +973,7 @@ export default function FitScoreScreen() {
   const [cheatDayDate, setCheatDayDate] = useState<string | null>(null); // the marked cheat date for this week
   const [isOnTeam, setIsOnTeam] = useState(false);
   const [cheatDayLoading, setCheatDayLoading] = useState(false);
+  const cheatDayAnim = useRef(new Animated.Value(0)).current; // 0=off, 1=on
 
   // WHOOP import modal
   const [showWhoopImport, setShowWhoopImport] = useState(false);
@@ -1580,7 +1581,9 @@ export default function FitScoreScreen() {
         // Fetch team membership + cheat day status for this date
         getCheatDayStatus(dateStr).then((status) => {
           setIsOnTeam(status.onTeam);
+          const isOn = status.cheatDate === dateStr;
           setCheatDayDate(status.cheatDate);
+          cheatDayAnim.setValue(isOn ? 1 : 0);
         }).catch(() => {});
         if (trainingData.length > 0) {
           console.log('[TRAINING DATA] First session breakdown:', trainingData[0].breakdown);
@@ -3393,59 +3396,100 @@ export default function FitScoreScreen() {
           )}
 
           {/* Cheat Day — team members only */}
-          {isOnTeam && !isPastDate && (
-            <View style={styles.cheatDayCard}>
-              <View style={styles.cheatDayRow}>
-                <View style={styles.cheatDayLeft}>
-                  <Text style={styles.cheatDayTitle}>Cheat Day</Text>
-                  <Text style={styles.cheatDaySubtitle}>
-                    {cheatDayDate
-                      ? cheatDayDate === formatDate(selectedDate)
-                        ? "Today won't count against your leaderboard score"
-                        : `Used on ${cheatDayDate} — your 1 weekly skip`
-                      : "Mark today as your cheat day — it won't hurt your team avg"}
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  style={[
-                    styles.cheatDayToggle,
-                    cheatDayDate === formatDate(selectedDate) && styles.cheatDayToggleActive,
-                    (cheatDayDate !== null && cheatDayDate !== formatDate(selectedDate)) && styles.cheatDayToggleDisabled,
-                  ]}
-                  disabled={cheatDayLoading || (cheatDayDate !== null && cheatDayDate !== formatDate(selectedDate))}
-                  onPress={async () => {
-                    setCheatDayLoading(true);
-                    try {
-                      const todayStr = formatDate(selectedDate);
-                      if (cheatDayDate === todayStr) {
-                        await unmarkCheatDay();
-                        setCheatDayDate(null);
-                      } else {
-                        const result = await markCheatDay(todayStr);
-                        setCheatDayDate(result.cheatDate);
-                      }
-                    } catch (err: any) {
-                      console.error('[CheatDay] toggle error:', err);
-                    } finally {
-                      setCheatDayLoading(false);
-                    }
-                  }}
-                  activeOpacity={0.75}
-                >
-                  {cheatDayLoading ? (
-                    <ActivityIndicator size="small" color={colors.accent} />
-                  ) : (
-                    <Text style={[
-                      styles.cheatDayToggleText,
-                      cheatDayDate === formatDate(selectedDate) && styles.cheatDayToggleTextActive,
-                    ]}>
-                      {cheatDayDate === formatDate(selectedDate) ? 'ON' : 'OFF'}
+          {isOnTeam && !isPastDate && (() => {
+            const todayStr = formatDate(selectedDate);
+            const isActive = cheatDayDate === todayStr;
+            const isUsedElsewhere = cheatDayDate !== null && !isActive;
+            const trackColor = cheatDayAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.surfaceMute + '50', colors.accent + '40'] });
+            const thumbColor = cheatDayAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.textMuted, colors.accent] });
+            const thumbTranslate = cheatDayAnim.interpolate({ inputRange: [0, 1], outputRange: [2, 22] });
+            return (
+              <View style={[styles.cheatDayCard, isActive && styles.cheatDayCardActive]}>
+                <View style={styles.cheatDayRow}>
+                  <View style={styles.cheatDayLeft}>
+                    <Text style={[styles.cheatDayTitle, isActive && { color: colors.accent }]}>
+                      {isActive ? 'Rest Pass — Active' : 'Rest Pass'}
                     </Text>
-                  )}
-                </TouchableOpacity>
+                    <Text style={styles.cheatDaySubtitle}>
+                      {isUsedElsewhere
+                        ? `Already used on ${cheatDayDate} this week`
+                        : isActive
+                          ? "Today is excluded from your leaderboard average"
+                          : "Use your 1 weekly pass — today won't count against your score"}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    disabled={cheatDayLoading || isUsedElsewhere}
+                    onPress={() => {
+                      if (isActive) {
+                        Alert.alert(
+                          'Remove Rest Pass?',
+                          'Today will count toward your leaderboard score again.',
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Remove',
+                              style: 'destructive',
+                              onPress: async () => {
+                                setCheatDayLoading(true);
+                                try {
+                                  await unmarkCheatDay();
+                                  setCheatDayDate(null);
+                                  Animated.spring(cheatDayAnim, { toValue: 0, useNativeDriver: false }).start();
+                                } catch (err: any) {
+                                  Alert.alert('Error', err?.message || 'Could not remove rest pass. Try again.');
+                                } finally {
+                                  setCheatDayLoading(false);
+                                }
+                              },
+                            },
+                          ]
+                        );
+                      } else {
+                        Alert.alert(
+                          'Use Rest Pass?',
+                          "Today will be excluded from your weekly leaderboard average — it won't help or hurt your score. You get 1 per week.",
+                          [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                              text: 'Activate',
+                              onPress: async () => {
+                                setCheatDayLoading(true);
+                                try {
+                                  const result = await markCheatDay(todayStr);
+                                  setCheatDayDate(result.cheatDate);
+                                  Animated.spring(cheatDayAnim, { toValue: 1, useNativeDriver: false }).start();
+                                } catch (err: any) {
+                                  const msg = err?.message || '';
+                                  if (msg.includes('already used') || msg.includes('409')) {
+                                    Alert.alert('Already Used', "You've already used your rest pass for this week.");
+                                  } else {
+                                    Alert.alert('Error', 'Could not activate rest pass. Try again.');
+                                  }
+                                } finally {
+                                  setCheatDayLoading(false);
+                                }
+                              },
+                            },
+                          ]
+                        );
+                      }
+                    }}
+                    activeOpacity={0.8}
+                    style={{ opacity: isUsedElsewhere ? 0.35 : 1 }}
+                  >
+                    {cheatDayLoading ? (
+                      <ActivityIndicator size="small" color={colors.accent} style={{ width: 48 }} />
+                    ) : (
+                      <Animated.View style={[styles.cheatDayTrack, { backgroundColor: trackColor }]}>
+                        <Animated.View style={[styles.cheatDayThumb, { backgroundColor: thumbColor, transform: [{ translateX: thumbTranslate }] }]} />
+                      </Animated.View>
+                    )}
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          )}
+            );
+          })()}
 
           {/* FitCoach Preview */}
           <Animated.View style={[styles.coachPreviewCard, { borderColor: coachBorderColor }]}>
@@ -6468,12 +6512,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   cheatDayCard: {
-    backgroundColor: colors.surfaceMute + '18',
+    backgroundColor: colors.surfaceMute + '15',
     borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.surfaceMute + '40',
+    borderColor: colors.surfaceMute + '35',
     padding: spacing.md,
     marginBottom: spacing.md,
+  },
+  cheatDayCardActive: {
+    backgroundColor: colors.accent + '0D',
+    borderColor: colors.accent + '40',
   },
   cheatDayRow: {
     flexDirection: 'row',
@@ -6488,40 +6536,29 @@ const styles = StyleSheet.create({
     ...typography.small,
     fontWeight: '700',
     color: colors.textPrimary,
-    letterSpacing: 0.5,
-    marginBottom: 2,
+    letterSpacing: 0.4,
+    marginBottom: 3,
   },
   cheatDaySubtitle: {
     fontSize: 11,
     color: colors.textMuted,
     lineHeight: 16,
   },
-  cheatDayToggle: {
-    minWidth: 44,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.surfaceMute + '30',
-    borderWidth: 1,
-    borderColor: colors.surfaceMute + '60',
-    alignItems: 'center',
+  cheatDayTrack: {
+    width: 46,
+    height: 26,
+    borderRadius: 13,
     justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
   },
-  cheatDayToggleActive: {
-    backgroundColor: colors.accent + '25',
-    borderColor: colors.accent + '60',
-  },
-  cheatDayToggleDisabled: {
-    opacity: 0.4,
-  },
-  cheatDayToggleText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.textMuted,
-    letterSpacing: 1,
-  },
-  cheatDayToggleTextActive: {
-    color: colors.accent,
+  cheatDayThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+    elevation: 2,
   },
   allGreenText: {
     ...typography.small,
