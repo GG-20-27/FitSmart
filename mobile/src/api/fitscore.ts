@@ -37,6 +37,7 @@ export interface MealData {
   mealQualityFlags?: MealQualityFlags;
   estimatedCalories?: number | null;
   estimatedProtein?: number | null;
+  identifiedAs?: string | null;   // e.g. "~150g chicken breast, ~80g rice, ~50g broccoli"
 }
 
 export interface TrainingDataEntry {

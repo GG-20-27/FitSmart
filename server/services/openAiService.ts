@@ -208,8 +208,15 @@ DIET PHASE CONTEXT (if provided):
 - Cutting: calorie density and portion size matter; note processing/portion issues
 - Lean bulk / Aggressive bulk / Performance fueling: protein amount matters most
 
+PORTION ESTIMATION (two-step — follow this order):
+Step 1: List each food component and estimate its weight in grams. Use a fork (≈20cm), hand, plate diameter, or standard serving sizes as visual anchors when visible. If no reference object is present, use typical restaurant/home serving sizes as your prior.
+Step 2: Use those weight estimates to calculate estimatedCalories and estimatedProtein. Do not guess calories directly — derive them from weight × typical nutrition values per 100g.
+
 Respond ONLY with valid JSON — no markdown, no extra text:
 {
+  "identifiedItems": [
+    { "item": "<food name>", "grams": <estimated weight as integer> }
+  ],
   "factors": {
     "proteinAdequacy":  { "status": "good"|"warning"|"unknown", "confidence": 0.0-1.0, "evidence": "<what you see>", "short_reason": "<≤90 chars>", "quick_fix": "<≤90 chars>" },
     "fiberPlantVolume": { "status": "good"|"warning"|"unknown", "confidence": 0.0-1.0, "evidence": "<what you see>", "short_reason": "<≤90 chars>", "quick_fix": "<≤90 chars>" },
@@ -220,8 +227,8 @@ Respond ONLY with valid JSON — no markdown, no extra text:
   "strength": "<1 sentence, ≤120 chars — specific, not generic>",
   "gap":      "<1 sentence, ≤120 chars — explicit warning factor + why it matters>",
   "upgrade":  "<1 sentence, ≤100 chars — starts with an action verb>",
-  "estimatedCalories": <rough integer kcal estimate based on visible portion and typical values>,
-  "estimatedProtein":  <rough integer grams protein estimate based on visible protein sources>
+  "estimatedCalories": <integer kcal — derived from identifiedItems weights>,
+  "estimatedProtein":  <integer grams — derived from identifiedItems weights>
 }`;
 
 export interface MealQualityFlag {
@@ -259,6 +266,7 @@ export interface MealAnalysisResult {
   meal_quality_flags?: MealQualityFlags;
   estimatedCalories?: number | null;
   estimatedProtein?: number | null;
+  identifiedAs?: string | null; // e.g. "~150g chicken breast, ~80g rice, ~50g broccoli"
 }
 
 export interface TrainingAnalysisResult {
@@ -778,6 +786,7 @@ export class OpenAIService {
         mealNotes ? `\n\nUser notes: "${mealNotes}"` : ''
       }${goalPhase ? `\n\nUser's current diet phase: ${goalPhase}` : ''}
 
+Follow the two-step portion estimation in the system prompt: list each component with grams first, then derive calories and protein from those weights.
 For each factor: report status ("good"/"warning"/"unknown"), your confidence (0.0–1.0), and a short evidence note.
 If you are not sure, use "unknown" — do NOT default to "warning" just because something isn't obvious.
 Then write strength/gap/upgrade — reference only factors you actually rated "warning" in the gap.
@@ -801,7 +810,7 @@ Return valid JSON only — no score.`;
               ]
             }
           ],
-          max_completion_tokens: 700,
+          max_completion_tokens: 900,
           temperature: 0.4,  // lower temp for more consistent factor classification
           response_format: { type: 'json_object' }
         })
@@ -894,7 +903,16 @@ Return valid JSON only — no score.`;
       const estimatedProtein = typeof aiResult.estimatedProtein === 'number' && aiResult.estimatedProtein > 0
         ? Math.round(aiResult.estimatedProtein) : null;
 
-      console.log(`[OpenAI Service] Analysis complete: score_raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk} phase=${goalPhase || 'none'} estimatedCal=${estimatedCalories} estimatedProt=${estimatedProtein}`);
+      // Build identifiedAs string from identifiedItems array
+      let identifiedAs: string | null = null;
+      if (Array.isArray(aiResult.identifiedItems) && aiResult.identifiedItems.length > 0) {
+        identifiedAs = aiResult.identifiedItems
+          .filter((it: any) => it?.item && it?.grams > 0)
+          .map((it: any) => `~${it.grams}g ${it.item}`)
+          .join(', ') || null;
+      }
+
+      console.log(`[OpenAI Service] Analysis complete: score_raw=${score_raw} display=${score_display} isPureJunk=${isPureJunk} phase=${goalPhase || 'none'} estimatedCal=${estimatedCalories} estimatedProt=${estimatedProtein} identifiedAs=${identifiedAs}`);
       return {
         nutrition_subscore: score_raw, // backward compat
         ai_analysis,
@@ -903,6 +921,7 @@ Return valid JSON only — no score.`;
         meal_quality_flags,
         estimatedCalories,
         estimatedProtein,
+        identifiedAs,
       };
 
     } catch (error) {
@@ -933,6 +952,7 @@ Return valid JSON only — no score.`;
 
       const userPrompt = `Assess this ${mealType} meal based on the user's description: "${mealDescription}"${goalPhase ? `\n\nUser's current diet phase: ${goalPhase}` : ''}
 
+Follow the two-step portion estimation in the system prompt: list each component with grams first, then derive calories and protein from those weights.
 For each factor: report status ("good"/"warning"/"unknown"), your confidence (0.0–1.0), and a short evidence note.
 If you are not sure, use "unknown" — do NOT default to "warning" just because something isn't obvious.
 Then write strength/gap/upgrade — reference only factors you actually rated "warning" in the gap.
@@ -950,7 +970,7 @@ Return valid JSON only — no score.`;
             { role: 'system', content: FITSCORE_AI_SYSTEM_PROMPT },
             { role: 'user', content: userPrompt }
           ],
-          max_completion_tokens: 700,
+          max_completion_tokens: 900,
           temperature: 0.4,
           response_format: { type: 'json_object' }
         })
@@ -1033,8 +1053,16 @@ Return valid JSON only — no score.`;
       const estimatedProtein = typeof aiResult.estimatedProtein === 'number' && aiResult.estimatedProtein > 0
         ? Math.round(aiResult.estimatedProtein) : null;
 
-      console.log(`[OpenAI Service] Text analysis complete: score_raw=${score_raw} display=${score_display}`);
-      return { nutrition_subscore: score_raw, ai_analysis, score_raw, score_display, meal_quality_flags, estimatedCalories, estimatedProtein };
+      let identifiedAs: string | null = null;
+      if (Array.isArray(aiResult.identifiedItems) && aiResult.identifiedItems.length > 0) {
+        identifiedAs = aiResult.identifiedItems
+          .filter((it: any) => it?.item && it?.grams > 0)
+          .map((it: any) => `~${it.grams}g ${it.item}`)
+          .join(', ') || null;
+      }
+
+      console.log(`[OpenAI Service] Text analysis complete: score_raw=${score_raw} display=${score_display} identifiedAs=${identifiedAs}`);
+      return { nutrition_subscore: score_raw, ai_analysis, score_raw, score_display, meal_quality_flags, estimatedCalories, estimatedProtein, identifiedAs };
 
     } catch (error) {
       console.error('[OpenAI Service] Failed to analyze meal text:', error);

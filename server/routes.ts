@@ -4471,6 +4471,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         meal_time: (mealTime as string) || null, // HH:MM from mobile time picker
         estimated_calories: analysis.estimatedCalories ?? null,
         estimated_protein: analysis.estimatedProtein ?? null,
+        identified_as: analysis.identifiedAs ?? null,
       };
 
       const updatedMeal = await storage.updateMeal(meal.id, {
@@ -4494,6 +4495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           mealQualityFlags: analysis.meal_quality_flags ?? null,
           estimatedCalories: analysis.estimatedCalories ?? null,
           estimatedProtein: analysis.estimatedProtein ?? null,
+          identifiedAs: analysis.identifiedAs ?? null,
         }
       });
     } catch (error) {
@@ -4543,6 +4545,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         meal_time: (mealTime as string) || null,
         estimated_calories: analysis.estimatedCalories ?? null,
         estimated_protein: analysis.estimatedProtein ?? null,
+        identified_as: analysis.identifiedAs ?? null,
       };
 
       const updatedMeal = await storage.updateMeal(meal.id, { analysisResult: JSON.stringify(analysisData) });
@@ -4564,6 +4567,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           mealQualityFlags: analysis.meal_quality_flags ?? null,
           estimatedCalories: analysis.estimatedCalories ?? null,
           estimatedProtein: analysis.estimatedProtein ?? null,
+          identifiedAs: analysis.identifiedAs ?? null,
         }
       });
     } catch (error) {
@@ -4645,6 +4649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         let estimatedCalories: number | null = null;
         let estimatedProtein: number | null = null;
 
+        let identifiedAs: string | null = null;
         if (meal.analysisResult) {
           try {
             const parsed = JSON.parse(meal.analysisResult);
@@ -4652,6 +4657,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             analysis = parsed.ai_analysis;
             if (typeof parsed.estimated_calories === 'number') estimatedCalories = parsed.estimated_calories;
             if (typeof parsed.estimated_protein === 'number') estimatedProtein = parsed.estimated_protein;
+            if (typeof parsed.identified_as === 'string') identifiedAs = parsed.identified_as;
           } catch (e) {
             console.error(`Failed to parse analysis for meal ${meal.id}:`, e);
           }
@@ -4668,6 +4674,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           analysis,
           estimatedCalories,
           estimatedProtein,
+          identifiedAs,
         };
       });
 

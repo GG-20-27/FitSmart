@@ -4554,7 +4554,13 @@ export default function FitScoreScreen() {
             <ScrollView ref={mealScrollRef} style={styles.modalScroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {/* Image Preview / Text-Only Placeholder */}
               {!textOnlyMode && pendingMealImage && (
-                <Image source={{ uri: pendingMealImage }} style={styles.mealPreviewImage} />
+                <>
+                  <Image source={{ uri: pendingMealImage }} style={styles.mealPreviewImage} />
+                  <View style={styles.portionTip}>
+                    <Ionicons name="restaurant-outline" size={13} color={colors.textMuted} />
+                    <Text style={styles.portionTipText}>Tip: include a fork or your hand in the photo for a more accurate portion estimate</Text>
+                  </View>
+                </>
               )}
               {textOnlyMode && (
                 <View style={styles.textOnlyPlaceholder}>
@@ -4753,6 +4759,26 @@ export default function FitScoreScreen() {
                       </View>
                     );
                   })()}
+
+                  {/* Correct estimate section */}
+                  {selectedMeal?.identifiedAs && (
+                    <View style={styles.correctEstimateSection}>
+                      <Text style={styles.correctEstimateLabel}>AI estimated</Text>
+                      <Text style={styles.correctEstimateText}>{selectedMeal.identifiedAs}</Text>
+                      <TouchableOpacity
+                        style={styles.correctEstimateBtn}
+                        onPress={() => {
+                          setShowAnalysisModal(false);
+                          // Open edit modal pre-filled with the AI's identification
+                          handleEditMeal({ ...selectedMeal!, mealNotes: selectedMeal!.identifiedAs ?? '' });
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="create-outline" size={14} color={colors.accent} />
+                        <Text style={styles.correctEstimateBtnText}>Correct estimate</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               )}
             </ScrollView>
@@ -5523,7 +5549,20 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 200,
     borderRadius: radii.md,
+    marginBottom: spacing.xs,
+  },
+  portionTip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: spacing.lg,
+    paddingHorizontal: 2,
+  },
+  portionTipText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 12,
+    flex: 1,
   },
   textOnlyPlaceholder: {
     width: '100%',
@@ -6075,6 +6114,40 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.textPrimary,
     lineHeight: 24,
+  },
+  correctEstimateSection: {
+    marginHorizontal: spacing.md,
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceMute + '40',
+  },
+  correctEstimateLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  correctEstimateText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: spacing.sm,
+  },
+  correctEstimateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+  },
+  correctEstimateBtnText: {
+    ...typography.small,
+    color: colors.accent,
+    fontSize: 13,
+    fontWeight: '500',
   },
   mealAnalysisRow: {
     flexDirection: 'row',
