@@ -8159,7 +8159,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           whoopByDate,
           calorieTarget: ctx?.calorieTarget ?? null,
           proteinTarget: ctx?.proteinTarget ?? null,
-          goals: goals.map(g => ({ emoji: g.emoji, title: g.title, category: g.category, progress: g.progress })),
+          goals: goals.map(g => ({
+            emoji: g.emoji,
+            title: g.title,
+            category: g.category,
+            progress: g.progress,
+            microhabits: Array.isArray(g.microhabits) ? g.microhabits : [],
+          })),
           playerContext: ctx ? {
             tier1Goal: ctx.tier1Goal,
             tier2Phase: ctx.tier2Phase,
