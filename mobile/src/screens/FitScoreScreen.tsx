@@ -666,7 +666,7 @@ function getWorstMealFactor(mealList: MealData[]): string | null {
   return labels[top[0]] ?? null;
 }
 
-function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[], waterLiters?: number, macroTargets?: { calorieTarget: number | null; proteinTarget: number | null }): WeakLinkResult {
+function computeWeakLink(result: FitScoreResponse, mealList: MealData[], sessions: TrainingDataEntry[], waterLiters?: number, macroTargets?: { calorieTarget: number | null; proteinTarget: number | null }, proteinSuppGrams?: number): WeakLinkResult {
   const nutRaw = result.breakdown.nutrition.score;
   const traRaw = result.breakdown.training.score;
   const recRaw = result.breakdown.recovery.score;
@@ -836,7 +836,7 @@ function computeWeakLink(result: FitScoreResponse, mealList: MealData[], session
     // Kcal + protein actual vs goal
     if (macroTargets) {
       const totalKcal = mealList.reduce((s, m) => s + (m.estimatedCalories ?? 0), 0);
-      const totalProt = mealList.reduce((s, m) => s + (m.estimatedProtein ?? 0), 0);
+      const totalProt = mealList.reduce((s, m) => s + (m.estimatedProtein ?? 0), 0) + (proteinSuppGrams ?? 0);
       if (totalKcal > 0 || totalProt > 0) {
         const kcalStr = macroTargets.calorieTarget
           ? `${totalKcal} kcal / goal ${macroTargets.calorieTarget} kcal (${Math.round(totalKcal / macroTargets.calorieTarget * 100)}%)`
@@ -1432,7 +1432,7 @@ export default function FitScoreScreen() {
   // Compute weak link whenever FitScore result, meals, training sessions, water or alcohol intake change
   useEffect(() => {
     if (fitScoreResult) {
-      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions, waterLiters, macroTargets));
+      setWeakLink(computeWeakLink(fitScoreResult, meals, trainingSessions, waterLiters, macroTargets, proteinSuppGrams));
     } else {
       setWeakLink(null);
     }
@@ -2902,9 +2902,6 @@ export default function FitScoreScreen() {
                   {session.durationMinutes && session.intensity ? '  ·  ' : ''}
                   {session.intensity ? session.intensity.charAt(0).toUpperCase() + session.intensity.slice(1) : ''}
                 </Text>
-              )}
-              {session.description && (
-                <Text style={styles.prescribedSessionDescription} numberOfLines={2}>{session.description}</Text>
               )}
               <View style={styles.prescribedSessionCta}>
                 <Text style={styles.prescribedSessionCtaText}>Tap to pre-fill</Text>
