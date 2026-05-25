@@ -148,7 +148,13 @@ export default function FitLookScreen() {
     setError(null);
     fadeAnim.setValue(0);
     try {
-      const data = await getFitLookToday();
+      let data = await getFitLookToday();
+      // Auto-upgrade v2 plans (no fuel/protocol/edge) to v3 format
+      if (data.snapshot_chips && !data.fuel && !data.protocol && !data.edge) {
+        try {
+          data = await regenerateFitLook();
+        } catch { /* keep v2 if regeneration fails */ }
+      }
       setFitlook(data);
       Animated.timing(fadeAnim, {
         toValue: 1,
