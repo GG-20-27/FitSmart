@@ -828,7 +828,7 @@ Return valid JSON only — no score.`;
               ]
             }
           ],
-          max_completion_tokens: 900,
+          max_completion_tokens: 1200,
           temperature: 0.4,  // lower temp for more consistent factor classification
           response_format: { type: 'json_object' }
         })
@@ -836,7 +836,7 @@ Return valid JSON only — no score.`;
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[OpenAI Service] API error ${response.status}: ${errorText}`);
+        console.error(`[OpenAI Service] Meal image API error ${response.status}: ${errorText}`);
         throw new Error(`OpenAI API error: ${response.status}`);
       }
 
@@ -943,7 +943,8 @@ Return valid JSON only — no score.`;
       };
 
     } catch (error) {
-      console.error('[OpenAI Service] Failed to analyze meal:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error('[OpenAI Service] Failed to analyze meal image:', errMsg);
       return {
         nutrition_subscore: 5,
         ai_analysis: '✅ Strength: Meal logged successfully.\n⚠️ Gap: Analysis temporarily unavailable.\n🔧 Upgrade: Try re-analyzing when connection is stable.',
@@ -988,7 +989,7 @@ Return valid JSON only — no score.`;
             { role: 'system', content: FITSCORE_AI_SYSTEM_PROMPT },
             { role: 'user', content: userPrompt }
           ],
-          max_completion_tokens: 900,
+          max_completion_tokens: 1200,
           temperature: 0.4,
           response_format: { type: 'json_object' }
         })
@@ -996,7 +997,7 @@ Return valid JSON only — no score.`;
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`[OpenAI Service] API error ${response.status}: ${errorText}`);
+        console.error(`[OpenAI Service] Meal text API error ${response.status}: ${errorText}`);
         throw new Error(`OpenAI API error: ${response.status}`);
       }
 
@@ -1083,7 +1084,8 @@ Return valid JSON only — no score.`;
       return { nutrition_subscore: score_raw, ai_analysis, score_raw, score_display, meal_quality_flags, estimatedCalories, estimatedProtein, identifiedAs };
 
     } catch (error) {
-      console.error('[OpenAI Service] Failed to analyze meal text:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error('[OpenAI Service] Failed to analyze meal text:', errMsg);
       return {
         nutrition_subscore: 5,
         ai_analysis: '✅ Strength: Meal logged successfully.\n⚠️ Gap: Analysis temporarily unavailable.\n🔧 Upgrade: Try re-analyzing when connection is stable.',
@@ -1628,7 +1630,8 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       return result;
 
     } catch (error) {
-      console.error('[OpenAI Service] Failed to generate daily summary:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      console.error('[OpenAI Service] Failed to generate daily summary:', errMsg);
 
       // Return fallback response based on overall zone
       const score = params.fitScore;

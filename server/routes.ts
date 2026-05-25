@@ -5349,11 +5349,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`[FITSCORE] Training score: ${trainingScore.toFixed(1)}/10 (${trainingSessions.length} sessions)`);
       } else {
         // No training logged — check for a scheduled team rest day first
-        const teamMembership = await storage.getTeamMembership(userId);
         let isScheduledRestDay = false;
-        if (teamMembership) {
-          const teamPlanned = await storage.getTeamTrainingPlanForDate(teamMembership.team.id, targetDate, userId);
-          isScheduledRestDay = teamPlanned.length === 0;
+        try {
+          const teamMembership = await storage.getTeamMembership(userId);
+          if (teamMembership) {
+            const teamPlanned = await storage.getTeamTrainingPlanForDate(teamMembership.team.id, targetDate, userId);
+            isScheduledRestDay = teamPlanned.length === 0;
+          }
+        } catch (teamErr) {
+          console.warn('[FITSCORE] Team rest-day check failed (non-fatal):', teamErr instanceof Error ? teamErr.message : teamErr);
         }
 
         if (isScheduledRestDay) {
