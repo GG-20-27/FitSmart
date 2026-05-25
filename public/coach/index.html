@@ -915,12 +915,8 @@
             macroEl.className = 'day-section-score';
             const calTarget = player.calorieTarget;
             const protTarget = player.proteinTarget;
-            const calColor = calTarget
-              ? (macroDay.calories >= calTarget * 0.85 ? '#27E9B5' : macroDay.calories >= calTarget * 0.65 ? '#F59E0B' : '#EF4444')
-              : '#27E9B5';
-            const protColor = protTarget
-              ? (macroDay.protein >= protTarget * 0.85 ? '#27E9B5' : macroDay.protein >= protTarget * 0.65 ? '#F59E0B' : '#EF4444')
-              : '#27E9B5';
+            const calColor  = macroColor(macroDay.calories, calTarget) || '#27E9B5';
+            const protColor = macroColor(macroDay.protein,  protTarget) || '#27E9B5';
             const calStr = calTarget
               ? `<span style="color:${calColor}">${Math.round(macroDay.calories)}</span> / ${calTarget} kcal`
               : `<span style="color:${calColor}">${Math.round(macroDay.calories)} kcal</span>`;
@@ -1156,8 +1152,8 @@
             const macro = player.macrosByDate[d];
             const [, mm, dd2] = d.split('-');
             const dateLabel = `${shortDay(d)} ${parseInt(mm)}.${parseInt(dd2)}`;
-            const calColor  = calTarget  ? (macro.calories >= calTarget  * 0.85 ? '#27E9B5' : macro.calories >= calTarget  * 0.65 ? '#F59E0B' : '#EF4444') : '#E0EAF0';
-            const protColor = protTarget ? (macro.protein  >= protTarget * 0.85 ? '#27E9B5' : macro.protein  >= protTarget * 0.65 ? '#F59E0B' : '#EF4444') : '#E0EAF0';
+            const calColor  = macroColor(macro.calories, calTarget);
+            const protColor = macroColor(macro.protein,  protTarget);
 
             const row = document.createElement('div');
             row.style.cssText = 'background:#162936;border-radius:7px;padding:7px 12px;margin-bottom:4px;display:flex;align-items:center;gap:8px;';
@@ -1183,6 +1179,16 @@
 
       el.appendChild(gcToggle);
       el.appendChild(gcPanel);
+    }
+
+    function macroColor(actual, target) {
+      if (!target) return '#E0EAF0';
+      const ratio = actual / target;
+      if (ratio > 1.25) return '#EF4444'; // >125% — significantly over
+      if (ratio > 1.10) return '#F59E0B'; // 110–125% — moderately over
+      if (ratio >= 0.85) return '#27E9B5'; // 85–110% — on target
+      if (ratio >= 0.65) return '#F59E0B'; // 65–85% — under
+      return '#EF4444';                    // <65% — well under
     }
 
     function escHtml(str) {
