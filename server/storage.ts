@@ -93,6 +93,7 @@ export interface IStorage {
   removeTeamMember(teamId: number, userId: string): Promise<void>;
   getCheatDay(userId: string, teamId: number, weekStart: string): Promise<CheatDay | undefined>;
   upsertCheatDay(userId: string, teamId: number, weekStart: string, cheatDate: string): Promise<CheatDay>;
+  deleteCheatDay(userId: string, teamId: number, weekStart: string): Promise<void>;
   getFitScoresByUserAndWeek(userId: string, weekStart: string, weekEnd: string): Promise<FitScore[]>;
   getMealsByUserAndDateRange(userId: string, from: string, to: string): Promise<Meal[]>;
 
@@ -535,6 +536,11 @@ export class DatabaseStorage implements IStorage {
       .onConflictDoUpdate({ target: [cheatDays.userId, cheatDays.teamId, cheatDays.weekStart], set: { cheatDate } })
       .returning();
     return row;
+  }
+
+  async deleteCheatDay(userId: string, teamId: number, weekStart: string): Promise<void> {
+    await db.delete(cheatDays)
+      .where(and(eq(cheatDays.userId, userId), eq(cheatDays.teamId, teamId), eq(cheatDays.weekStart, weekStart)));
   }
 
   async getFitScoresByUserAndWeek(userId: string, weekStart: string, weekEnd: string): Promise<FitScore[]> {

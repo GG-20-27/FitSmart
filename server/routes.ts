@@ -173,10 +173,12 @@ function calculateMacroTargets(params: {
   tier1Goal?: string;
   tier2DietPhase?: string;
   trainingSessionsPerWeek?: string | null;
+  gender?: string | null;
 }): { proteinTarget: number; calorieTarget: number } {
   const goal = (params.tier1Goal ?? '').toLowerCase();
   const diet = (params.tier2DietPhase ?? '').toLowerCase();
   const sessions = (params.trainingSessionsPerWeek ?? '').toLowerCase();
+  const isFemale = params.gender === 'female';
 
   // Protein multiplier (g per kg bodyweight) — distinct per goal
   let proteinMultiplier = 1.6; // default (longevity/health, rehab)
@@ -190,9 +192,10 @@ function calculateMacroTargets(params: {
   const proteinTarget = Math.round((params.weightKg * proteinMultiplier) / 5) * 5;
 
   // TDEE estimate (kcal per kg)
-  let activityMultiplier = 32; // moderate default
-  if (sessions.includes('1') || sessions.includes('2')) activityMultiplier = 28;
-  if (sessions.includes('5') || sessions.includes('6') || sessions.includes('7')) activityMultiplier = 36;
+  // Female BMR is ~15% lower per kg due to body composition differences — apply correction
+  let activityMultiplier = isFemale ? 27 : 32; // moderate default
+  if (sessions.includes('1') || sessions.includes('2')) activityMultiplier = isFemale ? 24 : 28;
+  if (sessions.includes('5') || sessions.includes('6') || sessions.includes('7')) activityMultiplier = isFemale ? 31 : 36;
   let tdee = params.weightKg * activityMultiplier;
 
   // Goal + diet adjustments
@@ -319,6 +322,7 @@ async function buildAndStoreFitRoast(
         `User profile: goal=${ctx.tier1Goal}, priority=${ctx.tier1Priority}, training phase=${ctx.tier2Phase}, diet phase=${ctx.tier2DietPhase}, emphasis=${ctx.tier2Emphasis}`,
         `This week: load=${ctx.tier3WeekLoad}, stress=${ctx.tier3Stress}, sleep expectation=${ctx.tier3SleepExpectation}`,
       ];
+      if (ctx.gender === 'female') parts.push('Athlete is female — adjust tone and any physiology-specific advice accordingly.');
       if (ctx.injuryType && ctx.injuryType !== 'None') {
         parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
       }
@@ -5344,29 +5348,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
         trainingScore = sessionScores.reduce((a: number, b: number) => a + b, 0) / sessionScores.length;
         console.log(`[FITSCORE] Training score: ${trainingScore.toFixed(1)}/10 (${trainingSessions.length} sessions)`);
       } else {
-        // No training logged — default score depends on context, capped when body is in red zone
-        const rehab = (rehabStage || '').toLowerCase();
-        const load  = (weeklyLoad || '').toLowerCase();
-        const pg    = (primaryGoal || '').toLowerCase();
-        const noSessionRecoveryZone = recoveryResult.recoveryZone;
-
-        if (rehab.includes('acute')) {
-          // Rest is correct execution — but red zone caps it (day is still constrained)
-          trainingScore = noSessionRecoveryZone === 'red' ? 6.5 : 7.5;
-        } else if (rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return') || pg.includes('rehab')) {
-          // Rehab phase — some activity expected but rest is ok
-          trainingScore = noSessionRecoveryZone === 'red' ? 5.5 : 6.0;
-        } else if (load === 'light') {
-          // Light week / deload — scheduled rest is fine
-          trainingScore = noSessionRecoveryZone === 'red' ? 5.5 : 6.5;
-        } else if (load === 'heavy' || load === 'competition' || pg.includes('performance')) {
-          // Build/performance phase — missing a session matters a lot
-          trainingScore = 4.0;
-        } else {
-          // General default
-          trainingScore = noSessionRecoveryZone === 'red' ? 4.5 : 5.0;
+        // No training logged — check for a scheduled team rest day first
+        const teamMembership = await storage.getTeamMembership(userId);
+        let isScheduledRestDay = false;
+        if (teamMembership) {
+          const teamPlanned = await storage.getTeamTrainingPlanForDate(teamMembership.team.id, targetDate, userId);
+          isScheduledRestDay = teamPlanned.length === 0;
         }
-        console.log(`[FITSCORE] No training sessions — context-aware default: ${trainingScore}/10 (rehabStage=${rehabStage}, weeklyLoad=${weeklyLoad}, recoveryZone=${noSessionRecoveryZone})`);
+
+        if (isScheduledRestDay) {
+          // No sessions in the team plan for this date = scheduled rest day. Neutral, not penalised.
+          trainingScore = 7.0;
+          console.log(`[FITSCORE] Scheduled rest day (no team plan for ${targetDate}) — neutral training score: ${trainingScore}`);
+        } else {
+          // Default score depends on context, capped when body is in red zone
+          const rehab = (rehabStage || '').toLowerCase();
+          const load  = (weeklyLoad || '').toLowerCase();
+          const pg    = (primaryGoal || '').toLowerCase();
+          const noSessionRecoveryZone = recoveryResult.recoveryZone;
+
+          if (rehab.includes('acute')) {
+            trainingScore = noSessionRecoveryZone === 'red' ? 6.5 : 7.5;
+          } else if (rehab.includes('sub') || rehab.includes('rehab') || rehab.includes('return') || pg.includes('rehab')) {
+            trainingScore = noSessionRecoveryZone === 'red' ? 5.5 : 6.0;
+          } else if (load === 'light') {
+            trainingScore = noSessionRecoveryZone === 'red' ? 5.5 : 6.5;
+          } else if (load === 'heavy' || load === 'competition' || pg.includes('performance')) {
+            trainingScore = 4.0;
+          } else {
+            trainingScore = noSessionRecoveryZone === 'red' ? 4.5 : 5.0;
+          }
+          console.log(`[FITSCORE] No training sessions — context-aware default: ${trainingScore}/10 (rehabStage=${rehabStage}, weeklyLoad=${weeklyLoad}, recoveryZone=${noSessionRecoveryZone})`);
+        }
       }
 
       // 5. Get Meals, compute daily nutrition score with day-level penalties, and build day context
@@ -5725,6 +5738,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ];
           if (ctx.workHoursPerWeek) parts.push(`Work hours/week: ${ctx.workHoursPerWeek}`);
           if (ctx.trainingSessionsPerWeek) parts.push(`Training sessions/week: ${ctx.trainingSessionsPerWeek}`);
+          if (ctx.gender === 'female') parts.push('Athlete is female — adjust tone and any physiology-specific advice accordingly.');
           if (ctx.injuryType && ctx.injuryType !== 'None') {
             let injuryLine = `Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}`;
             if (ctx.rehabStage) {
@@ -6142,6 +6156,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ];
           if (ctx.workHoursPerWeek) parts.push(`Work hours/week: ${ctx.workHoursPerWeek}`);
           if (ctx.trainingSessionsPerWeek) parts.push(`Training sessions/week: ${ctx.trainingSessionsPerWeek}`);
+          if (ctx.gender === 'female') parts.push('Athlete is female — adjust tone and any physiology-specific advice accordingly.');
           if (ctx.injuryType && ctx.injuryType !== 'None') {
             parts.push(`Active injury: ${ctx.injuryType}${ctx.injuryLocation ? ` (${ctx.injuryLocation})` : ''}${ctx.rehabStage ? `, stage: ${ctx.rehabStage}` : ''}`);
           }
@@ -6481,6 +6496,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           tier1Goal: ctx.tier1Goal,
           tier2DietPhase: ctx.tier2DietPhase,
           trainingSessionsPerWeek: ctx.trainingSessionsPerWeek,
+          gender: ctx.gender,
         });
         ctx = await storage.upsertUserContext(userId, targets);
       }
@@ -7881,14 +7897,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return d.toISOString().slice(0, 10);
   }
 
-  // Compute week average for a member, handling cheat day logic.
-  // First missed COMPLETED day → cheat (excluded from denominator). Second+ → 0 in avg.
+  // Compute week average for a leaderboard member.
+  // Completed days with no log count as 5 (neutral — not punished, not rewarded).
+  // Explicitly marked cheat days are excluded from the average entirely (not penalised, not counted).
   // Today is never penalised — user still has time to log.
-  async function computeWeekAvg(userId: string, teamId: number, weekStart: string): Promise<{ avg: number; daysLogged: number; cheatUsed: boolean }> {
+  async function computeWeekAvg(userId: string, teamId: number, weekStart: string): Promise<{ avg: number; daysLogged: number; cheatDate: string | null }> {
     const weekEnd = getWeekEnd(weekStart);
     const scores = await storage.getFitScoresByUserAndWeek(userId, weekStart, weekEnd);
     const scoresByDate: Record<string, number> = {};
     for (const s of scores) scoresByDate[s.date] = s.score;
+
+    const cheatDayRow = await storage.getCheatDay(userId, teamId, weekStart);
+    const cheatDate = cheatDayRow?.cheatDate ?? null;
 
     const days: string[] = [];
     const start = new Date(weekStart + 'T00:00:00Z');
@@ -7898,55 +7918,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       days.push(d.toISOString().slice(0, 10));
     }
 
-    // Use Zurich time for today — never penalise for missing today's log
     const today = new Date().toLocaleDateString('sv-SE', { timeZone: 'Europe/Zurich' });
-    // completedDays = strictly before today; these can be missed
     const completedDays = days.filter(d => d < today && d <= weekEnd);
-    // todayInWeek = today if it falls within this week
     const todayInWeek = days.includes(today) ? today : null;
-
-    // Load existing cheat day — only honour it if the user genuinely missed that day
-    const existingCheat = await storage.getCheatDay(userId, teamId, weekStart);
-    let cheatUsed = false;
-    let cheatDate: string | undefined;
-    if (existingCheat?.cheatDate && scoresByDate[existingCheat.cheatDate] == null) {
-      cheatUsed = true;
-      cheatDate = existingCheat.cheatDate;
-    }
-    // If the existing cheat day now has a score (retroactive log), ignore it
 
     let sum = 0;
     let daysLogged = 0;
+    let denominator = 0;
 
-    // Score completed days
     for (const day of completedDays) {
+      if (day === cheatDate) continue; // cheat day excluded entirely
+      denominator++;
       if (scoresByDate[day] != null) {
         sum += scoresByDate[day];
         daysLogged++;
       } else {
-        // Genuinely missed completed day
-        if (!cheatUsed) {
-          cheatUsed = true;
-          cheatDate = day;
-          await storage.upsertCheatDay(userId, teamId, weekStart, day);
-        }
-        // Second+ miss = 0 (already excluded from sum)
+        sum += 5; // missed day: neutral score, not a punishment
       }
     }
 
-    // Add today's score if already logged (bonus — doesn't affect cheat logic)
-    if (todayInWeek && scoresByDate[todayInWeek] != null) {
+    // Include today if already logged (cheat day exclusion applies here too)
+    if (todayInWeek && todayInWeek !== cheatDate && scoresByDate[todayInWeek] != null) {
       sum += scoresByDate[todayInWeek];
       daysLogged++;
+      denominator++;
     }
 
-    // Denominator = completed days that count + today if scored
-    const todayScored = todayInWeek && scoresByDate[todayInWeek] != null ? 1 : 0;
-    const cheatExcluded = cheatUsed && cheatDate && completedDays.includes(cheatDate) ? 1 : 0;
-    const denominator = completedDays.length - cheatExcluded + todayScored;
     const avg = denominator > 0 ? sum / denominator : 0;
-
-    return { avg: Math.round(avg * 10) / 10, daysLogged, cheatUsed };
+    return { avg: Math.round(avg * 10) / 10, daysLogged, cheatDate };
   }
 
   // POST /api/teams/create
@@ -8044,15 +8043,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const groupMembers = myGroup ? members.filter(m => m.groupName === myGroup) : members;
 
       const scored = await Promise.all(groupMembers.map(async (m) => {
-        const { avg, daysLogged, cheatUsed } = await computeWeekAvg(m.userId, teamId, weekStart);
-        const cheatDay = await storage.getCheatDay(m.userId, teamId, weekStart);
+        const { avg, daysLogged, cheatDate } = await computeWeekAvg(m.userId, teamId, weekStart);
         return {
           userId: m.userId,
           displayName: m.displayName ?? m.email,
           weekAvg: avg,
           daysLogged,
-          cheatUsed,
-          cheatDate: cheatDay?.cheatDate ?? null,
+          cheatDate,
           isYou: m.userId === userId,
         };
       }));
@@ -8271,6 +8268,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ ok: true });
     } catch (err) {
       console.error('[Teams] leave error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/teams/cheat-day  — mark a date as cheat day (excluded from leaderboard avg)
+  // Body: { date: 'YYYY-MM-DD' }  — must be today or a past day within the current week
+  app.post('/api/teams/cheat-day', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const { date } = req.body;
+      if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'valid date required' });
+
+      const membership = await storage.getTeamMembership(userId);
+      if (!membership) return res.status(403).json({ error: 'Not on a team' });
+
+      const teamId = membership.team.id;
+      const weekStart = membership.team.weekStart ?? getWeekStart(new Date());
+      const weekEnd = getWeekEnd(weekStart);
+
+      if (date < weekStart || date > weekEnd) {
+        return res.status(400).json({ error: 'date must be within the current competition week' });
+      }
+
+      // Enforce 1 cheat day per week
+      const existing = await storage.getCheatDay(userId, teamId, weekStart);
+      if (existing && existing.cheatDate !== date) {
+        return res.status(409).json({ error: 'cheat day already used this week', cheatDate: existing.cheatDate });
+      }
+
+      const row = await storage.upsertCheatDay(userId, teamId, weekStart, date);
+      res.json({ ok: true, cheatDate: row.cheatDate, weekStart });
+    } catch (err) {
+      console.error('[Teams] cheat-day mark error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // DELETE /api/teams/cheat-day  — unmark cheat day for the current week
+  app.delete('/api/teams/cheat-day', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const membership = await storage.getTeamMembership(userId);
+      if (!membership) return res.status(403).json({ error: 'Not on a team' });
+
+      const teamId = membership.team.id;
+      const weekStart = membership.team.weekStart ?? getWeekStart(new Date());
+
+      await storage.deleteCheatDay(userId, teamId, weekStart);
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('[Teams] cheat-day unmark error:', err);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // GET /api/teams/cheat-day?date=YYYY-MM-DD  — get cheat day status for a date
+  app.get('/api/teams/cheat-day', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = (req as any).userId as string;
+      const date = req.query.date as string | undefined;
+
+      const membership = await storage.getTeamMembership(userId);
+      if (!membership) return res.json({ onTeam: false, cheatDate: null });
+
+      const teamId = membership.team.id;
+      const weekStart = membership.team.weekStart ?? getWeekStart(new Date());
+      const cheatDayRow = await storage.getCheatDay(userId, teamId, weekStart);
+      const cheatDate = cheatDayRow?.cheatDate ?? null;
+
+      res.json({
+        onTeam: true,
+        teamId,
+        weekStart,
+        cheatDate,
+        isCheatDay: date ? cheatDate === date : false,
+      });
+    } catch (err) {
+      console.error('[Teams] cheat-day get error:', err);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

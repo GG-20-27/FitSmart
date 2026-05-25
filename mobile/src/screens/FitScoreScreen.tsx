@@ -52,7 +52,7 @@ import {
   type PlanContent,
   type TodayPlanHabit,
 } from '../api/improvementPlan';
-import { getTodayTeamTrainingPlan, type TeamTrainingPlan } from '../api/teams';
+import { getTodayTeamTrainingPlan, getCheatDayStatus, markCheatDay, unmarkCheatDay, type TeamTrainingPlan } from '../api/teams';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const MODAL_HEIGHT = SCREEN_HEIGHT * 0.92;
@@ -969,6 +969,11 @@ export default function FitScoreScreen() {
   // Team prescribed session (null = no team or no plan today)
   const [prescribedSessions, setPrescribedSessions] = useState<TeamTrainingPlan[]>([]);
 
+  // Cheat day — only visible for team members after FitScore calculated
+  const [cheatDayDate, setCheatDayDate] = useState<string | null>(null); // the marked cheat date for this week
+  const [isOnTeam, setIsOnTeam] = useState(false);
+  const [cheatDayLoading, setCheatDayLoading] = useState(false);
+
   // WHOOP import modal
   const [showWhoopImport, setShowWhoopImport] = useState(false);
   const [whoopWorkouts, setWhoopWorkouts] = useState<WhoopWorkout[]>([]);
@@ -1001,6 +1006,8 @@ export default function FitScoreScreen() {
   // Coach summary state
   const [coachSummary, setCoachSummary] = useState<CoachSummaryResponse | null>(null);
   const [loadingCoachSummary, setLoadingCoachSummary] = useState(false);
+  // Prevents stale async coach summary from overwriting a newer in-flight request
+  const coachGenRef = useRef(0);
 
   // Load persisted FitCook inputs
   useEffect(() => {
@@ -1544,17 +1551,15 @@ export default function FitScoreScreen() {
         if (cached) {
           setFitScoreResult(cached);
           setShowFitScoreResult(true);
-          fitScoreFadeAnim.setValue(1); // cached restore — show immediately without fade
+          fitScoreFadeAnim.setValue(1);
           startCoachGlow();
-          // Restore or fetch coach summary
+          // Restore cached coach summary only — do NOT auto-fetch for today/yesterday.
+          // Coach summary data changes as meals/drinks are updated; a fresh summary is
+          // generated whenever the user recalculates FitScore (which carries all current inputs).
           try {
             const rawCoach = await AsyncStorage.getItem(`coachSummary_${dateStr}`);
-            if (rawCoach) {
-              setCoachSummary(JSON.parse(rawCoach));
-            } else {
-              fetchCoachSummary(cached, dateStr);
-            }
-          } catch { fetchCoachSummary(cached, dateStr); }
+            if (rawCoach) setCoachSummary(JSON.parse(rawCoach));
+          } catch { /* graceful — no coach summary shown */ }
         }
 
         const [mealsData, trainingData] = await Promise.all([
@@ -1571,6 +1576,12 @@ export default function FitScoreScreen() {
         } else {
           setPrescribedSessions([]);
         }
+
+        // Fetch team membership + cheat day status for this date
+        getCheatDayStatus(dateStr).then((status) => {
+          setIsOnTeam(status.onTeam);
+          setCheatDayDate(status.cheatDate);
+        }).catch(() => {});
         if (trainingData.length > 0) {
           console.log('[TRAINING DATA] First session breakdown:', trainingData[0].breakdown);
         }
@@ -1653,14 +1664,16 @@ export default function FitScoreScreen() {
         }).start();
       });
 
-      // Fetch coach summary in the background and cache it
+      // Fetch coach summary in the background — increment gen so any racing load-path fetch is discarded
+      coachGenRef.current += 1;
+      const myGen = coachGenRef.current;
       const habitsCtx = dailyHabits.length > 0 ? {
         total: dailyHabits.length,
         completed: dailyHabits.filter(h => h.done).length,
         completedList: dailyHabits.filter(h => h.done).map(h => h.text),
         missingList: dailyHabits.filter(h => !h.done).map(h => h.text),
       } : undefined;
-      fetchCoachSummary(result, formatDate(selectedDate), habitsCtx);
+      fetchCoachSummary(result, formatDate(selectedDate), habitsCtx, myGen);
 
       // Refresh improvement plan status so daysCount picks up today's logged score
       getImprovementPlanStatus()
@@ -1682,6 +1695,7 @@ export default function FitScoreScreen() {
     fitScoreData: FitScoreResponse,
     dateStr?: string,
     habitsContext?: { total: number; completed: number; completedList: string[]; missingList: string[] },
+    gen?: number,
   ) => {
     setLoadingCoachSummary(true);
     try {
@@ -1709,20 +1723,30 @@ export default function FitScoreScreen() {
         waterLiters: waterLiters > 0 ? waterLiters : undefined,
         alcoholCount: alcoholCount > 0 ? alcoholCount : undefined,
         sodaCount: sodaCount > 0 ? sodaCount : undefined,
+        coffeeCount: coffeeCount > 0 ? coffeeCount : undefined,
+        energyDrinkCount: energyDrinkCount > 0 ? energyDrinkCount : undefined,
+        proteinSuppGrams: proteinSuppGrams > 0 ? proteinSuppGrams : undefined,
+        creatineTaken: creatineTaken || undefined,
         dailyHabits: habitsContext,
         advancedRecoverySignals: fitScoreData.advancedRecoverySignals,
         sleepDebtMinutes: fitScoreData.sleepDebtMinutes,
       });
-      setCoachSummary(summary);
-      if (dateStr) {
-        AsyncStorage.setItem(`coachSummary_${dateStr}`, JSON.stringify(summary)).catch(() => {});
+      // Only commit if no newer request has started since this one
+      if (gen === undefined || gen === coachGenRef.current) {
+        setCoachSummary(summary);
+        if (dateStr) {
+          AsyncStorage.setItem(`coachSummary_${dateStr}`, JSON.stringify(summary)).catch(() => {});
+        }
+        console.log('[COACH SUMMARY] Summary received');
+      } else {
+        console.log('[COACH SUMMARY] Discarding stale response (gen mismatch)');
       }
-      console.log('[COACH SUMMARY] Summary received');
     } catch (error) {
       console.error('[COACH SUMMARY] Failed to fetch:', error);
-      // Don't show an error - coach summary is optional
     } finally {
-      setLoadingCoachSummary(false);
+      if (gen === undefined || gen === coachGenRef.current) {
+        setLoadingCoachSummary(false);
+      }
     }
   };
 
@@ -2263,7 +2287,7 @@ export default function FitScoreScreen() {
     if (isEditingTrainings) {
       // In edit mode, show options to edit or delete
       Alert.alert(
-        'Edit Training',
+        'Edit Activity',
         `What would you like to do with this ${training.type}?`,
         [
           {
@@ -2761,7 +2785,7 @@ export default function FitScoreScreen() {
       {hasMeals && (
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Training</Text>
+            <Text style={styles.sectionTitle}>Activity</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               {dataSource === 'whoop' && (isToday || isYesterday) && !showFitScoreResult && !trainingEditing && (
                 <TouchableOpacity
@@ -2783,90 +2807,14 @@ export default function FitScoreScreen() {
                     color={isEditingTrainings ? colors.accent : colors.textMuted}
                   />
                   <Text style={[styles.editButtonText, isEditingTrainings && styles.editButtonTextActive]}>
-                    {isEditingTrainings ? 'Done' : 'Edit Trainings'}
+                    {isEditingTrainings ? 'Done' : 'Edit Activities'}
                   </Text>
                 </TouchableOpacity>
               )}
             </View>
           </View>
 
-          {/* Show existing training sessions as cards */}
-          {trainingSessions.length > 0 && !trainingEditing && (
-            <View style={styles.trainingsGrid}>
-              {trainingSessions.map((training) => {
-                const getIntensityEmoji = (intensity?: string) => {
-                  if (intensity === 'Low') return '💙';
-                  if (intensity === 'Moderate') return '🟡';
-                  if (intensity === 'High') return '🔥';
-                  return '⚪';
-                };
-
-                return (
-                  <TouchableOpacity
-                    key={training.id}
-                    style={[
-                      styles.trainingCardCompact,
-                      isEditingTrainings && styles.trainingCardEditing
-                    ]}
-                    onPress={() => training.id !== -1 && !analyzingTrainingIds.has(training.id) && handleTrainingPress(training)}
-                    disabled={training.id === -1 || analyzingTrainingIds.has(training.id)}
-                  >
-                    {(training.id === -1 || analyzingTrainingIds.has(training.id)) && (
-                      <View style={styles.trainingAnalyzingOverlay}>
-                        <ActivityIndicator size="small" color={colors.accent} />
-                        <Text style={styles.trainingAnalyzingText}>
-                          {analyzingTrainingIds.has(training.id) ? 'Updating training...' : 'Analyzing...'}
-                        </Text>
-                      </View>
-                    )}
-                    <View style={styles.trainingCardHeaderRow}>
-                      <Text style={styles.trainingCardType} numberOfLines={1}>{training.type}</Text>
-                      {training.id !== -1 && !analyzingTrainingIds.has(training.id) && training.score && !isEditingTrainings && (showFitScoreResult || isPastDate) && (
-                        <View style={[
-                          styles.trainingScoreBadge,
-                          { backgroundColor: getScoreColor(training.score) }
-                        ]}>
-                          <Text style={styles.trainingScoreText}>{Math.round(training.score)}</Text>
-                        </View>
-                      )}
-                      {isEditingTrainings && (
-                        <View style={styles.trainingEditIcon}>
-                          <Ionicons name="create" size={18} color={colors.accent} />
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.trainingCardDetails}>
-                      <Text style={styles.trainingCardDetailText}>⏱️ {training.duration}min</Text>
-                    </View>
-                    {training.intensity && (
-                      <View style={styles.trainingCardDetails}>
-                        <Text style={styles.trainingCardDetailText}>
-                          {getIntensityEmoji(training.intensity)} Intensity: {training.intensity}
-                        </Text>
-                      </View>
-                    )}
-                    {training.id !== -1 && training.analysis && !isEditingTrainings && (
-                      <Text style={styles.trainingTapHint}>✨ Tap to view</Text>
-                    )}
-                    {isEditingTrainings && (
-                      <Text style={styles.trainingTapHint}>Tap to edit</Text>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-              {(isToday || isYesterday) && !trainingEditing && !showFitScoreResult && (
-                <TouchableOpacity
-                  style={styles.addTrainingCard}
-                  onPress={() => setTrainingEditing(true)}
-                >
-                  <Ionicons name="add-circle" size={32} color={colors.accent} />
-                  <Text style={styles.addTrainingText}>Add Training</Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
-          {/* Prescribed session cards — one per session when team plan exists for today */}
+          {/* Prescribed session cards — always appear first, right below heading */}
           {prescribedSessions.length > 0 && isToday && !showFitScoreResult && prescribedSessions.map((session, idx) => (
             <TouchableOpacity
               key={session.id}
@@ -2910,6 +2858,83 @@ export default function FitScoreScreen() {
             </TouchableOpacity>
           ))}
 
+          {/* Show existing training sessions as full-width logged cards */}
+          {trainingSessions.length > 0 && !trainingEditing && (
+            <View style={styles.trainingsStack}>
+              {prescribedSessions.length > 0 && isToday && !showFitScoreResult && (
+                <Text style={styles.loggedSectionLabel}>LOGGED</Text>
+              )}
+              {trainingSessions.map((training) => {
+                const getIntensityEmoji = (intensity?: string) => {
+                  if (intensity === 'Low') return '💙';
+                  if (intensity === 'Moderate') return '🟡';
+                  if (intensity === 'High') return '🔥';
+                  return '⚪';
+                };
+
+                return (
+                  <TouchableOpacity
+                    key={training.id}
+                    style={[
+                      styles.trainingCardLogged,
+                      isEditingTrainings && styles.trainingCardEditing
+                    ]}
+                    onPress={() => training.id !== -1 && !analyzingTrainingIds.has(training.id) && handleTrainingPress(training)}
+                    disabled={training.id === -1 || analyzingTrainingIds.has(training.id)}
+                  >
+                    {(training.id === -1 || analyzingTrainingIds.has(training.id)) && (
+                      <View style={styles.trainingAnalyzingOverlay}>
+                        <ActivityIndicator size="small" color={colors.accent} />
+                        <Text style={styles.trainingAnalyzingText}>
+                          {analyzingTrainingIds.has(training.id) ? 'Updating training...' : 'Analyzing...'}
+                        </Text>
+                      </View>
+                    )}
+                    <View style={styles.trainingCardHeaderRow}>
+                      <Text style={styles.trainingCardType} numberOfLines={1}>{training.type}</Text>
+                      {training.id !== -1 && !analyzingTrainingIds.has(training.id) && training.score && !isEditingTrainings && (showFitScoreResult || isPastDate) && (
+                        <View style={[
+                          styles.trainingScoreBadge,
+                          { backgroundColor: getScoreColor(training.score) }
+                        ]}>
+                          <Text style={styles.trainingScoreText}>{Math.round(training.score)}</Text>
+                        </View>
+                      )}
+                      {isEditingTrainings && (
+                        <View style={styles.trainingEditIcon}>
+                          <Ionicons name="create" size={18} color={colors.accent} />
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.trainingCardMetaRow}>
+                      <Text style={styles.trainingCardDetailText}>⏱️ {training.duration}min</Text>
+                      {training.intensity && (
+                        <Text style={styles.trainingCardDetailText}>
+                          {' · '}{getIntensityEmoji(training.intensity)} {training.intensity}
+                        </Text>
+                      )}
+                    </View>
+                    {training.id !== -1 && training.analysis && !isEditingTrainings && (
+                      <Text style={styles.trainingTapHint}>✨ Tap to view</Text>
+                    )}
+                    {isEditingTrainings && (
+                      <Text style={styles.trainingTapHint}>Tap to edit</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+              {(isToday || isYesterday) && !trainingEditing && !showFitScoreResult && (
+                <TouchableOpacity
+                  style={styles.addTrainingCardWide}
+                  onPress={() => setTrainingEditing(true)}
+                >
+                  <Ionicons name="add-circle" size={28} color={colors.accent} />
+                  <Text style={styles.addTrainingText}>Log Activity</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
           {!hasTraining && !trainingEditing ? (
             <View style={styles.emptyState}>
               <Ionicons name="barbell-outline" size={48} color={colors.surfaceMute} />
@@ -2920,7 +2945,7 @@ export default function FitScoreScreen() {
                   onPress={() => setTrainingEditing(true)}
                 >
                   <Ionicons name="add-circle-outline" size={28} color={colors.accent} />
-                  <Text style={[styles.addTrainingText, { marginTop: 0 }]}>Add Training Details</Text>
+                  <Text style={[styles.addTrainingText, { marginTop: 0 }]}>Add Activity Details</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -3364,6 +3389,61 @@ export default function FitScoreScreen() {
           {showAllGreenBanner && fitScoreResult.allGreen && (
             <View style={styles.allGreenBanner}>
               <Text style={styles.allGreenText}>Strong day — all metrics in the green.</Text>
+            </View>
+          )}
+
+          {/* Cheat Day — team members only */}
+          {isOnTeam && !isPastDate && (
+            <View style={styles.cheatDayCard}>
+              <View style={styles.cheatDayRow}>
+                <View style={styles.cheatDayLeft}>
+                  <Text style={styles.cheatDayTitle}>Cheat Day</Text>
+                  <Text style={styles.cheatDaySubtitle}>
+                    {cheatDayDate
+                      ? cheatDayDate === formatDate(selectedDate)
+                        ? "Today won't count against your leaderboard score"
+                        : `Used on ${cheatDayDate} — your 1 weekly skip`
+                      : "Mark today as your cheat day — it won't hurt your team avg"}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.cheatDayToggle,
+                    cheatDayDate === formatDate(selectedDate) && styles.cheatDayToggleActive,
+                    (cheatDayDate !== null && cheatDayDate !== formatDate(selectedDate)) && styles.cheatDayToggleDisabled,
+                  ]}
+                  disabled={cheatDayLoading || (cheatDayDate !== null && cheatDayDate !== formatDate(selectedDate))}
+                  onPress={async () => {
+                    setCheatDayLoading(true);
+                    try {
+                      const todayStr = formatDate(selectedDate);
+                      if (cheatDayDate === todayStr) {
+                        await unmarkCheatDay();
+                        setCheatDayDate(null);
+                      } else {
+                        const result = await markCheatDay(todayStr);
+                        setCheatDayDate(result.cheatDate);
+                      }
+                    } catch (err: any) {
+                      console.error('[CheatDay] toggle error:', err);
+                    } finally {
+                      setCheatDayLoading(false);
+                    }
+                  }}
+                  activeOpacity={0.75}
+                >
+                  {cheatDayLoading ? (
+                    <ActivityIndicator size="small" color={colors.accent} />
+                  ) : (
+                    <Text style={[
+                      styles.cheatDayToggleText,
+                      cheatDayDate === formatDate(selectedDate) && styles.cheatDayToggleTextActive,
+                    ]}>
+                      {cheatDayDate === formatDate(selectedDate) ? 'ON' : 'OFF'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -5187,12 +5267,12 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
   },
   prescribedSessionCard: {
-    backgroundColor: colors.accent + '12',
+    backgroundColor: colors.accent + '08',
     borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.accent + '35',
+    borderColor: colors.accent + '30',
     padding: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
     gap: spacing.xs,
   },
   prescribedSessionHeader: {
@@ -5956,12 +6036,49 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.md,
   },
+  trainingsStack: {
+    gap: spacing.sm,
+  },
+  loggedSectionLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 1.5,
+    marginBottom: spacing.xs,
+    marginTop: spacing.xs,
+  },
+  trainingCardLogged: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.md,
+    padding: spacing.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent + '80',
+    position: 'relative',
+  },
+  trainingCardMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
   trainingCardCompact: {
     width: '47%',
     backgroundColor: colors.surfaceMute + '15',
     borderRadius: radii.md,
     padding: spacing.md,
     minHeight: 110,
+  },
+  addTrainingCardWide: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceMute + '15',
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.accent + '35',
+    borderStyle: 'dashed',
+    paddingVertical: spacing.md,
+    marginTop: spacing.xs,
   },
   trainingCardEditing: {
     borderWidth: 2,
@@ -6349,6 +6466,62 @@ const styles = StyleSheet.create({
     borderTopColor: colors.accent + '40',
     paddingTop: spacing.md,
     marginBottom: spacing.lg,
+  },
+  cheatDayCard: {
+    backgroundColor: colors.surfaceMute + '18',
+    borderRadius: radii.md,
+    borderWidth: 1,
+    borderColor: colors.surfaceMute + '40',
+    padding: spacing.md,
+    marginBottom: spacing.md,
+  },
+  cheatDayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+  },
+  cheatDayLeft: {
+    flex: 1,
+  },
+  cheatDayTitle: {
+    ...typography.small,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  cheatDaySubtitle: {
+    fontSize: 11,
+    color: colors.textMuted,
+    lineHeight: 16,
+  },
+  cheatDayToggle: {
+    minWidth: 44,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.surfaceMute + '30',
+    borderWidth: 1,
+    borderColor: colors.surfaceMute + '60',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  cheatDayToggleActive: {
+    backgroundColor: colors.accent + '25',
+    borderColor: colors.accent + '60',
+  },
+  cheatDayToggleDisabled: {
+    opacity: 0.4,
+  },
+  cheatDayToggleText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.textMuted,
+    letterSpacing: 1,
+  },
+  cheatDayToggleTextActive: {
+    color: colors.accent,
   },
   allGreenText: {
     ...typography.small,

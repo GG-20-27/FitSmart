@@ -122,8 +122,8 @@ function LeaderboardView({ data }: { data: Extract<LeaderboardResponse, { phase:
             <Text style={[styles.leaderName, entry.isYou && styles.leaderNameYou]}>
               {entry.displayName}{entry.isYou ? ' (you)' : ''}
             </Text>
-            {entry.isYou && entry.cheatUsed && (
-              <Text style={styles.cheatTag}>Cheat day used</Text>
+            {entry.isYou && entry.cheatDate && (
+              <Text style={styles.cheatTag}>Cheat day: {entry.cheatDate}</Text>
             )}
           </View>
           <Text style={[styles.leaderScore, entry.isYou && styles.leaderScoreYou]}>

@@ -37,16 +37,27 @@ export interface FitLookSlide {
   focus_line: string;
 }
 
+export interface FitLookProtocolStep {
+  time: string;
+  action: string;
+}
+
 export interface FitLookResponse {
   date_local: string;
   feeling: string;
   slides?: FitLookSlide[];    // v1 legacy
   // v2 A-B-C-D structured format
   snapshot_chips?: string[];
+  reasoning?: string;
   focus?: string;
   do?: string[];
   avoid?: string;
   forecast_line?: string;
+  // v3 pre-game protocol sections
+  fuel?: string[];
+  protocol?: FitLookProtocolStep[];
+  edge?: string;
+  isRestDay?: boolean;
   cached: boolean;
   created_at: string;
   needs_checkin?: boolean;

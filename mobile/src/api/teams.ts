@@ -41,10 +41,17 @@ export interface LeaderboardEntry {
   displayName: string;
   weekAvg: number;
   daysLogged: number;
-  cheatUsed: boolean;
   cheatDate: string | null;
   isYou: boolean;
   rank: number;
+}
+
+export interface CheatDayStatus {
+  onTeam: boolean;
+  teamId?: number;
+  weekStart?: string;
+  cheatDate: string | null;
+  isCheatDay: boolean;
 }
 
 export interface CompetingResponse {
@@ -103,4 +110,19 @@ export async function getTodayTeamTrainingPlan(): Promise<TeamTrainingPlan[]> {
 export async function getWeekTeamTrainingPlan(date?: string): Promise<{ sessions: TeamTrainingPlan[]; weekStart: string }> {
   const query = date ? `?date=${encodeURIComponent(date)}` : '';
   return apiRequest(`/api/teams/training-plan/week${query}`);
+}
+
+export async function getCheatDayStatus(date: string): Promise<CheatDayStatus> {
+  return apiRequest(`/api/teams/cheat-day?date=${encodeURIComponent(date)}`);
+}
+
+export async function markCheatDay(date: string): Promise<{ ok: boolean; cheatDate: string; weekStart: string }> {
+  return apiRequest('/api/teams/cheat-day', {
+    method: 'POST',
+    body: JSON.stringify({ date }),
+  });
+}
+
+export async function unmarkCheatDay(): Promise<{ ok: boolean }> {
+  return apiRequest('/api/teams/cheat-day', { method: 'DELETE' });
 }

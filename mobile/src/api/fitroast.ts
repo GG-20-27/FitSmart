@@ -31,7 +31,7 @@ export interface FitRoastEligibilityError extends Error {
   status: number;
   needs_generate: boolean;
   eligible: boolean;
-  is_sunday: boolean;
+  is_monday: boolean;
   active_days: number;
   week_start: string;
   week_end: string;
@@ -62,7 +62,7 @@ export async function getFitRoastCurrent(): Promise<FitRoastResponse> {
     err.status = response.status;
     err.needs_generate = data.needs_generate ?? false;
     err.eligible = data.eligible ?? false;
-    err.is_sunday = data.is_sunday ?? false;
+    err.is_monday = data.is_monday ?? false;
     err.active_days = data.active_days ?? 0;
     err.week_start = data.week_start ?? '';
     err.week_end = data.week_end ?? '';
@@ -90,7 +90,7 @@ export async function resetFitRoastDev(): Promise<void> {
   await apiRequest('/api/fitroast/current-dev', { method: 'DELETE' });
 }
 
-/** Generate (or regenerate) this week's FitRoast — only succeeds on Sunday with ≥5 active days */
+/** Generate (or regenerate) this week's FitRoast — only succeeds on Monday once the full week is complete */
 export async function generateFitRoast(
   intensity?: 'Light' | 'Spicy' | 'Savage',
   weeklyGoalReview?: WeeklyGoalReview

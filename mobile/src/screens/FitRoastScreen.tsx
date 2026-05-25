@@ -23,7 +23,7 @@ export default function FitRoastScreen() {
   const [shareVisible, setShareVisible] = useState(false);
   const [roastIntensity, setRoastIntensity] = useState<'Light' | 'Spicy' | 'Savage'>('Spicy');
   const [activeDays, setActiveDays] = useState(0);
-  const [isSunday, setIsSunday] = useState(false);
+  const [isMonday, setIsMonday] = useState(false);
   const [weeklySubgoals, setWeeklySubgoals] = useState<Array<{
     goalId: string; goalTitle: string; subIndex: number; text: string; checked: boolean;
   }>>([]);
@@ -61,9 +61,9 @@ export default function FitRoastScreen() {
       const is404 = e?.status === 404 || e?.message?.includes('404');
       if (is404) {
         setActiveDays(e?.active_days ?? 0);
-        setIsSunday(e?.is_sunday ?? false);
+        setIsMonday(e?.is_monday ?? false);
         if (e?.eligible) {
-          // Sunday + eligible → load subgoals then show weekly goal check
+          // Monday + eligible → load subgoals then show weekly goal check
           await loadWeeklySubgoals();
           setScreenState('goal-check');
         } else {
@@ -231,16 +231,17 @@ export default function FitRoastScreen() {
     );
   }
 
-  // ── Locked — only shown Mon–Sat ──
+  // ── Locked — shown Tue–Sun (generated Monday morning) ──
   if (screenState === 'locked') {
     const today = new Date();
-    const daysUntilSunday = (7 - today.getDay()) % 7 || 7;
+    // Days until Monday: Sun(0)→1, Mon(1)→7, Tue(2)→6, …, Sat(6)→2
+    const daysUntilMonday = (8 - today.getDay()) % 7 || 7;
     return (
       <Animated.View style={[styles.fullCenter, { opacity: screenFade }]}>
         <Ionicons name="flame-outline" size={44} color={colors.surfaceMute} />
-        <Text style={styles.lockedTitle}>FitRoast Coming Sunday</Text>
+        <Text style={styles.lockedTitle}>FitRoast Coming Monday</Text>
         <Text style={styles.lockedSubtitle}>
-          Every Sunday your week gets roasted.{'\n'}Come back in {daysUntilSunday} day{daysUntilSunday !== 1 ? 's' : ''}.
+          Every Monday your full week gets roasted.{'\n'}Come back in {daysUntilMonday} day{daysUntilMonday !== 1 ? 's' : ''}.
         </Text>
         {__DEV__ && (
           <TouchableOpacity
@@ -324,7 +325,11 @@ export default function FitRoastScreen() {
         </View>
 
         {/* Headline */}
-        <View style={styles.contentArea}>
+        <ScrollView
+          style={styles.contentAreaScroll}
+          contentContainerStyle={styles.contentAreaScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
             <Text style={styles.introLabel}>THIS WEEK</Text>
             <Text style={styles.headline}>{roast.headline}</Text>
@@ -332,7 +337,7 @@ export default function FitRoastScreen() {
               <Text style={styles.cachedHint}>Generated earlier this week</Text>
             )}
           </Animated.View>
-        </View>
+        </ScrollView>
 
         {/* Tap to continue */}
         <TouchableOpacity style={styles.tapArea} onPress={handleTap} activeOpacity={1}>
@@ -377,17 +382,17 @@ export default function FitRoastScreen() {
           <View style={{ width: 22 }} />
         </View>
 
-        {/* Segment content */}
-        <TouchableOpacity
-          style={styles.contentArea}
-          onPress={isLastSegment ? undefined : handleTap}
-          activeOpacity={isLastSegment ? 1 : 0.95}
+        {/* Segment content — scrollable so long text is never cut off */}
+        <ScrollView
+          style={styles.contentAreaScroll}
+          contentContainerStyle={styles.contentAreaScrollContent}
+          showsVerticalScrollIndicator={false}
         >
           <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
             <Text style={styles.topicLabel}>{currentSegment.topic.toUpperCase()}</Text>
             <Text style={styles.segmentText}>{currentSegment.text}</Text>
           </Animated.View>
-        </TouchableOpacity>
+        </ScrollView>
 
         {/* Bottom area */}
         <View style={styles.bottomArea}>
@@ -503,6 +508,15 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: spacing.xl,
     justifyContent: 'center',
+  },
+  contentAreaScroll: {
+    flex: 1,
+    paddingHorizontal: spacing.xl,
+  },
+  contentAreaScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    paddingVertical: spacing.xl,
   },
   introLabel: {
     ...typography.small,

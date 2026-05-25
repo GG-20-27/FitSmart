@@ -3146,6 +3146,35 @@ function BodyFuelSection({ context, onBatchUpdate }: { context: UserContext; onB
 
   return (
     <View style={{ paddingTop: spacing.xs }}>
+      {/* Sex */}
+      <Text style={ctxStyles.optGroupLabel}>SEX</Text>
+      <View style={{ flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md }}>
+        {(['male', 'female'] as const).map((val) => {
+          const label = val === 'male' ? 'Male' : 'Female';
+          const selected = context.gender === val;
+          return (
+            <TouchableOpacity
+              key={val}
+              onPress={() => onBatchUpdate({ gender: val })}
+              style={{
+                flex: 1,
+                paddingVertical: spacing.sm,
+                borderRadius: radii.sm,
+                alignItems: 'center',
+                backgroundColor: selected ? colors.accent + '20' : colors.bgSecondary,
+                borderWidth: 1.5,
+                borderColor: selected ? colors.accent : colors.surfaceMute,
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={{ fontSize: 13, fontWeight: selected ? '700' : '500', color: selected ? colors.accent : colors.textMuted }}>
+                {label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       {/* Weight & Height row */}
       <View style={{ flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md }}>
         <View style={{ flex: 1 }}>

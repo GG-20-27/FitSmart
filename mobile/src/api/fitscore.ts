@@ -498,6 +498,10 @@ export async function getCoachSummary(params: {
   waterLiters?: number | null;
   alcoholCount?: number | null;
   sodaCount?: number | null;
+  coffeeCount?: number | null;
+  energyDrinkCount?: number | null;
+  proteinSuppGrams?: number | null;
+  creatineTaken?: boolean;
   dailyHabits?: {
     total: number;
     completed: number;

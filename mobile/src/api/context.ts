@@ -35,6 +35,7 @@ export interface UserContext {
   proteinTarget: number | null;
   calorieTarget: number | null;
   macroTargetOverridden: boolean;
+  gender: 'male' | 'female' | null;
 }
 
 export const DEFAULTS: UserContext = {
@@ -59,6 +60,7 @@ export const DEFAULTS: UserContext = {
   proteinTarget: null,
   calorieTarget: null,
   macroTargetOverridden: false,
+  gender: null,
 };
 
 /** Fetch saved user context (returns defaults if not yet set) */

@@ -292,10 +292,11 @@ export default function FitLookScreen() {
     );
   }
 
-  // ──── Render: v2 A-B-C-D fixed layout ────
+  // ──── Render: v3 pre-game protocol layout (falls back to v2 if new fields absent) ────
 
-  // Assign an icon to each readiness chip by position:
-  // 0 = recovery (heart), 1 = sleep (moon), 2 = feeling (matches check-in icon)
+  const hasV3 = !!(fitlook.fuel || fitlook.protocol || fitlook.edge);
+
+  // Chip icon by position: 0=recovery, 1=sleep, 2=feeling
   const chipIcon = (index: number): string => {
     if (index === 0) return 'heart';
     if (index === 1) return 'moon';
@@ -304,90 +305,134 @@ export default function FitLookScreen() {
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      {/* Header — feeling is shown inside Readiness chips only */}
       <Text style={styles.header}>FitLook</Text>
-      <Text style={styles.subtitle}>Today's Outlook</Text>
+      <Text style={styles.subtitle}>
+        {fitlook.isRestDay ? 'Rest Day' : "Today's Outlook"}
+      </Text>
       <Text style={styles.dateText}>{formatDate(fitlook.date_local)}</Text>
 
       <Animated.View style={[styles.cards, { opacity: fadeAnim }]}>
 
-        {/* Reasoning sentence — why this plan */}
+        {/* Reasoning sentence */}
         {fitlook.reasoning && (
           <Text style={styles.reasoningText}>{fitlook.reasoning}</Text>
         )}
 
-        {/* A) Readiness — 3-column metrics row */}
-        <View style={styles.card}>
-          <Text style={styles.cardLabel}>READINESS</Text>
-          <View style={styles.metricsRow}>
-            {fitlook.snapshot_chips.slice(0, 3).map((chip, i) => (
-              <View key={i} style={styles.metricItem}>
-                <Ionicons name={chipIcon(i) as any} size={18} color={colors.accent} />
-                <Text style={styles.metricValue}>{chip}</Text>
+        {/* Readiness — single-line horizontal pill strip */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.chipsStrip}
+          contentContainerStyle={{ gap: spacing.xs, paddingRight: spacing.xs }}
+        >
+          {fitlook.snapshot_chips.slice(0, 4).map((chip, i) => (
+            <View key={i} style={styles.chipPill}>
+              <Ionicons name={chipIcon(i) as any} size={13} color={colors.accent} />
+              <Text style={styles.chipPillText}>{chip}</Text>
+            </View>
+          ))}
+        </ScrollView>
+
+        {hasV3 ? (
+          <>
+            {/* Section 1: Fuel */}
+            <View style={styles.card}>
+              <View style={styles.sectionHeaderRow}>
+                <Ionicons name="nutrition-outline" size={15} color={colors.accent} />
+                <Text style={styles.cardLabel}>FUEL</Text>
               </View>
-            ))}
-          </View>
-          {fitlook.sleepDebtMinutes != null && fitlook.sleepDebtMinutes > 0 ? (
-            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 8, fontStyle: 'italic' }}>
-              {`Sleep debt: ${Math.floor(fitlook.sleepDebtMinutes / 60)}h ${fitlook.sleepDebtMinutes % 60}m`}
-            </Text>
-          ) : fitlook.sleepDebtMinutes != null && fitlook.sleepDebtMinutes <= 0 ? (
-            <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 8, fontStyle: 'italic' }}>
-              Sleep target met
-            </Text>
-          ) : null}
-        </View>
+              {(fitlook.fuel ?? []).map((item, i) => (
+                <View key={i} style={styles.actionRow}>
+                  <View style={styles.actionDot} />
+                  <Text style={styles.actionText}>{item}</Text>
+                </View>
+              ))}
+              {(!fitlook.fuel || fitlook.fuel.length === 0) && (
+                <Text style={styles.actionText}>Eat balanced meals — prioritise protein today</Text>
+              )}
+            </View>
 
-        {/* B) Today's Focus */}
-        {fitlook.focus && (
-          <View style={styles.card}>
-            <Text style={styles.cardLabel}>TODAY'S FOCUS</Text>
-            <Text style={styles.focusText}>{fitlook.focus}</Text>
-          </View>
-        )}
-
-        {/* C) Actions */}
-        {(fitlook.do || fitlook.avoid) && (
-          <View style={styles.card}>
-            <Text style={styles.cardLabel}>ACTIONS</Text>
-            {fitlook.do && fitlook.do.length > 0 && (
-              <View style={styles.actionSection}>
-                <Text style={styles.actionGroupLabel}>DO</Text>
-                {fitlook.do.map((item, i) => (
-                  <View key={i} style={styles.actionRow}>
-                    <View style={styles.actionDot} />
-                    <Text style={styles.actionText}>{item}</Text>
+            {/* Section 2: Today's Protocol */}
+            <View style={styles.card}>
+              <View style={styles.sectionHeaderRow}>
+                <Ionicons name="flash-outline" size={15} color={colors.accent} />
+                <Text style={styles.cardLabel}>
+                  {fitlook.isRestDay ? "RECOVERY PROTOCOL" : "TODAY'S PROTOCOL"}
+                </Text>
+              </View>
+              {(fitlook.protocol ?? []).map((step, i) => (
+                <View key={i} style={styles.protocolRow}>
+                  <View style={styles.protocolTimeTag}>
+                    <Text style={styles.protocolTimeText}>{step.time}</Text>
                   </View>
-                ))}
+                  <Text style={styles.protocolActionText}>{step.action}</Text>
+                </View>
+              ))}
+              {(!fitlook.protocol || fitlook.protocol.length === 0) && (
+                <Text style={styles.actionText}>Follow your usual routine</Text>
+              )}
+            </View>
+
+            {/* Section 3: Your Edge */}
+            <View style={styles.forecastCard}>
+              <View style={styles.forecastStripe} />
+              <View style={styles.forecastContent}>
+                <Text style={styles.forecastHeading}>YOUR EDGE</Text>
+                <Text style={styles.forecastText}>{fitlook.edge ?? fitlook.focus ?? ''}</Text>
+              </View>
+            </View>
+          </>
+        ) : (
+          <>
+            {/* v2 fallback layout */}
+            {fitlook.focus && (
+              <View style={styles.card}>
+                <Text style={styles.cardLabel}>TODAY'S FOCUS</Text>
+                <Text style={styles.focusText}>{fitlook.focus}</Text>
               </View>
             )}
-            {fitlook.avoid && (
-              <View style={[styles.actionSection, { marginTop: spacing.sm }]}>
-                <Text style={[styles.actionGroupLabel, styles.avoidLabel]}>AVOID</Text>
-                <View style={styles.actionRow}>
-                  <View style={[styles.actionDot, styles.avoidDot]} />
-                  <Text style={styles.actionText}>{fitlook.avoid}</Text>
+
+            {(fitlook.do || fitlook.avoid) && (
+              <View style={styles.card}>
+                <Text style={styles.cardLabel}>ACTIONS</Text>
+                {fitlook.do && fitlook.do.length > 0 && (
+                  <View style={styles.actionSection}>
+                    <Text style={styles.actionGroupLabel}>DO</Text>
+                    {fitlook.do.map((item, i) => (
+                      <View key={i} style={styles.actionRow}>
+                        <View style={styles.actionDot} />
+                        <Text style={styles.actionText}>{item}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {fitlook.avoid && (
+                  <View style={[styles.actionSection, { marginTop: spacing.sm }]}>
+                    <Text style={[styles.actionGroupLabel, styles.avoidLabel]}>AVOID</Text>
+                    <View style={styles.actionRow}>
+                      <View style={[styles.actionDot, styles.avoidDot]} />
+                      <Text style={styles.actionText}>{fitlook.avoid}</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {fitlook.forecast_line && (
+              <View style={styles.forecastCard}>
+                <View style={styles.forecastStripe} />
+                <View style={styles.forecastContent}>
+                  <Text style={styles.forecastHeading}>To hit today's FitScore forecast:</Text>
+                  <Text style={styles.forecastText}>
+                    {(() => {
+                      const s = fitlook.forecast_line!.replace(/^to hit today['']s\s+(fitscore\s+)?forecast:\s*/i, '').trim();
+                      return s.charAt(0).toUpperCase() + s.slice(1);
+                    })()}
+                  </Text>
                 </View>
               </View>
             )}
-          </View>
-        )}
-
-        {/* D) Forecast Lock-In */}
-        {fitlook.forecast_line && (
-          <View style={styles.forecastCard}>
-            <View style={styles.forecastStripe} />
-            <View style={styles.forecastContent}>
-              <Text style={styles.forecastHeading}>To hit today's FitScore forecast:</Text>
-              <Text style={styles.forecastText}>
-                {/* Strip any leading preamble the AI may include, then capitalize */}
-                {(() => {
-                  const s = fitlook.forecast_line.replace(/^to hit today['']s\s+(fitscore\s+)?forecast:\s*/i, '').trim();
-                  return s.charAt(0).toUpperCase() + s.slice(1);
-                })()}
-              </Text>
-            </View>
-          </View>
+          </>
         )}
 
         {/* CTA — Explain Today's Plan */}
@@ -401,7 +446,7 @@ export default function FitLookScreen() {
         </TouchableOpacity>
 
         {/* Cached hint */}
-        {fitlook.cached && (
+        {(fitlook as any).cached && (
           <Text style={styles.cachedHint}>Generated earlier today</Text>
         )}
       </Animated.View>
@@ -555,7 +600,65 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
 
-  // A) Readiness — 3-column metrics row
+  // Readiness pill strip (v3)
+  chipsStrip: {
+    marginBottom: spacing.xs,
+  },
+  chipPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.accent + '15',
+    borderRadius: 20,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  chipPillText: {
+    ...typography.small,
+    fontSize: 12,
+    color: colors.textPrimary,
+    fontWeight: '500',
+  },
+
+  // Section header row (icon + label)
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+
+  // Protocol steps (v3)
+  protocolRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  protocolTimeTag: {
+    backgroundColor: colors.accent + '20',
+    borderRadius: radii.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    minWidth: 70,
+    alignItems: 'center',
+  },
+  protocolTimeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.accent,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  protocolActionText: {
+    ...typography.body,
+    fontSize: 14,
+    color: colors.textPrimary,
+    flex: 1,
+    lineHeight: 20,
+  },
+
+  // A) Readiness — 3-column metrics row (v2 fallback)
   metricsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',

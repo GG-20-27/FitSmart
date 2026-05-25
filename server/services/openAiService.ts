@@ -289,51 +289,69 @@ export interface DailySummaryResult {
   tomorrowsOutlook: string;
 }
 
-// FitLook Morning Outlook Prompt — v2 fixed A-B-C-D structure
-const FITLOOK_MORNING_OUTLOOK_PROMPT = `You are fitLookAi — a grounded, emotionally intelligent morning coach for the FitSmart app.
+// FitLook Morning Outlook Prompt — v3 pre-game protocol format
+const FITLOOK_MORNING_OUTLOOK_PROMPT = `You are fitLookAi — the morning coach for a team athlete's day. You read their recovery data and today's session plan, then deliver a sharp pre-game protocol they can follow in seconds.
 
-Purpose: Deliver a scannable morning briefing in under 10 seconds. Fixed structure, dynamic content. Actionable, not inspirational. Forward-looking.
+Purpose: Give the athlete a clear, time-anchored plan for the day. Three sections: Fuel, Protocol, Edge. Always shown. Content adapts to readiness — good day gets motivation, rough day gets tactical support.
 
-Tone: Warm intensity 6/10. Steady, clear, direct. Like a trusted friend who checked your numbers and tells you plainly what matters today. No corporate motivation. No therapy tone. No questions. No long paragraphs.
+Tone: Direct, warm, confident. Like a trusted teammate who checked the numbers. No motivation fluff. No paragraphs. Scannable.
 
-BANNED PHRASES: "It's all about the journey", "Small steps", "Keep pushing", "You're doing great", "Listen to your body", "Trust the process", "Remember to", "Don't forget", "linchpin", "fortify", "trajectory", "calibration", "measurably", "paradigm", "synergy", "optimize", "leverage", "harness", "hydrate", "drink more water", "stay hydrated" (unless a hydration flag is explicitly in context)
+BANNED PHRASES: "It's all about the journey", "Small steps", "Keep pushing", "You're doing great", "Listen to your body", "Trust the process", "Remember to", "Don't forget", "linchpin", "fortify", "trajectory", "calibration", "measurably", "paradigm", "synergy", "optimize", "leverage", "harness", "hydrate", "drink more water", "stay hydrated" (unless hydration flag in context)
+WARM-UP RULE: NEVER suggest saving energy in the warm-up or reducing warm-up effort. Warm-up should always be done at full quality regardless of recovery. Adjust overall session load instead.
+REST DAY RULE: If no training session is prescribed (rest day), protocol steps should be recovery-focused: mobility, mental preparation, sleep support. Do NOT penalize for resting.
 
 FEELING RULES:
-- stressed or tired → lower-friction actions, supportive tone, no punishing language
+- stressed or tired → lower-friction, supportive tone, no punishing language
 - energized → allow more ambitious focus within any rehab/training constraints
 - steady → balanced, matter-of-fact
-- Always reconcile feeling with WHOOP metrics honestly. Never dismiss either.
+- Always reconcile feeling with recovery data honestly
 
-REHAB RULE: If rehabActive or injuryNotes are present, ALL action bullets must stay within rehab constraints. Never suggest high-impact movement.
+REHAB RULE: If injuryNotes are present, all bullets must stay within rehab constraints. Never suggest high-impact movement.
 
 OUTPUT: Return valid JSON with exactly this structure:
 {
-  "reasoning": "Based on your low recovery and yesterday's heavy training load, today calls for controlled effort.",
-  "snapshot_chips": ["Recovery 96%", "Sleep 9.1h", "Feeling: Steady"],
-  "focus": "Controlled ankle rehab — keep it brief",
-  "do": ["Short rehab strength (≤30 min)", "Protein by 11:00"],
-  "avoid": "High-impact movements today",
-  "forecast_line": "Short rehab + steady meals."
+  "reasoning": "Based on your 82% recovery and tonight's floorball game, you're set up well — execute the protocol.",
+  "snapshot_chips": ["Recovery 82%", "Sleep 7.8h", "Feeling: Energized"],
+  "fuel": ["High-protein breakfast by 9:00", "Complex carbs 2–3h before game"],
+  "protocol": [
+    { "time": "Morning", "action": "Light activation — 15 min" },
+    { "time": "Pre-game", "action": "Full warm-up — do not cut it short" },
+    { "time": "Post-game", "action": "Protein + 10 min cool-down" }
+  ],
+  "edge": "Your sharp first step wins the ball — use it early",
+  "focus": "Game-ready by 19:00",
+  "do": ["Full pre-game activation", "Protein within 30 min post-game"],
+  "avoid": "Heavy meal within 2h of game",
+  "forecast_line": "Full warm-up + post-game protein.",
+  "isRestDay": false
 }
 
 FIELD RULES:
-- reasoning: Exactly 1 sentence. Starts with "Based on..." and names 1–2 specific signals from today's data (recovery %, sleep, yesterday's training, feeling, injury stage, nutrition trend). This is what makes the plan feel earned, not generic. Max 80 chars. Plain language only — no jargon.
-- snapshot_chips: 2–4 chips. Always include Feeling chip. Include Recovery % and Sleep hours if available. Include a trend tag if meaningful (e.g. "3-day: improving").
-- focus: One sentence max, bold intent. Start with an action noun or verb. Max 60 chars.
-- do: Array of exactly 2 strings. Each bullet is concrete, time-aware if relevant, max 40 chars. No vague verbs.
-- avoid: Exactly 1 string. Concrete, specific. Max 40 chars.
-- forecast_line: Crisp action phrase ONLY — do NOT start with "To hit today's forecast:" or any similar preamble. Just the key levers, max 50 chars. Example: "Short rehab + steady meals."
+- reasoning: Exactly 1 sentence starting with "Based on..." — names 1–2 specific signals (recovery %, sleep, session name, feeling). Max 90 chars. Plain language only.
+- snapshot_chips: 2–4 chips. Always include Feeling chip. Include Recovery % and Sleep hours if available. Max 20 chars each.
+- fuel: Array of exactly 2 strings. Concrete nutrition/energy bullets for today's session. Time-specific if possible. Max 45 chars each.
+- protocol: Array of exactly 3 objects with "time" and "action" keys. Steps anchored to today's session. "time" = short label (max 12 chars). "action" = concrete step (max 50 chars).
+  - REST DAY: steps should be recovery/mobility/preparation focused
+  - TRAINING DAY: steps anchored to session timing
+  - NEVER include "save energy in warm-up" — warm-up is always full effort
+- edge: Exactly 1 sentence. A sharp, personalized insight tied to the user's sport, goal, or context. Makes the athlete feel understood. Max 60 chars. No generic advice.
+- focus: One sentence max, bold intent (kept for v2 compat). Max 60 chars.
+- do: Array of 2 strings (kept for v2 compat). Concrete, max 40 chars each.
+- avoid: 1 string (kept for v2 compat). Max 40 chars.
+- forecast_line: Crisp action phrase (kept for v2 compat). Max 50 chars.
+- isRestDay: boolean — true if no training session is prescribed today
 
 GLOBAL RULES:
 - No bullet starts with "Try to" or "Make sure"
-- Each chip under 20 chars
-- Be specific: use actual numbers, times, durations where available
-- No paragraphs anywhere — every field is a fragment or single sentence`;
+- Be specific: use actual numbers, session names, times where available
+- Green readiness + prescribed session: lead with confidence ("You're loaded for tonight's game")
+- Low readiness + session: tactical support ("Manage your effort in the second half")
+- No paragraphs — every field is a fragment or short sentence`;
 
 const FITROAST_LIGHT_PROMPT = `You are FitRoastAI in Light mode — a friendly, honest mate checking in on your week.
 
 PERSONA:
-Think gym buddy who noticed your week but isn't going to make it weird. Warm, a little funny, never harsh. Plain everyday language — like texting a friend. Short sentences. Easy to read. The goal is a smile, not a sting.
+Think training partner who noticed your week but isn't going to make it weird. Warm, a little funny, never harsh. Plain everyday language — like texting a friend. Short sentences. Easy to read. The goal is a smile, not a sting.
 
 INTENSITY: 3/10. A gentle poke.
 
@@ -394,7 +412,7 @@ TONE:
 - Say what actually happened, then add the twist. "You trained twice out of 7 days. Twice. Your rest game is immaculate."
 - Sarcasm is fine. Cruelty is not. Never attack who someone is — only what they did or didn't do.
 - Short punchy sentences. Plain words. No long setups or complicated metaphors.
-- Do NOT sound like a coach. Sound like that one mate who's watched too much of your week.
+- Do NOT sound like a coach. Sound like that one friend who's watched too much of your week.
 
 DATA — THE ROAST MUST FEEL PERSONAL:
 - Use the actual numbers. Every segment should reference something real from the data.
@@ -1392,7 +1410,7 @@ Return valid JSON only — no score.`;
         if (macroParts.length > 0) {
           const calPct = totalCalories != null && calorieTarget ? totalCalories / calorieTarget : null;
           const protPct = totalProtein != null && proteinTarget ? totalProtein / proteinTarget : null;
-          let macroInstruction = `Estimated meal macros today: ${macroParts.join(', ')}.`;
+          let macroInstruction = `Estimated total intake today (meals + protein supplements combined): ${macroParts.join(', ')}.`;
           if ((calPct != null && calPct < 0.80) || (protPct != null && protPct < 0.80)) {
             macroInstruction += ` Targets are significantly under-reached.`;
             if (protPct != null && protPct < 0.80) {
@@ -1462,7 +1480,7 @@ Return valid JSON only — no score.`;
         contextParts.push(`☕ Caffeine: ${parts.join(' + ')} today.${heavyCaffeine ? ' High caffeine load — consider sleep timing impact.' : ''}`);
       }
       if ((params.proteinSuppGrams ?? 0) > 0) {
-        contextParts.push(`💪 Protein supplements: ${params.proteinSuppGrams}g today (shakes/bars).`);
+        contextParts.push(`💪 Protein supplements: ${params.proteinSuppGrams}g of protein from supplements today (shakes/powder/bars). When referencing this in your summary, say "${params.proteinSuppGrams}g of protein supplements".`);
       }
       if (params.creatineTaken) {
         contextParts.push(`🧪 Creatine: taken today.`);
@@ -1764,7 +1782,8 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
         }
       }
 
-      const userPrompt = `Generate this morning's FitLook briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required v2 fields: reasoning, snapshot_chips, focus, do (array of 2), avoid, forecast_line. No slides array.`;
+      const isRestDay = !input.prescribedSession && !input.plannedTraining;
+      const userPrompt = `Generate this morning's FitLook briefing.\n\nContext:\n${parts.join('\n')}\n\nReturn JSON only with the required v3 fields: reasoning, snapshot_chips, fuel (array of 2), protocol (array of 3 {time,action} objects), edge, focus, do (array of 2), avoid, forecast_line, isRestDay. No slides array.`;
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
@@ -1778,7 +1797,7 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
             { role: 'system', content: FITLOOK_MORNING_OUTLOOK_PROMPT },
             { role: 'user', content: userPrompt }
           ],
-          max_completion_tokens: 800,
+          max_completion_tokens: 1000,
           temperature: 0.8,
           response_format: { type: 'json_object' }
         })
@@ -1798,26 +1817,33 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
 
       const parsed = JSON.parse(content);
 
-      // Validate v2 fields
-      if (!parsed.snapshot_chips || !parsed.focus || !Array.isArray(parsed.do) || !parsed.avoid || !parsed.forecast_line) {
-        throw new Error('Invalid FitLook v2 structure in response');
+      // Validate minimum required fields
+      if (!parsed.snapshot_chips || !Array.isArray(parsed.snapshot_chips)) {
+        throw new Error('Invalid FitLook response: missing snapshot_chips');
       }
 
       // Clamp arrays to spec limits
-      if (parsed.do.length > 2) parsed.do = parsed.do.slice(0, 2);
+      if (Array.isArray(parsed.do) && parsed.do.length > 2) parsed.do = parsed.do.slice(0, 2);
+      if (Array.isArray(parsed.fuel) && parsed.fuel.length > 2) parsed.fuel = parsed.fuel.slice(0, 2);
+      if (Array.isArray(parsed.protocol) && parsed.protocol.length > 3) parsed.protocol = parsed.protocol.slice(0, 3);
 
       const payload: import('@shared/schema').FitLookPayload = {
         date_local: input.dateLocal,
         feeling: input.feeling,
         ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
         snapshot_chips: parsed.snapshot_chips,
-        focus: parsed.focus,
-        do: parsed.do,
-        avoid: parsed.avoid,
-        forecast_line: parsed.forecast_line,
+        focus: parsed.focus ?? '',
+        do: Array.isArray(parsed.do) ? parsed.do : [],
+        avoid: parsed.avoid ?? '',
+        forecast_line: parsed.forecast_line ?? '',
+        // v3 fields
+        ...(Array.isArray(parsed.fuel) && parsed.fuel.length > 0 ? { fuel: parsed.fuel } : {}),
+        ...(Array.isArray(parsed.protocol) && parsed.protocol.length > 0 ? { protocol: parsed.protocol } : {}),
+        ...(parsed.edge ? { edge: parsed.edge } : {}),
+        isRestDay: Boolean(parsed.isRestDay ?? isRestDay),
       };
 
-      console.log(`[OpenAI Service] FitLook v2 generated: feeling=${input.feeling}`);
+      console.log(`[OpenAI Service] FitLook v3 generated: feeling=${input.feeling}, isRestDay=${payload.isRestDay}, hasFuel=${!!payload.fuel}, hasProtocol=${!!payload.protocol}`);
       return payload;
 
     } catch (error) {
@@ -1847,6 +1873,22 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
         forecast_line: isLow
           ? 'Protect tonight\'s recovery: keep it light.'
           : `Keep the day on track — ${feeling === 'energized' ? 'use the energy well' : 'stay steady'}.`,
+        fuel: isLow
+          ? ['Light protein-rich meal', 'No heavy carb loading today']
+          : ['Balanced breakfast before 10:00', 'Protein within 1h post-session'],
+        protocol: isLow
+          ? [
+              { time: 'Morning', action: 'Gentle mobility — 10 min max' },
+              { time: 'Midday', action: 'Rest or light walk' },
+              { time: 'Evening', action: 'Early sleep — recovery priority' },
+            ]
+          : [
+              { time: 'Morning', action: 'Activation warm-up — full effort' },
+              { time: 'Session', action: 'Execute the plan' },
+              { time: 'Post', action: 'Protein + cool-down' },
+            ],
+        edge: isLow ? 'Recovery is the work today' : 'Consistency compounds — show up',
+        isRestDay: !input.prescribedSession && !input.plannedTraining,
       };
     }
   }

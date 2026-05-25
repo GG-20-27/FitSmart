@@ -305,6 +305,8 @@ export const userContext = pgTable("user_context", {
   macroTargetOverridden: boolean("macro_target_overridden").notNull().default(false),
   sleepBedtime: text("sleep_bedtime"),
   sleepWakeTime: text("sleep_wake_time"),
+  // Biological sex — used for macro defaults and AI tone calibration
+  gender: text("gender"),  // 'male' | 'female' | null
 });
 
 // FitLook slide shape
@@ -316,17 +318,28 @@ export interface FitLookSlide {
 }
 
 // FitLook payload shape (shared between server and mobile)
+export interface FitLookProtocolStep {
+  time: string;   // e.g. "Pre-game", "Morning", "Post-session"
+  action: string; // e.g. "Dynamic warm-up — full quality"
+}
+
 export interface FitLookPayload {
   date_local: string;
   feeling: string;
   slides?: FitLookSlide[]; // v1 legacy — kept for backward compat
-  // v2 structured A-B-C-D format
+  // v2 structured A-B-C-D format (kept for backward compat)
   reasoning?: string;         // One sentence explaining why this plan — "Based on X and Y..."
-  snapshot_chips?: string[];  // A) Readiness: ["Recovery 96%", "Sleep 9.1h", "Feeling: Steady"]
-  focus?: string;             // B) Today's Focus: one bold line
-  do?: string[];              // C) Do: 1-2 concrete action bullets
-  avoid?: string;             // C) Avoid: 1 bullet
-  forecast_line?: string;     // D) Forecast lock-in line
+  snapshot_chips?: string[];  // Readiness chips: ["Recovery 96%", "Sleep 9.1h", "Feeling: Steady"]
+  focus?: string;             // v2 Today's Focus
+  do?: string[];              // v2 Do bullets
+  avoid?: string;             // v2 Avoid bullet
+  forecast_line?: string;     // v2 Forecast line
+  sleepDebtMinutes?: number;  // carried through for display
+  // v3 pre-game protocol sections
+  fuel?: string[];            // 1-2 nutrition bullets for today's session
+  protocol?: FitLookProtocolStep[]; // 2-3 time-anchored protocol steps
+  edge?: string;              // 1 personalized "Your Edge" insight
+  isRestDay?: boolean;        // true if no team sessions today
 }
 
 export const insertUserSchema = createInsertSchema(users).pick({
