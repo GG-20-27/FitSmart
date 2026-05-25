@@ -1145,7 +1145,7 @@
           wrap.appendChild(targetsRow);
         }
 
-        // Day-by-day rows with progress bars
+        // Day-by-day rows
         if (daysWithMacros.length > 0) {
           const tableLabel = document.createElement('div');
           tableLabel.style.cssText = 'font-size:10px;font-weight:700;color:#3B5265;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;';
@@ -1156,38 +1156,18 @@
             const macro = player.macrosByDate[d];
             const [, mm, dd2] = d.split('-');
             const dateLabel = `${shortDay(d)} ${parseInt(mm)}.${parseInt(dd2)}`;
-            const calPct  = calTarget  ? Math.min(Math.round(macro.calories / calTarget  * 100), 100) : null;
-            const protPct = protTarget ? Math.min(Math.round(macro.protein  / protTarget * 100), 100) : null;
             const calColor  = calTarget  ? (macro.calories >= calTarget  * 0.85 ? '#27E9B5' : macro.calories >= calTarget  * 0.65 ? '#F59E0B' : '#EF4444') : '#E0EAF0';
             const protColor = protTarget ? (macro.protein  >= protTarget * 0.85 ? '#27E9B5' : macro.protein  >= protTarget * 0.65 ? '#F59E0B' : '#EF4444') : '#E0EAF0';
 
             const row = document.createElement('div');
-            row.style.cssText = 'background:#162936;border-radius:7px;padding:8px 12px;margin-bottom:4px;';
-
-            // Number row
-            const numRow = document.createElement('div');
-            numRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
-            numRow.innerHTML = `<span style="font-size:11px;font-weight:700;color:#B0C2CC;width:52px;flex-shrink:0;">${escHtml(dateLabel)}</span>` +
+            row.style.cssText = 'background:#162936;border-radius:7px;padding:7px 12px;margin-bottom:4px;display:flex;align-items:center;gap:8px;';
+            row.innerHTML = `<span style="font-size:11px;font-weight:700;color:#B0C2CC;width:52px;flex-shrink:0;">${escHtml(dateLabel)}</span>` +
               (calTarget
                 ? `<span style="font-size:11px;color:${calColor};flex:1;">${Math.round(macro.calories)}<span style="color:#3B5265;"> / ${calTarget} kcal</span></span>`
                 : `<span style="font-size:11px;color:#E0EAF0;flex:1;">${Math.round(macro.calories)} kcal</span>`) +
               (protTarget
                 ? `<span style="font-size:11px;color:${protColor};flex:1;">${Math.round(macro.protein)}<span style="color:#3B5265;"> / ${protTarget}g protein</span></span>`
                 : `<span style="font-size:11px;color:#E0EAF0;flex:1;">${Math.round(macro.protein)}g protein</span>`);
-            row.appendChild(numRow);
-
-            // Progress bars
-            if (calPct !== null || protPct !== null) {
-              const barsWrap = document.createElement('div');
-              barsWrap.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding-left:60px;';
-              if (calPct !== null) {
-                barsWrap.innerHTML += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:9px;color:#3B5265;width:36px;text-align:right;flex-shrink:0;">kcal</span><div style="flex:1;height:4px;background:#1E3A4A;border-radius:2px;"><div style="height:4px;border-radius:2px;background:${calColor};width:${calPct}%;"></div></div><span style="font-size:9px;color:#3B5265;width:28px;flex-shrink:0;">${calPct}%</span></div>`;
-              }
-              if (protPct !== null) {
-                barsWrap.innerHTML += `<div style="display:flex;align-items:center;gap:6px;"><span style="font-size:9px;color:#3B5265;width:36px;text-align:right;flex-shrink:0;">protein</span><div style="flex:1;height:4px;background:#1E3A4A;border-radius:2px;"><div style="height:4px;border-radius:2px;background:${protColor};width:${protPct}%;"></div></div><span style="font-size:9px;color:#3B5265;width:28px;flex-shrink:0;">${protPct}%</span></div>`;
-              }
-              row.appendChild(barsWrap);
-            }
             wrap.appendChild(row);
           });
         }
