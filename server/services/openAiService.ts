@@ -124,7 +124,7 @@ OUTPUT FORMAT (strict — ⚠️ Gap is OPTIONAL, omit if no meaningful concern)
 🔧 Upgrade: <1 sentence — the single most useful actionable suggestion>
 
 RULES:
-- NEVER confuse WHOOP strain (0-21 biometric scale) with the training score (0-10). They are different numbers.
+- NEVER mention the training score (0-10) in any block — the user discovers it separately and the surprise is intentional. Only reference WHOOP strain when available.
 - If WHOOP strain data is provided, mention the specific strain number in Strength or Gap.
 - DO NOT explain scoring breakdowns or percentages.
 - Each block is exactly 1 sentence, max ~90 characters. No extra sentences.
@@ -1161,9 +1161,6 @@ Return valid JSON only — no score.`;
         }
       }
 
-      // Score
-      contextParts.push(`Score: ${params.score.toFixed(1)}/10`);
-
       // Goal
       if (params.userGoal) {
         contextParts.push(`Fitness Goal: ${params.userGoal}`);
@@ -1251,7 +1248,7 @@ Return valid JSON only — no score.`;
 
       // Return fallback response with basic context (no hallucinated WHOOP values)
       const zoneRef = (params.dataSource === 'manual' || params.whoopDataMissing) ? '' : ` in the ${params.recoveryZone} zone`;
-      const basicAnalysis = `This ${params.trainingType} session scored ${params.score.toFixed(1)}/10${zoneRef}. Keep listening to your body!`;
+      const basicAnalysis = `✅ Strength: ${params.trainingType} session logged${zoneRef}.\n🔧 Upgrade: Keep consistent with your training rhythm.`;
 
       return {
         training_analysis: basicAnalysis
