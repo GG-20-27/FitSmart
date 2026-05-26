@@ -764,6 +764,19 @@ function computeMealScore(
   };
 }
 
+/** Replace em dashes and en dashes with a plain hyphen so AI text reads more natural. */
+function noDash(text: string): string {
+  return text.replace(/—/g, ' - ').replace(/–/g, ' - ').replace(/  +/g, ' ').trim();
+}
+function noDashObj<T extends Record<string, any>>(obj: T): T {
+  const out: any = { ...obj };
+  for (const key of Object.keys(out)) {
+    if (typeof out[key] === 'string') out[key] = noDash(out[key]);
+    else if (Array.isArray(out[key])) out[key] = out[key].map((v: any) => typeof v === 'string' ? noDash(v) : v);
+  }
+  return out as T;
+}
+
 export class OpenAIService {
   private readonly apiKey: string;
   private readonly visionModel: string;
@@ -893,7 +906,7 @@ Return valid JSON only — no score.`;
         ? (gap || 'One nutritional aspect could be improved.')
         : 'No major gaps — this is a solid meal.';
 
-      const ai_analysis = `✅ Strength: ${strength || 'Logged and counted — every meal adds data.'}\n⚠️ Gap: ${resolvedGap}\n🔧 Upgrade: ${upgrade || 'Consider adding a variety of whole foods.'}`;
+      const ai_analysis = noDash(`✅ Strength: ${strength || 'Logged and counted, every meal adds data.'}\n⚠️ Gap: ${resolvedGap}\n🔧 Upgrade: ${upgrade || 'Consider adding a variety of whole foods.'}`);
 
       // ── Build quality flags ────────────────────────────────────────────────
       const buildFlag = (raw: RawFactorWithConfidence): MealQualityFlag => ({
@@ -1045,7 +1058,7 @@ Return valid JSON only — no score.`;
         ? (gap || 'One nutritional aspect could be improved.')
         : 'No major gaps — this is a solid meal.';
 
-      const ai_analysis = `✅ Strength: ${strength || 'Logged and counted — every meal adds data.'}\n⚠️ Gap: ${resolvedGap}\n🔧 Upgrade: ${upgrade || 'Consider adding a variety of whole foods.'}`;
+      const ai_analysis = noDash(`✅ Strength: ${strength || 'Logged and counted, every meal adds data.'}\n⚠️ Gap: ${resolvedGap}\n🔧 Upgrade: ${upgrade || 'Consider adding a variety of whole foods.'}`);
 
       const buildFlag = (raw: RawFactorWithConfidence): MealQualityFlag => ({
         status:          raw.status,
@@ -1242,17 +1255,14 @@ Return valid JSON only — no score.`;
       }
 
       console.log(`[OpenAI Service] Training analysis complete`);
-      return result;
+      return { training_analysis: noDash(result.training_analysis) };
 
     } catch (error) {
       console.error('[OpenAI Service] Failed to analyze training:', error);
 
-      // Return fallback response with basic context (no hallucinated WHOOP values)
       const zoneRef = (params.dataSource === 'manual' || params.whoopDataMissing) ? '' : ` in the ${params.recoveryZone} zone`;
-      const basicAnalysis = `✅ Strength: ${params.trainingType} session logged${zoneRef}.\n🔧 Upgrade: Keep consistent with your training rhythm.`;
-
       return {
-        training_analysis: basicAnalysis
+        training_analysis: `✅ Strength: ${params.trainingType} session logged${zoneRef}.\n🔧 Upgrade: Keep consistent with your training rhythm.`
       };
     }
   }
@@ -1617,11 +1627,13 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       }
 
       // Build result with legacy compatibility
+      const cleanSlides = (parsed.slides as CoachSlide[]).map(s => noDashObj(s));
+      const cleanPreview = noDash(parsed.preview);
       const result: DailySummaryResult = {
-        preview: parsed.preview,
-        slides: parsed.slides,
-        fitCoachTake: parsed.preview,
-        tomorrowsOutlook: parsed.slides[4]?.content || '',
+        preview: cleanPreview,
+        slides: cleanSlides,
+        fitCoachTake: cleanPreview,
+        tomorrowsOutlook: noDash(cleanSlides[4]?.content || ''),
       };
 
       console.log(`[OpenAI Service] Daily summary generated: ${result.slides.length} slides`);
@@ -1840,16 +1852,18 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
       const payload: import('@shared/schema').FitLookPayload = {
         date_local: input.dateLocal,
         feeling: input.feeling,
-        ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
+        ...(parsed.reasoning ? { reasoning: noDash(parsed.reasoning) } : {}),
         snapshot_chips: parsed.snapshot_chips,
-        focus: parsed.focus ?? '',
-        do: Array.isArray(parsed.do) ? parsed.do : [],
-        avoid: parsed.avoid ?? '',
-        forecast_line: parsed.forecast_line ?? '',
+        focus: noDash(parsed.focus ?? ''),
+        do: Array.isArray(parsed.do) ? parsed.do.map(noDash) : [],
+        avoid: noDash(parsed.avoid ?? ''),
+        forecast_line: noDash(parsed.forecast_line ?? ''),
         // v3 fields
-        ...(Array.isArray(parsed.fuel) && parsed.fuel.length > 0 ? { fuel: parsed.fuel } : {}),
-        ...(Array.isArray(parsed.protocol) && parsed.protocol.length > 0 ? { protocol: parsed.protocol } : {}),
-        ...(parsed.edge ? { edge: parsed.edge } : {}),
+        ...(Array.isArray(parsed.fuel) && parsed.fuel.length > 0 ? { fuel: parsed.fuel.map(noDash) } : {}),
+        ...(Array.isArray(parsed.protocol) && parsed.protocol.length > 0 ? {
+          protocol: parsed.protocol.map((s: any) => ({ ...s, action: noDash(s.action ?? '') }))
+        } : {}),
+        ...(parsed.edge ? { edge: noDash(parsed.edge) } : {}),
         isRestDay: Boolean(parsed.isRestDay ?? isRestDay),
       };
 
