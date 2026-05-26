@@ -391,6 +391,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve static files from uploads directory
   app.use('/uploads', express.static(uploadsDir));
 
+  // Terms of Service
+  app.get('/terms', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html');
+    res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FitSmart – Terms of Service</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; max-width: 760px; margin: 0 auto; padding: 48px 24px 80px; color: #1a1a2e; line-height: 1.75; background: #fff; }
+    h1 { font-size: 2rem; margin-bottom: 4px; }
+    h2 { font-size: 1.15rem; margin-top: 44px; margin-bottom: 8px; color: #111; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+    p { font-size: 0.95rem; color: #333; margin-bottom: 10px; }
+    ul { font-size: 0.95rem; color: #333; margin-bottom: 10px; padding-left: 22px; }
+    li { margin-bottom: 6px; }
+    a { color: #6366f1; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .updated { color: #888; font-size: 0.85rem; margin-bottom: 36px; display: block; }
+    .highlight { background: #f0f4ff; border-left: 3px solid #6366f1; padding: 12px 16px; border-radius: 4px; margin: 16px 0; font-size: 0.93rem; color: #333; }
+  </style>
+</head>
+<body>
+  <h1>Terms of Service</h1>
+  <span class="updated">Last updated: May 2026</span>
+
+  <div class="highlight">
+    FitSmart is currently in beta. By using the app you accept these terms. If you do not agree, do not use the app.
+  </div>
+
+  <h2>1. Who We Are</h2>
+  <p>FitSmart is operated by Gustavs Griezitis, an individual service provider based in Switzerland. Contact: <a href="mailto:gustavs.griezitis@gmail.com">gustavs.griezitis@gmail.com</a></p>
+
+  <h2>2. What FitSmart Is</h2>
+  <p>FitSmart is a personal fitness decision-support tool. It helps you make better daily training and nutrition decisions by combining your health data, meal logs, and AI-generated recommendations into a daily plan and score.</p>
+  <p>FitSmart is <strong>not</strong> a medical device, a clinical tool, or a substitute for professional medical or physiotherapy advice. Nothing in the app constitutes medical advice, diagnosis, or treatment.</p>
+
+  <h2>3. Beta Product — No Guarantees</h2>
+  <p>FitSmart is in active development. You acknowledge that:</p>
+  <ul>
+    <li>The app may contain bugs, errors, or inaccuracies</li>
+    <li>Features may change, be removed, or be unavailable without notice</li>
+    <li>AI-generated recommendations (FitLook, FitCoach, FitScore) are based on the data you provide and are estimates — not clinical assessments</li>
+    <li>Calorie and macronutrient estimates from meal photos are approximations and should not be relied upon for medical dietary management</li>
+  </ul>
+
+  <h2>4. Your Responsibilities</h2>
+  <ul>
+    <li>Use the app only for personal, non-commercial fitness purposes</li>
+    <li>Do not use FitSmart's recommendations as a substitute for advice from a doctor, physiotherapist, or registered dietitian — especially if you have an injury, illness, or medical condition</li>
+    <li>Provide accurate information when setting up your profile and completing check-ins — inaccurate inputs produce inaccurate outputs</li>
+    <li>You are responsible for any training or nutrition decisions you make, regardless of what the app recommends</li>
+    <li>Do not share your account credentials with others</li>
+  </ul>
+
+  <h2>5. Limitation of Liability</h2>
+  <p>To the maximum extent permitted by Swiss law, Gustavs Griezitis and FitSmart are not liable for:</p>
+  <ul>
+    <li>Any injury, illness, or physical harm arising from following recommendations made by the app</li>
+    <li>Loss of data due to technical failure</li>
+    <li>Interruption or discontinuation of the service</li>
+    <li>Any indirect, incidental, or consequential damages arising from your use of the app</li>
+  </ul>
+  <p>FitSmart is a tool to support your decisions — the decisions and their consequences remain yours.</p>
+
+  <h2>6. Intellectual Property</h2>
+  <p>You own your personal data (meals, scores, check-ins). We own the app, its design, prompts, and software. You grant us a limited licence to process your data to operate the service, as described in the <a href="/privacy">Privacy Policy</a>.</p>
+  <p>You may not copy, reverse-engineer, or distribute any part of the FitSmart application or its AI prompts.</p>
+
+  <h2>7. Account Termination</h2>
+  <p>You can delete your account at any time via Settings in the app. We may suspend or terminate access if these terms are violated. On termination, all your data is deleted per the <a href="/privacy">Privacy Policy</a>.</p>
+
+  <h2>8. Changes to These Terms</h2>
+  <p>We may update these terms as the product evolves. We will notify you of material changes via in-app notification or email. Continued use of the app after a change constitutes acceptance of the updated terms.</p>
+
+  <h2>9. Governing Law</h2>
+  <p>These terms are governed by Swiss law. Any disputes shall be subject to the exclusive jurisdiction of the courts of Switzerland.</p>
+
+  <h2>10. Contact</h2>
+  <p>Questions about these terms: <a href="mailto:gustavs.griezitis@gmail.com">gustavs.griezitis@gmail.com</a></p>
+
+  <p style="margin-top: 48px; font-size: 0.8rem; color: #aaa;">These terms apply to the FitSmart mobile application and all associated services. They were last updated in May 2026 and supersede all previous versions.</p>
+</body>
+</html>`);
+  });
+
   // Privacy Policy page (required for WHOOP OAuth + nDSG compliance)
   app.get('/privacy', (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
@@ -655,7 +742,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     <strong>Email:</strong> <a href="mailto:gustavs.griezitis@gmail.com">gustavs.griezitis@gmail.com</a><br>
     <strong>App:</strong> FitSmart
   </p>
-  <p style="margin-top: 48px; font-size: 0.8rem; color: #aaa;">This policy applies to the FitSmart mobile application and all associated backend services. It was written in compliance with the Swiss nDSG (revised Federal Act on Data Protection, SR 235.1) and reflects the data processing practices as of the date above.</p>
+  <p style="margin-top: 48px; font-size: 0.8rem; color: #aaa;">This policy applies to the FitSmart mobile application and all associated backend services. It was written in compliance with the Swiss nDSG (revised Federal Act on Data Protection, SR 235.1) and reflects the data processing practices as of the date above. Also see our <a href="/terms" style="color:#6366f1;">Terms of Service</a>.</p>
 </body>
 </html>`);
   });
@@ -8811,7 +8898,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     { title: 'Close the loop', body: "Close the loop. Your teammates probably already did." },
     { title: "Don't leave us on read", body: "How did today actually go? Don't leave FitSmart on read." },
     { title: 'FitScore time', body: "Your FitScore won't calculate itself. Sadly." },
-    { title: 'End the day right', body: "End the day properly. Log your score — good or bad, it counts." },
+    { title: 'End the day right', body: "End the day properly. Log your score - good or bad, it counts." },
     { title: 'Today happened', body: "Today happened. Did you make it count? Log and find out." },
     { title: 'One tap', body: "One tap. Two seconds. Your FitScore is waiting." },
     { title: 'Still awake?', body: "Still awake? Perfect. Log your FitScore before you crash." },
