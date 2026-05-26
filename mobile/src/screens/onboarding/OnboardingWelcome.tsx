@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Alert, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, ScrollView, Alert, ActivityIndicator, Image, Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -42,6 +42,9 @@ type NavigationProp = NativeStackNavigationProp<OnboardingStackParamList>;
 export default function OnboardingWelcome() {
   const navigation = useNavigation<NavigationProp>();
   const [isLoading, setIsLoading] = useState(false);
+  const [consentGiven, setConsentGiven] = useState(false);
+
+  const privacyUrl = `${API_BASE_URL.replace(/\/$/, '')}/privacy`;
 
   const handleConnectWhoop = async () => {
     try {
@@ -130,11 +133,32 @@ export default function OnboardingWelcome() {
         {/* Spacer */}
         <View style={styles.spacer} />
 
+        {/* Consent checkbox */}
+        <TouchableOpacity
+          style={styles.consentRow}
+          onPress={() => setConsentGiven(v => !v)}
+          activeOpacity={0.7}
+        >
+          <View style={[styles.checkbox, consentGiven && styles.checkboxChecked]}>
+            {consentGiven && <Ionicons name="checkmark" size={13} color={colors.bgPrimary} />}
+          </View>
+          <Text style={styles.consentText}>
+            I agree to the processing of my health and fitness data, including sensitive data (recovery, injury context, biometrics), as described in the{' '}
+            <Text
+              style={styles.consentLink}
+              onPress={() => Linking.openURL(privacyUrl)}
+            >
+              Privacy Policy
+            </Text>
+            .
+          </Text>
+        </TouchableOpacity>
+
         {/* WHOOP login */}
         <TouchableOpacity
-          style={[styles.connectButton, isLoading && styles.connectButtonDisabled]}
+          style={[styles.connectButton, (!consentGiven || isLoading) && styles.connectButtonDisabled]}
           onPress={handleConnectWhoop}
-          disabled={isLoading}
+          disabled={!consentGiven || isLoading}
         >
           {isLoading ? (
             <ActivityIndicator color={colors.bgPrimary} />
@@ -155,12 +179,12 @@ export default function OnboardingWelcome() {
 
         {/* Email login */}
         <TouchableOpacity
-          style={styles.emailButton}
-          onPress={() => navigation.navigate('OnboardingEmailAuth')}
+          style={[styles.emailButton, !consentGiven && styles.emailButtonDisabled]}
+          onPress={() => consentGiven && navigation.navigate('OnboardingEmailAuth')}
           activeOpacity={0.85}
         >
-          <Ionicons name="mail-outline" size={20} color={colors.accent} />
-          <Text style={styles.emailButtonText}>Sign Up with Email</Text>
+          <Ionicons name="mail-outline" size={20} color={consentGiven ? colors.accent : colors.textMuted} />
+          <Text style={[styles.emailButtonText, !consentGiven && styles.emailButtonTextDisabled]}>Sign Up with Email</Text>
         </TouchableOpacity>
 
         {/* Already have an account */}
@@ -169,14 +193,6 @@ export default function OnboardingWelcome() {
           <TouchableOpacity onPress={() => navigation.navigate('OnboardingEmailAuth', { mode: 'signin' })}>
             <Text style={styles.signInLink}>Sign in</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* Security Note */}
-        <View style={styles.securityNote}>
-          <Ionicons name="lock-closed-outline" size={14} color={colors.textMuted} />
-          <Text style={styles.securityText}>
-            Your data stays private
-          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -249,6 +265,38 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: spacing.xl,
   },
+  consentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+    paddingHorizontal: 2,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: colors.textMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  checkboxChecked: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  consentText: {
+    ...typography.small,
+    color: colors.textMuted,
+    flex: 1,
+    lineHeight: 18,
+  },
+  consentLink: {
+    color: colors.accent,
+    fontWeight: '600',
+  },
   connectButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -260,7 +308,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   connectButtonDisabled: {
-    opacity: 0.7,
+    opacity: 0.4,
   },
   connectButtonText: {
     ...typography.title,
@@ -293,11 +341,18 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginBottom: spacing.md,
   },
+  emailButtonDisabled: {
+    borderColor: colors.textMuted,
+    opacity: 0.4,
+  },
   emailButtonText: {
     ...typography.title,
     color: colors.accent,
     fontSize: 17,
     fontWeight: '600',
+  },
+  emailButtonTextDisabled: {
+    color: colors.textMuted,
   },
   signInRow: {
     flexDirection: 'row',
@@ -328,15 +383,5 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.accent,
     fontWeight: '600',
-  },
-  securityNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-  },
-  securityText: {
-    ...typography.small,
-    color: colors.textMuted,
   },
 });

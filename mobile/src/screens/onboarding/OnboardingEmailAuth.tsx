@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Linking,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -200,6 +201,20 @@ export default function OnboardingEmailAuth() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {/* Consent notice for registration */}
+          {mode === 'register' && (
+            <Text style={styles.consentNote}>
+              By creating an account you consent to the processing of your health and fitness data as described in our{' '}
+              <Text
+                style={styles.consentLink}
+                onPress={() => Linking.openURL(`${API_BASE_URL.replace(/\/$/, '')}/privacy`)}
+              >
+                Privacy Policy
+              </Text>
+              .
+            </Text>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -318,6 +333,17 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.accent,
     fontSize: 14,
+    fontWeight: '600',
+  },
+  consentNote: {
+    ...typography.small,
+    color: colors.textMuted,
+    textAlign: 'center',
+    marginTop: spacing.md,
+    lineHeight: 18,
+  },
+  consentLink: {
+    color: colors.accent,
     fontWeight: '600',
   },
 });

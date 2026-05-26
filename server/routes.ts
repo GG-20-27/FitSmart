@@ -391,7 +391,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Serve static files from uploads directory
   app.use('/uploads', express.static(uploadsDir));
 
-  // Privacy Policy page (required for WHOOP OAuth)
+  // Privacy Policy page (required for WHOOP OAuth + nDSG compliance)
   app.get('/privacy', (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.send(`<!DOCTYPE html>
@@ -401,50 +401,261 @@ export async function registerRoutes(app: Express): Promise<Server> {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>FitSmart – Privacy Policy</title>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 720px; margin: 60px auto; padding: 0 24px; color: #1a1a2e; line-height: 1.7; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; max-width: 760px; margin: 0 auto; padding: 48px 24px 80px; color: #1a1a2e; line-height: 1.75; background: #fff; }
     h1 { font-size: 2rem; margin-bottom: 4px; }
-    h2 { font-size: 1.1rem; margin-top: 36px; color: #333; }
-    p, li { font-size: 0.97rem; color: #444; }
-    a { color: #6366f1; }
-    .updated { color: #888; font-size: 0.85rem; margin-bottom: 32px; }
+    h2 { font-size: 1.15rem; margin-top: 44px; margin-bottom: 8px; color: #111; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+    h3 { font-size: 0.97rem; font-weight: 600; margin-top: 20px; margin-bottom: 4px; color: #222; }
+    p { font-size: 0.95rem; color: #333; margin-bottom: 10px; }
+    ul, ol { font-size: 0.95rem; color: #333; margin-bottom: 10px; padding-left: 22px; }
+    li { margin-bottom: 6px; }
+    a { color: #6366f1; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .updated { color: #888; font-size: 0.85rem; margin-bottom: 36px; display: block; }
+    .highlight { background: #f0f4ff; border-left: 3px solid #6366f1; padding: 12px 16px; border-radius: 4px; margin: 16px 0; font-size: 0.93rem; color: #333; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.9rem; }
+    th { text-align: left; background: #f5f5f7; padding: 8px 12px; font-weight: 600; border: 1px solid #e0e0e0; }
+    td { padding: 8px 12px; border: 1px solid #e0e0e0; vertical-align: top; }
+    .sensitive-tag { display: inline-block; background: #fff0f0; color: #c0392b; font-size: 0.78rem; padding: 1px 7px; border-radius: 10px; font-weight: 600; margin-left: 6px; }
   </style>
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p class="updated">Last updated: February 2026</p>
+  <span class="updated">Last updated: May 2026</span>
 
-  <p>FitSmart ("we", "our", or "us") is a personal fitness intelligence app. This policy explains what data we collect, how we use it, and your rights.</p>
+  <div class="highlight">
+    FitSmart processes sensitive health and medical data. By using the app you give your explicit, informed consent to this processing as described below. You can withdraw consent and delete all your data at any time.
+  </div>
 
-  <h2>1. Data We Collect</h2>
+  <h2>1. Who Is Responsible for Your Data</h2>
+  <p>
+    <strong>Controller:</strong> Gustavs Griezitis, operating FitSmart as an individual service provider.<br>
+    <strong>Country:</strong> Switzerland<br>
+    <strong>Contact:</strong> <a href="mailto:gustavs.griezitis@gmail.com">gustavs.griezitis@gmail.com</a>
+  </p>
+  <p>FitSmart is governed by the Swiss Federal Act on Data Protection (nDSG / revised DSG, in force since 1 September 2023). Where users are located in the EU/EEA, the GDPR applies in parallel.</p>
+
+  <h2>2. Data We Collect and Why</h2>
+
+  <h3>2.1 Account &amp; Identity Data</h3>
   <ul>
-    <li><strong>WHOOP health data</strong> – heart rate, HRV, sleep, recovery, and strain data accessed via the WHOOP API with your explicit consent.</li>
-    <li><strong>Meal photos</strong> – images you upload for nutrition analysis.</li>
-    <li><strong>Goals &amp; check-ins</strong> – fitness goals and daily check-in responses you enter in the app.</li>
-    <li><strong>Chat messages</strong> – messages sent to the AI coach for personalised advice.</li>
+    <li>Email address and display name (for account creation and communication)</li>
+    <li>Authentication provider: WHOOP OAuth or email/password</li>
+    <li>Account creation date</li>
+  </ul>
+  <p><strong>Legal basis:</strong> Performance of contract (to operate your account).</p>
+
+  <h3>2.2 Health &amp; Biometric Data <span class="sensitive-tag">sensitive</span></h3>
+  <p>For users connected via WHOOP:</p>
+  <ul>
+    <li>Recovery score, heart rate variability (HRV), resting heart rate, respiratory rate, skin temperature, blood oxygen (SpO2)</li>
+    <li>Sleep duration, sleep stages (REM, deep, light), sleep consistency, sleep performance</li>
+    <li>Strain score, daily activity and workout data</li>
+    <li>WHOOP OAuth access and refresh tokens (stored to maintain your connection)</li>
+  </ul>
+  <p>For users without WHOOP (manual mode):</p>
+  <ul>
+    <li>Self-reported recovery level, energy level, and sleep hours from daily morning check-ins</li>
+  </ul>
+  <p><strong>Legal basis:</strong> Explicit consent (nDSG Art. 31 / GDPR Art. 9(2)(a)). You grant consent when you connect your WHOOP account or complete your first morning check-in. You can withdraw consent at any time by disconnecting WHOOP or deleting your account.</p>
+
+  <h3>2.3 Medical &amp; Injury Data <span class="sensitive-tag">sensitive</span></h3>
+  <ul>
+    <li>Injury type, injury description, affected body region and location</li>
+    <li>Rehabilitation stage and any surgery or medical history you choose to enter</li>
+    <li>Sport archetype and fitness goals (which may include medical context)</li>
+  </ul>
+  <p>This data is <strong>entirely optional</strong> and entered only if you choose to provide it. It is used exclusively to personalise your daily FitLook plan and AI coaching recommendations.</p>
+  <p><strong>Legal basis:</strong> Explicit consent at the time of entry.</p>
+
+  <h3>2.4 Body Metrics</h3>
+  <ul>
+    <li>Weight (kg), height (cm), biological sex (used for calorie and protein target calculations)</li>
+    <li>Age, daily stress level, daily working hours, typical sleep window</li>
+  </ul>
+  <p><strong>Legal basis:</strong> Explicit consent and performance of contract (personalisation).</p>
+
+  <h3>2.5 Nutrition &amp; Activity Data</h3>
+  <ul>
+    <li>Meal photos you upload for AI analysis</li>
+    <li>Meal descriptions, estimated calories and macronutrients, meal timing</li>
+    <li>AI-generated nutrition analysis results (stored alongside your meals)</li>
+    <li>Training sessions: date, duration, notes, computed training score</li>
+    <li>Daily FitScore calculations and pillar scores (nutrition, training, recovery)</li>
+  </ul>
+  <p><strong>Legal basis:</strong> Performance of contract (to generate your FitScore and coaching output).</p>
+
+  <h3>2.6 AI-Generated Content</h3>
+  <ul>
+    <li>Daily FitLook plans (personalised training and nutrition guidance)</li>
+    <li>FitCoach chat history (your messages and AI responses)</li>
+    <li>Weekly FitRoast summaries</li>
+    <li>Training session analyses</li>
+    <li>Improvement plans and habit check-ins</li>
+  </ul>
+  <p><strong>Legal basis:</strong> Performance of contract.</p>
+
+  <h3>2.7 Team &amp; Competition Data</h3>
+  <p>If you join a team (e.g. a sports club pilot), the following data is shared beyond your private account:</p>
+  <ul>
+    <li>Your display name is visible to all teammates on the leaderboard</li>
+    <li>Your group assignment and weekly average FitScore are visible to members of your group (after the assessment phase ends)</li>
+    <li><strong>Coach dashboard:</strong> your display name, daily FitScore, meal photos and descriptions, and recovery/sleep data for the past 7 days are published to a password-protected web page accessible to your team coach and physio. This page is hosted on our server and accessible via a private URL — anyone who has that URL can view this data. The URL is shared only with authorised coaching staff.</li>
+  </ul>
+  <p>By joining a team you explicitly consent to your data appearing in the coach dashboard described above. You can withdraw from this by leaving the team.</p>
+  <p><strong>Legal basis:</strong> Explicit consent (given when you join a team).</p>
+
+  <h3>2.8 Technical Data</h3>
+  <ul>
+    <li>Push notification token (device identifier used only to send you app notifications)</li>
+    <li>Calendar subscription URLs (if you subscribe to your FitLook calendar feed)</li>
+    <li>Server logs (IP address, request timestamps) retained for up to 30 days for security and debugging</li>
+  </ul>
+  <p><strong>Legal basis:</strong> Legitimate interest (app security and operation).</p>
+
+  <h2>3. How We Use Your Data</h2>
+  <ul>
+    <li>Generate your daily FitScore, readiness assessment, and personalised coaching</li>
+    <li>Analyse meal photos and text for nutritional content via OpenAI Vision</li>
+    <li>Produce daily FitLook training and nutrition plans via OpenAI</li>
+    <li>Power the FitCoach AI assistant with your historical context</li>
+    <li>Track habit and goal completion over time</li>
+    <li>Send morning and evening push notifications (if you opt in)</li>
+    <li>Show your aggregated data to your team coach (if you join a team)</li>
+  </ul>
+  <p>We do <strong>not</strong> sell your data, use it for advertising, or share it with any third party except the processors listed below.</p>
+
+  <h2>4. Third-Party Processors and Cross-Border Transfers</h2>
+
+  <div class="highlight">
+    All processors below are located in the <strong>United States</strong>. As a Swiss user, this constitutes an international transfer of personal data under nDSG. These transfers are made on the basis of the standard contractual clauses (SCCs) and/or your explicit consent. Each processor has committed to appropriate safeguards via Data Processing Agreements.
+  </div>
+
+  <table>
+    <tr>
+      <th>Processor</th>
+      <th>Country</th>
+      <th>Purpose</th>
+      <th>Policy</th>
+    </tr>
+    <tr>
+      <td><strong>Supabase</strong></td>
+      <td>US (EU hosting option used)</td>
+      <td>PostgreSQL database hosting — all your personal data is stored here</td>
+      <td><a href="https://supabase.com/privacy" target="_blank">supabase.com/privacy</a></td>
+    </tr>
+    <tr>
+      <td><strong>Railway</strong></td>
+      <td>US</td>
+      <td>Application server hosting — processes all API requests</td>
+      <td><a href="https://railway.app/legal/privacy" target="_blank">railway.app/legal/privacy</a></td>
+    </tr>
+    <tr>
+      <td><strong>OpenAI</strong></td>
+      <td>US</td>
+      <td>AI analysis of meals, training, FitCoach chat, and FitLook generation. Meal photos and text are transmitted to OpenAI for processing.</td>
+      <td><a href="https://openai.com/privacy" target="_blank">openai.com/privacy</a></td>
+    </tr>
+    <tr>
+      <td><strong>WHOOP</strong></td>
+      <td>US</td>
+      <td>Source of biometric health data (WHOOP users only). FitSmart reads data via WHOOP's OAuth API with your explicit permission.</td>
+      <td><a href="https://www.whoop.com/privacy" target="_blank">whoop.com/privacy</a></td>
+    </tr>
+    <tr>
+      <td><strong>Resend</strong></td>
+      <td>US</td>
+      <td>Transactional email delivery (magic link login for email-auth users)</td>
+      <td><a href="https://resend.com/privacy" target="_blank">resend.com/privacy</a></td>
+    </tr>
+    <tr>
+      <td><strong>Expo / EAS</strong></td>
+      <td>US</td>
+      <td>Mobile app distribution and push notification delivery</td>
+      <td><a href="https://expo.dev/privacy" target="_blank">expo.dev/privacy</a></td>
+    </tr>
+    <tr>
+      <td><strong>Anthropic</strong></td>
+      <td>US</td>
+      <td>Development tooling only. The developer uses Claude Code (an AI coding assistant by Anthropic) during development. If debugging requires inspecting real data, it may pass through Anthropic's API. We take care to use anonymised data during development and do not share user PII with development tools as a matter of practice.</td>
+      <td><a href="https://www.anthropic.com/privacy" target="_blank">anthropic.com/privacy</a></td>
+    </tr>
+  </table>
+
+  <h2>5. Data Retention</h2>
+  <table>
+    <tr>
+      <th>Data Category</th>
+      <th>Retention Period</th>
+    </tr>
+    <tr>
+      <td>Account data (email, display name)</td>
+      <td>Until account deletion</td>
+    </tr>
+    <tr>
+      <td>Health and biometric data (WHOOP / check-ins)</td>
+      <td>Until account deletion</td>
+    </tr>
+    <tr>
+      <td>Medical / injury data</td>
+      <td>Until you delete it or delete your account</td>
+    </tr>
+    <tr>
+      <td>Meal photos and nutrition data</td>
+      <td>Until account deletion</td>
+    </tr>
+    <tr>
+      <td>FitScore history and training logs</td>
+      <td>Until account deletion</td>
+    </tr>
+    <tr>
+      <td>FitCoach chat history</td>
+      <td>Until account deletion (you can clear chat within the app)</td>
+    </tr>
+    <tr>
+      <td>Push notification tokens</td>
+      <td>Until account deletion or token refresh</td>
+    </tr>
+    <tr>
+      <td>Server access logs</td>
+      <td>30 days rolling</td>
+    </tr>
+  </table>
+
+  <h2>6. Your Rights Under nDSG / GDPR</h2>
+  <p>You have the following rights regarding your personal data:</p>
+  <ul>
+    <li><strong>Right of access</strong> – request a copy of all data we hold about you</li>
+    <li><strong>Right to deletion</strong> – request that we delete all your personal data. You can do this directly in the app (Settings > Delete My Account) or by email. We will complete deletion within 30 days.</li>
+    <li><strong>Right to correction</strong> – request that inaccurate data be corrected</li>
+    <li><strong>Right to data portability</strong> – request your data in a machine-readable format (JSON)</li>
+    <li><strong>Right to withdraw consent</strong> – you can withdraw consent for sensitive data processing at any time by disconnecting WHOOP, deleting injury/medical data from your profile, or deleting your account. Withdrawal does not affect the lawfulness of processing before withdrawal.</li>
+    <li><strong>Right to lodge a complaint</strong> – with the Swiss Federal Data Protection and Information Commissioner (FDPIC) at <a href="https://www.edoeb.admin.ch" target="_blank">edoeb.admin.ch</a>, or your local supervisory authority if you are in the EU/EEA</li>
+  </ul>
+  <p>To exercise any of these rights, contact: <a href="mailto:gustavs.griezitis@gmail.com">gustavs.griezitis@gmail.com</a>. We will respond within 30 days.</p>
+
+  <h2>7. Data Security</h2>
+  <ul>
+    <li>All data in transit is encrypted via HTTPS (TLS 1.2+)</li>
+    <li>Database access is restricted to the application server via Supabase row-level security and connection pooling</li>
+    <li>WHOOP OAuth tokens are stored server-side and never exposed to the client</li>
+    <li>JWT authentication tokens are short-lived and signed with a secret key</li>
+    <li>Meal images are stored in Supabase Storage with access-controlled signed URLs</li>
   </ul>
 
-  <h2>2. How We Use Your Data</h2>
-  <ul>
-    <li>To generate your FitScore, recovery insights, and AI coaching summaries.</li>
-    <li>To analyse meal photos for nutritional content using OpenAI Vision.</li>
-    <li>To personalise your fitness recommendations over time.</li>
-    <li>We do <strong>not</strong> sell your data to third parties.</li>
-  </ul>
+  <h2>8. Children</h2>
+  <p>FitSmart is not directed at children under 16. We do not knowingly collect personal data from users under 16. If you believe a child has provided us with data, contact us and we will delete it promptly.</p>
 
-  <h2>3. Data Storage</h2>
-  <p>Your data is stored in a secure PostgreSQL database hosted on Supabase (EU region). WHOOP OAuth tokens are encrypted and stored only to maintain your connection to the WHOOP API.</p>
+  <h2>9. Changes to This Policy</h2>
+  <p>We will notify users of material changes to this policy via in-app notification or email. The date at the top of this page reflects the most recent update. Continued use of the app after a policy change constitutes acceptance of the updated policy.</p>
 
-  <h2>4. Third-Party Services</h2>
-  <ul>
-    <li><strong>WHOOP API</strong> – health data is fetched from WHOOP with your permission. See <a href="https://www.whoop.com/privacy" target="_blank">WHOOP's Privacy Policy</a>.</li>
-    <li><strong>OpenAI</strong> – meal photos and chat messages are processed by OpenAI. See <a href="https://openai.com/privacy" target="_blank">OpenAI's Privacy Policy</a>.</li>
-  </ul>
-
-  <h2>5. Your Rights</h2>
-  <p>You can request deletion of all your data at any time by contacting us. Disconnecting WHOOP in the app immediately revokes our access to your WHOOP data.</p>
-
-  <h2>6. Contact</h2>
-  <p>For any privacy questions, contact us at: <a href="mailto:privacy@fitsmart.app">privacy@fitsmart.app</a></p>
+  <h2>10. Contact</h2>
+  <p>
+    <strong>Data Controller:</strong> Gustavs Griezitis<br>
+    <strong>Email:</strong> <a href="mailto:gustavs.griezitis@gmail.com">gustavs.griezitis@gmail.com</a><br>
+    <strong>App:</strong> FitSmart
+  </p>
+  <p style="margin-top: 48px; font-size: 0.8rem; color: #aaa;">This policy applies to the FitSmart mobile application and all associated backend services. It was written in compliance with the Swiss nDSG (revised Federal Act on Data Protection, SR 235.1) and reflects the data processing practices as of the date above.</p>
 </body>
 </html>`);
   });
