@@ -784,8 +784,8 @@ export class OpenAIService {
 
   constructor() {
     this.apiKey = process.env.OPENAI_API_KEY || '';
-    this.visionModel = process.env.OPENAI_MODEL || 'gpt-5.4-2026-03-05';
-    this.textModel = process.env.OPENAI_MODEL || 'gpt-5.4-2026-03-05';
+    this.visionModel = process.env.OPENAI_MODEL || 'gpt-5-mini-2025-08-07';
+    this.textModel = process.env.OPENAI_MODEL || 'gpt-5-mini-2025-08-07';
 
     if (!this.apiKey) {
       console.error('[OpenAI Service] API key not configured');
@@ -805,7 +805,9 @@ export class OpenAIService {
     imageUrl: string,
     mealType: string,
     mealNotes?: string,
-    goalPhase?: string
+    goalPhase?: string,
+    imageBuffer?: Buffer,
+    imageMimeType?: string
   ): Promise<MealAnalysisResult> {
     if (!this.apiKey) {
       throw new Error('OpenAI API key not configured');
@@ -838,12 +840,20 @@ Return valid JSON only — no score.`;
               role: 'user',
               content: [
                 { type: 'text', text: userPrompt },
-                { type: 'image_url', image_url: { url: imageUrl, detail: 'high' } }
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: imageBuffer
+                      ? `data:${imageMimeType || 'image/jpeg'};base64,${imageBuffer.toString('base64')}`
+                      : imageUrl,
+                    detail: 'high'
+                  }
+                }
               ]
             }
           ],
-          max_completion_tokens: 1200,
-          temperature: 0.4,  // lower temp for more consistent factor classification
+          max_completion_tokens: 4000,
+          reasoning_effort: 'low',
           response_format: { type: 'json_object' }
         })
       });
@@ -1003,8 +1013,8 @@ Return valid JSON only — no score.`;
             { role: 'system', content: FITSCORE_AI_SYSTEM_PROMPT },
             { role: 'user', content: userPrompt }
           ],
-          max_completion_tokens: 1200,
-          temperature: 0.4,
+          max_completion_tokens: 4000,
+          reasoning_effort: 'low',
           response_format: { type: 'json_object' }
         })
       });
@@ -1228,8 +1238,8 @@ Return valid JSON only — no score.`;
               content: userPrompt
             }
           ],
-          max_completion_tokens: 200,
-          temperature: 0.7,
+          max_completion_tokens: 2000,
+          reasoning_effort: 'low',
           response_format: { type: 'json_object' }
         })
       });
@@ -1595,8 +1605,8 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
               content: userPrompt
             }
           ],
-          max_completion_tokens: 1200,
-          temperature: 0.8,
+          max_completion_tokens: 4000,
+          reasoning_effort: 'low',
           response_format: { type: 'json_object' }
         })
       });
@@ -1819,8 +1829,8 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
             { role: 'system', content: FITLOOK_MORNING_OUTLOOK_PROMPT },
             { role: 'user', content: userPrompt }
           ],
-          max_completion_tokens: 1000,
-          temperature: 0.8,
+          max_completion_tokens: 3000,
+          reasoning_effort: 'low',
           response_format: { type: 'json_object' }
         })
       });
@@ -2066,8 +2076,8 @@ IMPORTANT: Commit fully to the "${selectedTheme.name}" theme from the first word
             { role: 'system', content: input.intensity === 'Light' ? FITROAST_LIGHT_PROMPT : input.intensity === 'Savage' ? FITROAST_SAVAGE_PROMPT : FITROAST_WEEKLY_PROMPT },
             { role: 'user', content: userPrompt },
           ],
-          max_completion_tokens: 700,
-          temperature: 1.0,
+          max_completion_tokens: 2500,
+          reasoning_effort: 'low',
           response_format: { type: 'json_object' },
         }),
       });
@@ -2263,7 +2273,7 @@ RULES — never break:
       const res = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: this.textModel, messages, max_completion_tokens: 900, temperature: 0.7 }),
+        body: JSON.stringify({ model: this.textModel, messages, max_completion_tokens: 2500, reasoning_effort: 'low' }),
       });
       if (!res.ok) {
         const errorText = await res.text();
@@ -2343,7 +2353,7 @@ Swap → {one alternative}
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: singleMealPrompt }], max_completion_tokens: 120, temperature: 0.9 }),
+      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: singleMealPrompt }], max_completion_tokens: 1500, reasoning_effort: 'low' }),
     });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
     const data = await res.json();
@@ -2456,7 +2466,7 @@ RULES:
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: prompt }], max_completion_tokens: 500, temperature: 0.7 }),
+      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: prompt }], max_completion_tokens: 2000, reasoning_effort: 'low' }),
     });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
     const data = await res.json();
@@ -2616,8 +2626,8 @@ Universal rules:
       body: JSON.stringify({
         model: this.textModel,
         messages: [{ role: 'user', content: prompt }],
-        max_completion_tokens: 350,
-        temperature: 0.85,
+        max_completion_tokens: 2000,
+        reasoning_effort: 'low',
       }),
     });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
@@ -2648,7 +2658,7 @@ Rules:
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: prompt }], max_completion_tokens: 80, temperature: 0.3 }),
+      body: JSON.stringify({ model: this.textModel, messages: [{ role: 'user', content: prompt }], max_completion_tokens: 1000, reasoning_effort: 'low' }),
     });
     if (!res.ok) throw new Error(`OpenAI API error: ${res.status}`);
     const data = await res.json();
