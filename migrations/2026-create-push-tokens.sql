@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS push_tokens (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT NOT NULL,
+  platform TEXT,
+  updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+);

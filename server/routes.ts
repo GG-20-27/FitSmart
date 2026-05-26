@@ -2401,6 +2401,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/notifications/register — save Expo push token for this user
+  app.post('/api/notifications/register', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      const { token, platform } = req.body ?? {};
+      if (!token || typeof token !== 'string') return res.status(400).json({ error: 'token required' });
+      await storage.upsertPushToken(userId, token, platform);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[PUSH] Register error:', error);
+      res.status(500).json({ error: 'Failed to register push token' });
+    }
+  });
+
   // POST /api/auth/forgot-password — request a password reset email
   app.post('/api/auth/forgot-password', async (req, res) => {
     try {
@@ -8764,6 +8779,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[Cron] FitRoast cron error:', msg);
+    }
+  }, { timezone: 'Europe/Zurich' });
+
+  // ── Push notification helpers ──────────────────────────────────────────────
+  async function sendExpoPushNotification(token: string, title: string, body: string) {
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate' },
+      body: JSON.stringify({ to: token, title, body, sound: 'default' }),
+    });
+  }
+
+  function pickRandom<T>(arr: T[]): T {
+    return arr[Math.floor(Math.random() * arr.length)];
+  }
+
+  const MORNING_MESSAGES = [
+    { title: 'FitLook is ready', body: "Do you even know what you're doing today? Your FitLook does." },
+    { title: "Today's plan is set", body: "Today has a plan. The question is whether you'll follow it." },
+    { title: 'Your move', body: "Your body gave the data. FitLook built the plan. Your move." },
+    { title: "FitLook is ready", body: "No more 'I didn't know what to train' excuses. It's all there." },
+    { title: "08:30 check-in", body: "Today's training and fuel plan is ready. Go get it." },
+    { title: "It already knows", body: "FitLook doesn't guess — it knows exactly what you need today." },
+    { title: "Future you approves", body: "Today's plan is ready. Your future self already approves." },
+  ];
+
+  const EVENING_MESSAGES = [
+    { title: 'Log your FitScore', body: "You trained today. Allegedly. Log your FitScore and prove it." },
+    { title: 'FitScore waiting', body: "Your FitScore is uncalculated and honestly a little offended." },
+    { title: 'Close the loop', body: "Close the loop. Your teammates probably already did." },
+    { title: "Don't leave us on read", body: "How did today actually go? Don't leave FitSmart on read." },
+    { title: 'FitScore time', body: "Your FitScore won't calculate itself. Sadly." },
+    { title: 'End the day right', body: "End the day properly. Log your score — good or bad, it counts." },
+    { title: 'Today happened', body: "Today happened. Did you make it count? Log and find out." },
+    { title: 'One tap', body: "One tap. Two seconds. Your FitScore is waiting." },
+    { title: 'Still awake?', body: "Still awake? Perfect. Log your FitScore before you crash." },
+    { title: 'The day is almost done', body: "The day is almost over. How did the plan hold up?" },
+  ];
+
+  // ── Morning notification cron — 08:30 Zurich ──────────────────────────────
+  cron.schedule('30 8 * * *', async () => {
+    console.log('[Cron] Morning notifications starting...');
+    try {
+      const tokens = await storage.getAllPushTokens();
+      const msg = pickRandom(MORNING_MESSAGES);
+      let sent = 0;
+      for (const { token } of tokens) {
+        try {
+          await sendExpoPushNotification(token, msg.title, msg.body);
+          sent++;
+        } catch (err) {
+          console.error('[Cron] Morning push failed for token:', err);
+        }
+      }
+      console.log(`[Cron] Morning notifications sent: ${sent}`);
+    } catch (err) {
+      console.error('[Cron] Morning notification cron error:', err);
+    }
+  }, { timezone: 'Europe/Zurich' });
+
+  // ── Evening notification cron — 21:30 Zurich ──────────────────────────────
+  // Skips users who have already calculated their FitScore today
+  cron.schedule('30 21 * * *', async () => {
+    console.log('[Cron] Evening notifications starting...');
+    try {
+      const tokens = await storage.getAllPushTokens();
+      const zurichToday = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+      let sent = 0;
+      let skipped = 0;
+      for (const { userId, token } of tokens) {
+        try {
+          const [existing] = await db.select().from(fitScores)
+            .where(and(eq(fitScores.userId, userId), eq(fitScores.date, zurichToday)))
+            .limit(1);
+          if (existing) { skipped++; continue; }
+          const msg = pickRandom(EVENING_MESSAGES);
+          await sendExpoPushNotification(token, msg.title, msg.body);
+          sent++;
+        } catch (err) {
+          console.error('[Cron] Evening push failed for user:', userId, err);
+        }
+      }
+      console.log(`[Cron] Evening notifications sent: ${sent} skipped: ${skipped}`);
+    } catch (err) {
+      console.error('[Cron] Evening notification cron error:', err);
     }
   }, { timezone: 'Europe/Zurich' });
 

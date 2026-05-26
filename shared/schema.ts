@@ -270,6 +270,18 @@ export type InsertCheatDay = z.infer<typeof insertCheatDaySchema>;
 export type TeamTrainingPlan = typeof teamTrainingPlan.$inferSelect;
 export type InsertTeamTrainingPlan = z.infer<typeof insertTeamTrainingPlanSchema>;
 
+// Push notification tokens — one row per user device
+export const pushTokens = pgTable("push_tokens", {
+  userId: text("user_id").primaryKey().references(() => users.id, { onDelete: 'cascade' }),
+  token: text("token").notNull(),           // Expo push token
+  platform: text("platform"),              // "ios" | "android"
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertPushTokenSchema = createInsertSchema(pushTokens).omit({ updatedAt: true });
+export type PushToken = typeof pushTokens.$inferSelect;
+export type InsertPushToken = z.infer<typeof insertPushTokenSchema>;
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const userContext = pgTable("user_context", {

@@ -3,6 +3,8 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Text, View, StyleSheet, ActivityIndicator, TouchableOpacity, Linking, Image, Animated, DeviceEventEmitter, Platform, StatusBar } from 'react-native';
 import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 import DashboardScreen from './src/screens/DashboardScreen';
 import CalendarScreen from './src/screens/CalendarScreen';
 import ChatScreen from './src/screens/ChatScreen';
@@ -299,6 +301,7 @@ export default function App() {
         setOnboardingComplete(true);
         setShowCheckin(false);
         setLoading(false);
+        registerPushToken();
         return;
       }
 
@@ -314,6 +317,29 @@ export default function App() {
       setShowCheckin(false);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const registerPushToken = async () => {
+    try {
+      if (!Device.isDevice) return; // skip in simulator
+      const { status: existing } = await Notifications.getPermissionsAsync();
+      let finalStatus = existing;
+      if (existing !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      if (finalStatus !== 'granted') return;
+      const tokenData = await Notifications.getExpoPushTokenAsync({
+        projectId: Constants.expoConfig?.extra?.eas?.projectId,
+      });
+      await apiRequest('/api/notifications/register', {
+        method: 'POST',
+        body: JSON.stringify({ token: tokenData.data, platform: Platform.OS }),
+      });
+      console.log('[PUSH] Token registered:', tokenData.data);
+    } catch (err) {
+      console.warn('[PUSH] Token registration failed (non-fatal):', err);
     }
   };
 
