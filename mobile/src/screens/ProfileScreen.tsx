@@ -200,6 +200,44 @@ export default function ProfileScreen() {
     ]);
   };
 
+  const handleDeleteAccount = async () => {
+    Alert.alert(
+      'Delete Account',
+      'This permanently deletes your account and all your data — meals, scores, coaching history, everything. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete Everything',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Are you absolutely sure?',
+              'All your data will be wiped immediately and cannot be recovered.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Yes, Delete My Account',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      await apiRequest('/api/auth/me', { method: 'DELETE' });
+                      await clearAuthToken();
+                      if (typeof (global as any).refreshOnboardingStatus === 'function') {
+                        (global as any).refreshOnboardingStatus();
+                      }
+                    } catch {
+                      Alert.alert('Error', 'Failed to delete account. Please try again or contact privacy@fitsmart.app.');
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  };
+
   const handleLogout = async () => {
     Alert.alert('Logout', 'Are you sure you want to logout?', [
       { text: 'Cancel', style: 'cancel' },
@@ -381,6 +419,14 @@ export default function ProfileScreen() {
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <Ionicons name="log-out-outline" size={20} color={colors.danger} />
             <Text style={styles.logoutButtonText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Delete account */}
+        <View style={styles.section}>
+          <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
+            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+            <Text style={styles.deleteAccountText}>Delete My Account</Text>
           </TouchableOpacity>
         </View>
 
@@ -607,5 +653,17 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.danger,
     fontWeight: '600',
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+  },
+  deleteAccountText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontWeight: '500',
   },
 });

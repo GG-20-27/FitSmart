@@ -2387,6 +2387,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // DELETE /api/auth/me — permanently delete account and all user data (nDSG right to deletion)
+  app.delete('/api/auth/me', requireJWTAuth, async (req, res) => {
+    try {
+      const userId = getCurrentUserId(req);
+      if (!userId) return res.status(401).json({ error: 'Authentication required' });
+      await db.delete(users).where(eq(users.id, userId));
+      console.log(`[ACCOUNT DELETE] User ${userId} deleted all their data`);
+      res.json({ ok: true });
+    } catch (error) {
+      console.error('[ACCOUNT DELETE] Error:', error);
+      res.status(500).json({ error: 'Failed to delete account' });
+    }
+  });
+
   // POST /api/auth/forgot-password — request a password reset email
   app.post('/api/auth/forgot-password', async (req, res) => {
     try {
@@ -4674,7 +4688,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         imageUrl,
         mealType,
         mealNotes || undefined,
-        dietPhase
+        dietPhase,
+        file.buffer,
+        file.mimetype
       );
 
       // Update meal with analysis result (include meal_time for timing signal computation)
