@@ -564,6 +564,7 @@ export interface FitLookGenerationInput {
     training?: number;
     nutrition?: number;
   };
+  yesterdayMealsSummary?: string; // e.g. "2 meals; first at 08:30, last at 20:15; ~1800 kcal (SHORT); ~95g protein (SHORT); Quality flags: low veg/fiber"
   pillarPattern7d?: string;
   plannedTraining?: string;
   userGoalTitle?: string;
@@ -1708,6 +1709,15 @@ Return JSON with "preview" and "slides" (5 slides: The Day, Recovery, Training, 
           const b = input.yesterdayBreakdown;
           parts.push(`Yesterday breakdown — Recovery: ${b.recovery ?? '?'}/10, Training: ${b.training ?? '?'}/10, Nutrition: ${b.nutrition ?? '?'}/10`);
         }
+      }
+      if (input.yesterdayMealsSummary) {
+        parts.push(`Yesterday's eating: ${input.yesterdayMealsSummary}`);
+        parts.push(
+          'FUEL SECTION RULE: Use the eating data above to personalise every bullet. ' +
+          'Name specific gaps (e.g. "protein was 40g short — hit it today") or confirm what worked well ("you nailed protein yesterday — repeat it"). ' +
+          'Reference meal timing if it was late or sparse. If 0 meals were logged yesterday, note the missing data and default to recovery-focused fuelling. ' +
+          'NEVER write generic tips like "eat a balanced breakfast" without anchoring it to the actual numbers above.'
+        );
       }
 
       if (input.pillarPattern7d) {

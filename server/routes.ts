@@ -6046,7 +6046,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('[FITLOOK] WHOOP data not available:', (e as Error).message);
       }
 
-      // Yesterday's FitScore
+      // Yesterday's FitScore + pillar breakdown
       const yesterday = DateTime.now().setZone('Europe/Zurich').minus({ days: 1 }).toISODate()!;
       let yesterdayFitScore: number | undefined;
       let yesterdayBreakdown: { recovery?: number; training?: number; nutrition?: number } | undefined;
@@ -6054,7 +6054,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const [ys] = await db.select().from(fitScores)
           .where(and(eq(fitScores.userId, userId), eq(fitScores.date, yesterday)))
           .limit(1);
-        if (ys) yesterdayFitScore = ys.score;
+        if (ys) {
+          yesterdayFitScore = ys.score;
+          if (ys.recoveryScore != null || ys.trainingScore != null || ys.nutritionScore != null) {
+            yesterdayBreakdown = {
+              recovery: ys.recoveryScore ?? undefined,
+              training: ys.trainingScore ?? undefined,
+              nutrition: ys.nutritionScore ?? undefined,
+            };
+          }
+        }
+      } catch { /* graceful */ }
+
+      // Yesterday's meal patterns for personalised Fuel section
+      let yesterdayMealsSummary: string | undefined;
+      try {
+        const ctx = await storage.getUserContext(userId);
+        const yesterdayMeals = await storage.getMealsByUserAndDate(userId, yesterday);
+        if (yesterdayMeals.length > 0) {
+          let totalCal = 0, totalProt = 0, hasCal = false, hasProt = false;
+          let firstMealTime: string | null = null;
+          let lastMealTime: string | null = null;
+          const qualityIssues: string[] = [];
+
+          for (const m of yesterdayMeals) {
+            if (m.analysisResult) {
+              try {
+                const p = JSON.parse(m.analysisResult);
+                if (typeof p.estimated_calories === 'number') { totalCal += p.estimated_calories; hasCal = true; }
+                if (typeof p.estimated_protein === 'number') { totalProt += p.estimated_protein; hasProt = true; }
+                if (typeof p.meal_time === 'string' && p.meal_time) {
+                  if (!firstMealTime || p.meal_time < firstMealTime) firstMealTime = p.meal_time;
+                  if (!lastMealTime || p.meal_time > lastMealTime) lastMealTime = p.meal_time;
+                }
+                const flags = p.meal_quality_flags;
+                if (flags?.processingLoad?.effectiveStatus === 'warning') qualityIssues.push('processed food');
+                if (flags?.proteinAdequacy?.effectiveStatus === 'warning') qualityIssues.push('low protein in meal');
+                if (flags?.fiberPlantVolume?.effectiveStatus === 'warning') qualityIssues.push('low veg/fiber');
+              } catch { /* skip */ }
+            }
+          }
+
+          const mealLines: string[] = [`Yesterday: ${yesterdayMeals.length} meal${yesterdayMeals.length !== 1 ? 's' : ''} logged`];
+          if (firstMealTime) mealLines.push(`first meal at ${firstMealTime}, last at ${lastMealTime ?? firstMealTime}`);
+          if (hasCal) {
+            const calTarget = ctx?.calorieTarget;
+            mealLines.push(`~${Math.round(totalCal)} kcal${calTarget ? ` (target: ${calTarget} kcal, ${totalCal < calTarget * 0.85 ? 'SHORT' : totalCal > calTarget * 1.15 ? 'OVER' : 'on target'})` : ''}`);
+          }
+          if (hasProt) {
+            const protTarget = ctx?.proteinTarget;
+            mealLines.push(`~${Math.round(totalProt)}g protein${protTarget ? ` (target: ${protTarget}g, ${totalProt < protTarget * 0.8 ? 'SHORT' : totalProt >= protTarget * 0.95 ? 'hit' : 'close'})` : ''}`);
+          }
+          const uniqueIssues = [...new Set(qualityIssues)];
+          if (uniqueIssues.length > 0) mealLines.push(`Quality flags: ${uniqueIssues.join(', ')}`);
+          yesterdayMealsSummary = mealLines.join('; ');
+        } else {
+          yesterdayMealsSummary = 'Yesterday: 0 meals logged';
+        }
       } catch { /* graceful */ }
 
       // 7-day per-pillar FitScore pattern
@@ -6203,6 +6259,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         strainScore: fitlookDataSource !== 'manual' ? strainScore : undefined,
         yesterdayFitScore,
         yesterdayBreakdown,
+        yesterdayMealsSummary,
         pillarPattern7d,
         plannedTraining: prescribedSession ? undefined : plannedTraining, // prescribed overrides calendar
         userGoalTitle,

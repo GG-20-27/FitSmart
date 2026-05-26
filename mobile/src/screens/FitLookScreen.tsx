@@ -603,7 +603,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     color: colors.textMuted,
     textTransform: 'uppercase',
-    marginBottom: spacing.sm,
   },
 
   // Readiness pill strip (v3)
@@ -630,24 +629,25 @@ const styles = StyleSheet.create({
   sectionHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    gap: 6,
     marginBottom: spacing.sm,
   },
 
   // Protocol steps (v3)
   protocolRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: spacing.sm,
     marginBottom: spacing.sm,
   },
   protocolTimeTag: {
     backgroundColor: colors.accent + '20',
     borderRadius: radii.sm,
-    paddingHorizontal: spacing.sm,
     paddingVertical: 3,
-    minWidth: 70,
+    width: 80,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   protocolTimeText: {
     fontSize: 10,
