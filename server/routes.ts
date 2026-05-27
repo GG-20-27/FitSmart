@@ -8454,7 +8454,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/coach/verify-pin  — verify PIN before granting coach view access
+  // Body: { token, pin }
+  // Returns { ok: true, pinRequired: bool } or 401
+  app.post('/api/coach/verify-pin', async (req, res) => {
+    try {
+      const { token, pin } = req.body as { token?: string; pin?: string };
+      if (!token) return res.status(400).json({ error: 'token required' });
+      const team = await storage.getTeamByCoachToken(token);
+      if (!team) return res.status(404).json({ error: 'Team not found' });
+      if (!team.coachPin) return res.json({ ok: true, pinRequired: false });
+      if (!pin || pin.trim() !== team.coachPin.trim()) {
+        return res.status(401).json({ error: 'Incorrect PIN' });
+      }
+      return res.json({ ok: true, pinRequired: true });
+    } catch (err) {
+      console.error('[Coach] verify-pin error:', err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // POST /api/coach/set-pin?token=XXX  — set or clear the coach view PIN
+  // Body: { pin }  (send empty string or null to remove PIN)
+  app.post('/api/coach/set-pin', async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token) return res.status(400).json({ error: 'token required' });
+      const team = await storage.getTeamByCoachToken(token);
+      if (!team) return res.status(404).json({ error: 'Team not found' });
+      const { pin } = req.body as { pin?: string };
+      const pinValue = pin && pin.trim().length > 0 ? pin.trim() : null;
+      await storage.setCoachPin(team.id, pinValue);
+      return res.json({ ok: true, pinSet: pinValue !== null });
+    } catch (err) {
+      console.error('[Coach] set-pin error:', err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // GET /api/coach/team?token=XXX  (no JWT — coach access via secret token)
+  // If team has a PIN set, requires X-Coach-Pin header with the correct PIN.
   app.get('/api/coach/team', async (req, res) => {
     try {
       const token = req.query.token as string;
@@ -8462,6 +8501,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const team = await storage.getTeamByCoachToken(token);
       if (!team) return res.status(404).json({ error: 'Team not found' });
+
+      // PIN gate: if team has a PIN, require it in the X-Coach-Pin header
+      if (team.coachPin) {
+        const suppliedPin = req.headers['x-coach-pin'] as string | undefined;
+        if (!suppliedPin || suppliedPin.trim() !== team.coachPin.trim()) {
+          return res.status(401).json({ error: 'pin_required' });
+        }
+      }
 
       const members = await storage.getTeamMembers(team.id);
       const weekStart = team.weekStart ?? getWeekStart(new Date());

@@ -502,9 +502,120 @@
       box-shadow: 0 8px 40px #000000aa;
     }
     .meal-thumb { cursor: zoom-in; }
+
+    /* ── PIN gate ────────────────────────────────────────────────────────── */
+    .pin-gate {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #051824;
+      z-index: 200;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .pin-gate.visible { display: flex; }
+
+    .pin-gate-card {
+      background: #162936;
+      border: 1px solid #3B5265;
+      border-radius: 16px;
+      padding: 40px 36px;
+      width: 100%;
+      max-width: 360px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+    .pin-gate-logo {
+      font-size: 13px;
+      font-weight: 800;
+      color: #27E9B5;
+      letter-spacing: 0.5px;
+      margin-bottom: 28px;
+    }
+    .pin-gate-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 6px;
+      text-align: center;
+    }
+    .pin-gate-subtitle {
+      font-size: 13px;
+      color: #3B5265;
+      text-align: center;
+      margin-bottom: 28px;
+      line-height: 1.5;
+    }
+    .pin-input-wrap {
+      position: relative;
+      width: 100%;
+      margin-bottom: 14px;
+    }
+    .pin-input {
+      width: 100%;
+      background: #0E2231;
+      border: 1.5px solid #3B5265;
+      border-radius: 10px;
+      color: #ffffff;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      padding: 14px 18px;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.15s;
+      font-family: inherit;
+    }
+    .pin-input::placeholder { letter-spacing: 2px; font-size: 14px; font-weight: 400; color: #3B5265; }
+    .pin-input:focus { border-color: #27E9B5; }
+    .pin-input.error { border-color: #EF4444; animation: pin-shake 0.3s ease; }
+    @keyframes pin-shake {
+      0%,100% { transform: translateX(0); }
+      25%      { transform: translateX(-6px); }
+      75%      { transform: translateX(6px); }
+    }
+    .pin-error-msg {
+      font-size: 12px;
+      color: #EF4444;
+      text-align: center;
+      min-height: 16px;
+      margin-bottom: 16px;
+    }
+    .pin-submit-btn {
+      width: 100%;
+      background: #27E9B5;
+      color: #051824;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 800;
+      padding: 14px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      letter-spacing: 0.3px;
+    }
+    .pin-submit-btn:hover { opacity: 0.88; }
+    .pin-submit-btn:disabled { opacity: 0.4; cursor: default; }
   </style>
 </head>
 <body>
+  <!-- PIN gate overlay -->
+  <div class="pin-gate" id="pin-gate">
+    <div class="pin-gate-card">
+      <div class="pin-gate-logo">FitSmart</div>
+      <div class="pin-gate-title">Coach Access</div>
+      <div class="pin-gate-subtitle">Enter the PIN shared with you to view this team's dashboard.</div>
+      <div class="pin-input-wrap">
+        <input class="pin-input" id="pin-input" type="password" inputmode="numeric" maxlength="12" placeholder="Enter PIN" autocomplete="off" />
+      </div>
+      <div class="pin-error-msg" id="pin-error"></div>
+      <button class="pin-submit-btn" id="pin-submit">Unlock Dashboard</button>
+    </div>
+  </div>
   <header>
     <div class="header-left">
       <h1>FitSmart Coach View</h1>
@@ -542,7 +653,94 @@
     const token = new URLSearchParams(window.location.search).get('token');
     const todayStr = new Date().toISOString().slice(0, 10);
 
-    let weekOffset = 0; // 0 = current week, -1 = last week, etc.
+    let weekOffset = 0;
+    let cachedPin = null; // set after successful PIN verification
+
+    // ── PIN gate ─────────────────────────────────────────────────────────
+    const PIN_STORAGE_KEY = token ? `coachPin_${token}` : null;
+
+    function getPinHeaders() {
+      return cachedPin ? { 'x-coach-pin': cachedPin } : {};
+    }
+
+    async function initPinGate() {
+      // Check sessionStorage for a previously verified PIN
+      const stored = PIN_STORAGE_KEY ? sessionStorage.getItem(PIN_STORAGE_KEY) : null;
+      if (stored) {
+        // Verify the stored PIN is still valid (team PIN may have changed)
+        const res = await fetch(`${API_BASE}/api/coach/verify-pin`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+          body: JSON.stringify({ token, pin: stored }),
+        });
+        if (res.ok) {
+          cachedPin = stored;
+          return; // all good — proceed to load
+        }
+        sessionStorage.removeItem(PIN_STORAGE_KEY); // stale / changed
+      }
+
+      // Probe whether a PIN is required at all
+      const probe = await fetch(`${API_BASE}/api/coach/verify-pin`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+        body: JSON.stringify({ token, pin: '' }),
+      });
+      if (probe.ok) {
+        const data = await probe.json();
+        if (!data.pinRequired) return; // no PIN on this team — proceed
+      }
+
+      // Show the gate and wait for correct PIN
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('pin-gate').classList.add('visible');
+      await waitForPin();
+    }
+
+    function waitForPin() {
+      return new Promise((resolve) => {
+        const input  = document.getElementById('pin-input');
+        const btn    = document.getElementById('pin-submit');
+        const errEl  = document.getElementById('pin-error');
+
+        async function attempt() {
+          const pin = input.value.trim();
+          if (!pin) return;
+          btn.disabled = true;
+          btn.textContent = 'Checking…';
+          errEl.textContent = '';
+
+          try {
+            const res = await fetch(`${API_BASE}/api/coach/verify-pin`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' },
+              body: JSON.stringify({ token, pin }),
+            });
+            if (res.ok) {
+              cachedPin = pin;
+              if (PIN_STORAGE_KEY) sessionStorage.setItem(PIN_STORAGE_KEY, pin);
+              document.getElementById('pin-gate').classList.remove('visible');
+              document.getElementById('loading').style.display = 'block';
+              resolve();
+            } else {
+              input.classList.add('error');
+              errEl.textContent = 'Incorrect PIN — try again';
+              input.value = '';
+              input.focus();
+              setTimeout(() => input.classList.remove('error'), 400);
+            }
+          } catch {
+            errEl.textContent = 'Connection error — try again';
+          }
+          btn.disabled = false;
+          btn.textContent = 'Unlock Dashboard';
+        }
+
+        btn.addEventListener('click', attempt);
+        input.addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+        input.focus();
+      });
+    }
 
     function getWeekBounds(offset) {
       const today = new Date();
@@ -571,10 +769,12 @@
       document.getElementById('error-msg').textContent = 'No token in URL. Use the link provided by the team creator.';
       document.getElementById('loading').style.display = 'none';
     } else {
-      document.getElementById('btn-prev').addEventListener('click', () => { weekOffset--; load(); });
-      document.getElementById('btn-next').addEventListener('click', () => { weekOffset++; load(); });
-      load();
-      setInterval(load, 5 * 60 * 1000);
+      initPinGate().then(() => {
+        document.getElementById('btn-prev').addEventListener('click', () => { weekOffset--; load(); });
+        document.getElementById('btn-next').addEventListener('click', () => { weekOffset++; load(); });
+        load();
+        setInterval(load, 5 * 60 * 1000);
+      });
     }
 
     function scoreClass(s) {
@@ -616,7 +816,7 @@
       try {
         const { from, to } = getWeekBounds(weekOffset);
         const url = `${API_BASE}/api/coach/team?token=${encodeURIComponent(token)}&from=${from}&to=${to}`;
-        const res = await fetch(url, { headers: { 'ngrok-skip-browser-warning': 'true' } });
+        const res = await fetch(url, { headers: { 'ngrok-skip-browser-warning': 'true', ...getPinHeaders() } });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
 

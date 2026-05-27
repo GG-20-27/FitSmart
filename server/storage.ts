@@ -84,6 +84,7 @@ export interface IStorage {
   getTeamByJoinCode(code: string): Promise<Team | undefined>;
   getTeamByCoachToken(token: string): Promise<Team | undefined>;
   getTeamById(id: number): Promise<Team | undefined>;
+  setCoachPin(teamId: number, pin: string | null): Promise<void>;
   addTeamMember(teamId: number, userId: string, role?: string): Promise<TeamMember>;
   getTeamMembers(teamId: number): Promise<(TeamMember & { displayName: string | null; email: string })[]>;
   getTeamMembership(userId: string): Promise<{ team: Team; member: TeamMember } | undefined>;
@@ -467,6 +468,10 @@ export class DatabaseStorage implements IStorage {
   async getTeamById(id: number): Promise<Team | undefined> {
     const [team] = await db.select().from(teams).where(eq(teams.id, id));
     return team || undefined;
+  }
+
+  async setCoachPin(teamId: number, pin: string | null): Promise<void> {
+    await db.update(teams).set({ coachPin: pin }).where(eq(teams.id, teamId));
   }
 
   async addTeamMember(teamId: number, userId: string, role = 'member'): Promise<TeamMember> {

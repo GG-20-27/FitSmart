@@ -217,6 +217,7 @@ export const teams = pgTable("teams", {
   sport: text("sport").notNull(),
   joinCode: text("join_code").notNull().unique(),
   coachToken: text("coach_token").notNull().unique(),
+  coachPin: text("coach_pin"),                         // optional PIN gate for coach view
   phase: text("phase").notNull().default("assessment"), // "assessment" | "competing"
   weekStart: text("week_start"),                       // YYYY-MM-DD Monday when competition started
   createdBy: text("created_by").notNull().references(() => users.id, { onDelete: 'cascade' }),
