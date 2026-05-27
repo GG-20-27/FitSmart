@@ -297,7 +297,7 @@
     .day-section-label {
       font-size: 9px;
       font-weight: 700;
-      color: #3B5265;
+      color: #8AABB8;
       text-transform: uppercase;
       letter-spacing: 0.8px;
     }
@@ -861,7 +861,7 @@
         <div style="flex:1;padding-bottom:4px;">
           <span style="font-size:11px;color:#3B5265;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Player</span>
         </div>
-        <span style="font-size:9px;color:#3B526570;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;padding-bottom:4px;padding-right:4px;">FitScore ▸</span>
+        <span style="font-size:9px;color:#5A7A8A;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;white-space:nowrap;padding-bottom:4px;padding-right:4px;">FitScore ▸</span>
         ${days.map(d => `<div class="score-cell${d === todayStr ? ' day-today' : ''}">
           <div class="day-abbr">${shortDay(d)}</div>
           <div class="day-date">${monthAbbr(d)} ${String(parseInt(d.slice(8), 10))}</div>
@@ -938,23 +938,24 @@
         : '—';
       const totalMeals = Object.values(player.mealsByDate).reduce((a, b) => a + b.length, 0);
 
+      const daysElapsed = days.filter(d => d <= todayStr).length;
       const summary = document.createElement('div');
       summary.className = 'summary-row';
       summary.innerHTML = `
         <div class="summary-stat">Avg FitScore <span>${avgScore}</span></div>
-        <div class="summary-stat">Days logged <span>${scores.length}/${days.length}</span></div>
+        <div class="summary-stat">Days logged <span>${scores.length}/${daysElapsed}</span></div>
         <div class="summary-stat">Meals logged <span>${totalMeals}</span></div>
       `;
       el.appendChild(summary);
 
       // Week overview: pillar scores by day
       const overviewLabel = document.createElement('div');
-      overviewLabel.style.cssText = 'font-size:9px;font-weight:700;color:#3B5265;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:3px;';
+      overviewLabel.style.cssText = 'font-size:10px;font-weight:700;color:#B0C2CC;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:3px;';
       overviewLabel.textContent = 'Week Overview — Nutrition · Training · Recovery';
       el.appendChild(overviewLabel);
 
       const overviewInfo = document.createElement('div');
-      overviewInfo.style.cssText = 'font-size:11px;color:#3B526590;margin-bottom:10px;';
+      overviewInfo.style.cssText = 'font-size:12px;color:#7A9AAA;margin-bottom:10px;';
       overviewInfo.textContent = 'Each pillar is scored 0–10. The daily FitScore is their average.';
       el.appendChild(overviewInfo);
 
@@ -1206,7 +1207,7 @@
 
       // ── Goals & Context collapsible panel ──────────────────────────────
       const gcToggle = document.createElement('button');
-      gcToggle.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:12px 0 10px;background:none;border:none;border-top:1px solid #3B526530;color:#3B5265;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;cursor:pointer;margin-top:14px;';
+      gcToggle.style.cssText = 'display:flex;align-items:center;gap:8px;width:100%;text-align:left;padding:12px 0 10px;background:none;border:none;border-top:1px solid #3B526530;color:#B0C2CC;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;cursor:pointer;margin-top:14px;';
       gcToggle.innerHTML = '<span class="gc-arrow">▸</span> Goals &amp; Context';
       const gcPanel = document.createElement('div');
       gcPanel.style.display = 'none';
