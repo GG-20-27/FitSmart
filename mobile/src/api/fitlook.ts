@@ -53,11 +53,21 @@ export interface FitLookResponse {
   do?: string[];
   avoid?: string;
   forecast_line?: string;
-  // v3 pre-game protocol sections
+  // v3 legacy
   fuel?: string[];
   protocol?: FitLookProtocolStep[];
   edge?: string;
   isRestDay?: boolean;
+  // v4 three-pillar plan
+  plan?: {
+    nutrition: { summary: string; detail: string[] };
+    recovery:  { summary: string; detail: string[] };
+    training:  { summary: string; detail: string[] };
+  };
+  yesterday_summary?: {
+    all_green: boolean;
+    weak_pillars?: Array<{ pillar: string; score: number; detail: string }>;
+  };
   cached: boolean;
   created_at: string;
   needs_checkin?: boolean;
@@ -75,7 +85,7 @@ export async function getFitLookToday(): Promise<FitLookResponse> {
 /** Force-regenerate today's FitLook */
 export async function regenerateFitLook(): Promise<FitLookResponse> {
   console.log('[API] Force-regenerating FitLook');
-  return apiRequest<FitLookResponse>('/api/fitlook/generate', {
-    method: 'POST',
+  return apiRequest<FitLookResponse>('/api/fitlook/today?force=true', {
+    method: 'GET',
   });
 }

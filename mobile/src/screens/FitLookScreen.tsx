@@ -1,8 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  ActivityIndicator, Animated,
+  ActivityIndicator, Animated, Modal, Dimensions, Platform, PanResponder,
 } from 'react-native';
+
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+
+const PILLARS = [
+  { key: 'nutrition' as const, icon: 'nutrition-outline', label: 'NUTRITION' },
+  { key: 'recovery'  as const, icon: 'heart-outline',     label: 'RECOVERY'  },
+  { key: 'training'  as const, icon: 'flash-outline',     label: 'TRAINING'  },
+];
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -13,6 +21,18 @@ import {
 } from '../api/fitlook';
 
 const FITLOOK_CHECKIN_KEY = () => `fitlook_checkin_${new Date().toISOString().slice(0, 10)}`;
+
+// Regex: match numbers with fitness units (ranges too) and times like 16:00
+const EMPHASIS_RE = /(\d+(?:\.\d+)?(?:\s*[-–]\s*\d+(?:\.\d+)?)?\s*(?:kcal|cal|g|kg|ml|mg|h|min|%|x)?|\d{1,2}:\d{2})/gi;
+
+function renderBulletText(text: string, emphasisStyle: object, baseStyle: object): React.ReactNode {
+  const parts = text.split(EMPHASIS_RE);
+  return parts.map((part, i) =>
+    /^\d/.test(part)
+      ? <Text key={i} style={emphasisStyle}>{part}</Text>
+      : <Text key={i} style={baseStyle}>{part}</Text>
+  );
+}
 
 /**
  * Builds the prefilled FitCoach prompt from the FitLook payload.
@@ -65,14 +85,81 @@ const FEELINGS: { key: Feeling; label: string; icon: string }[] = [
 
 export default function FitLookScreen() {
   // States
-  const [checkinDone, setCheckinDone] = useState<boolean | null>(null); // null = loading
+  const [checkinDone, setCheckinDone] = useState<boolean | null>(null);
   const [feeling, setFeeling] = useState<Feeling | null>(null);
   const [savingCheckin, setSavingCheckin] = useState(false);
   const [fitlook, setFitlook] = useState<FitLookResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openPillar, setOpenPillar] = useState<'nutrition' | 'recovery' | 'training' | null>(null);
+  const [seenPillars, setSeenPillars] = useState<Set<string>>(new Set());
 
   const navigation = useNavigation<any>();
+
+  // Card stagger animations
+  const cardAnims = useRef(
+    PILLARS.map(() => ({ opacity: new Animated.Value(0), translateY: new Animated.Value(24) }))
+  ).current;
+  const glowAnim = useRef(new Animated.Value(0.3)).current;
+  const glowLoop = useRef<Animated.CompositeAnimation | null>(null);
+  const modalAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  // 0 = unseen (use glowAnim), 1 = seen (fade to 0.35)
+  const ctaSeenAnims = useRef(PILLARS.map(() => new Animated.Value(0))).current;
+
+  const dragPan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gs) => gs.dy > 3,
+      onPanResponderMove: (_, gs) => {
+        if (gs.dy > 0) modalAnim.setValue(gs.dy);
+      },
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dy > 80 || gs.vy > 0.5) {
+          Animated.timing(modalAnim, { toValue: SCREEN_HEIGHT, duration: 220, useNativeDriver: true })
+            .start(() => setOpenPillar(null));
+        } else {
+          Animated.spring(modalAnim, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }).start();
+        }
+      },
+    })
+  ).current;
+
+  // Trigger staggered card animations + glow when v4 plan loads
+  useEffect(() => {
+    if (!fitlook?.plan) return;
+    cardAnims.forEach(a => { a.opacity.setValue(0); a.translateY.setValue(32); });
+    Animated.stagger(600, cardAnims.map(a =>
+      Animated.parallel([
+        Animated.timing(a.opacity, { toValue: 1, duration: 650, useNativeDriver: true }),
+        Animated.timing(a.translateY, { toValue: 0, duration: 650, useNativeDriver: true }),
+      ])
+    )).start();
+    glowLoop.current?.stop();
+    glowAnim.setValue(0.3);
+    glowLoop.current = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, { toValue: 1, duration: 1600, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0.3, duration: 1600, useNativeDriver: true }),
+      ])
+    );
+    glowLoop.current.start();
+    ctaSeenAnims.forEach(a => a.setValue(0));
+    return () => { glowLoop.current?.stop(); };
+  }, [fitlook?.plan]);
+
+  const openPillarModal = (key: 'nutrition' | 'recovery' | 'training') => {
+    setOpenPillar(key);
+    setSeenPillars(prev => new Set(prev).add(key));
+    const idx = PILLARS.findIndex(p => p.key === key);
+    Animated.timing(ctaSeenAnims[idx], { toValue: 1, duration: 350, useNativeDriver: true }).start();
+    modalAnim.setValue(SCREEN_HEIGHT);
+    Animated.spring(modalAnim, { toValue: 0, tension: 65, friction: 11, useNativeDriver: true }).start();
+  };
+
+  const closeModal = () => {
+    Animated.timing(modalAnim, { toValue: SCREEN_HEIGHT, duration: 220, useNativeDriver: true })
+      .start(() => setOpenPillar(null));
+  };
 
   const handleExplainPlan = () => {
     if (!fitlook) return;
@@ -150,10 +237,16 @@ export default function FitLookScreen() {
     try {
       let data = await getFitLookToday();
       // Auto-upgrade v2 plans (no fuel/protocol/edge) to v3 format
-      if (data.snapshot_chips && !data.fuel && !data.protocol && !data.edge) {
+      if (data.snapshot_chips && !data.fuel && !data.protocol && !data.edge && !data.plan) {
         try {
           data = await regenerateFitLook();
         } catch { /* keep v2 if regeneration fails */ }
+      }
+      // Auto-upgrade old v4 format where plan pillars are string[] instead of {summary, detail}
+      if (data.plan && Array.isArray((data.plan.nutrition as any))) {
+        try {
+          data = await regenerateFitLook();
+        } catch { /* keep if regeneration fails */ }
       }
       setFitlook(data);
       Animated.timing(fadeAnim, {
@@ -298,9 +391,10 @@ export default function FitLookScreen() {
     );
   }
 
-  // ──── Render: v3 pre-game protocol layout (falls back to v2 if new fields absent) ────
+  // ──── Render: v4 three-pillar layout (falls back to v3/v2 if absent) ────
 
-  const hasV3 = !!(fitlook.fuel || fitlook.protocol || fitlook.edge);
+  const hasV4 = !!fitlook.plan;
+  const hasV3 = !hasV4 && !!(fitlook.fuel || fitlook.protocol || fitlook.edge);
 
   // Chip icon by position: 0=recovery, 1=sleep, 2=feeling
   const chipIcon = (index: number): string => {
@@ -310,6 +404,7 @@ export default function FitLookScreen() {
   };
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.bgPrimary }}>
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       <Text style={styles.header}>FitLook</Text>
       <Text style={styles.subtitle}>
@@ -318,11 +413,6 @@ export default function FitLookScreen() {
       <Text style={styles.dateText}>{formatDate(fitlook.date_local)}</Text>
 
       <Animated.View style={[styles.cards, { opacity: fadeAnim }]}>
-
-        {/* Reasoning sentence */}
-        {fitlook.reasoning && (
-          <Text style={styles.reasoningText}>{fitlook.reasoning}</Text>
-        )}
 
         {/* Readiness — single-line horizontal pill strip */}
         <ScrollView
@@ -339,9 +429,63 @@ export default function FitLookScreen() {
           ))}
         </ScrollView>
 
-        {hasV3 ? (
+        {hasV4 ? (
           <>
-            {/* Section 1: Fuel */}
+            {PILLARS.map((pillar, i) => {
+              const data = fitlook.plan![pillar.key];
+              if (!data) return null;
+              const anim = cardAnims[i];
+              const isSeen = seenPillars.has(pillar.key);
+              return (
+                <Animated.View
+                  key={pillar.key}
+                  style={{ opacity: anim.opacity, transform: [{ translateY: anim.translateY }], marginBottom: spacing.sm }}
+                >
+                  <View>
+                    {!isSeen && (
+                      <Animated.View style={[styles.glowBorder, { opacity: glowAnim }]} pointerEvents="none" />
+                    )}
+                    <TouchableOpacity
+                      style={styles.pillarCard}
+                      activeOpacity={0.82}
+                      onPress={() => openPillarModal(pillar.key)}
+                    >
+                      <View style={styles.pillarCardHeader}>
+                        <View style={styles.pillarIconWrap}>
+                          <Ionicons name={pillar.icon as any} size={15} color={colors.accent} />
+                        </View>
+                        <Text style={styles.pillarCardLabel}>{pillar.label}</Text>
+                      </View>
+                      {(data.detail ?? []).length > 0 ? (
+                        <View style={styles.pillarBulletList}>
+                          {(data.detail ?? []).map((action, ai) => (
+                            <View key={ai} style={styles.pillarBulletRow}>
+                              <View style={styles.pillarBulletDot} />
+                              <Text style={styles.pillarBulletText}>
+                                {renderBulletText(action, styles.bulletEmphasis, styles.pillarBulletText)}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      ) : (
+                        <Text style={styles.pillarSummaryText}>{data.summary ?? ''}</Text>
+                      )}
+                      <Animated.View style={[styles.pillarCtaRow, { opacity: Animated.add(
+                          Animated.multiply(glowAnim, ctaSeenAnims[i].interpolate({ inputRange: [0, 1], outputRange: [1, 0] })),
+                          ctaSeenAnims[i].interpolate({ inputRange: [0, 1], outputRange: [0, 0.35] })
+                        ) }]}>
+                        <Text style={styles.pillarCtaText}>Full overview</Text>
+                        <Ionicons name="chevron-forward" size={12} color={colors.accent} />
+                      </Animated.View>
+                    </TouchableOpacity>
+                  </View>
+                </Animated.View>
+              );
+            })}
+          </>
+        ) : hasV3 ? (
+          <>
+            {/* v3 legacy: Fuel + Protocol + Edge */}
             <View style={styles.card}>
               <View style={styles.sectionHeaderRow}>
                 <Ionicons name="nutrition-outline" size={15} color={colors.accent} />
@@ -353,18 +497,11 @@ export default function FitLookScreen() {
                   <Text style={styles.actionText}>{item}</Text>
                 </View>
               ))}
-              {(!fitlook.fuel || fitlook.fuel.length === 0) && (
-                <Text style={styles.actionText}>Eat balanced meals — prioritise protein today</Text>
-              )}
             </View>
-
-            {/* Section 2: Today's Protocol */}
             <View style={styles.card}>
               <View style={styles.sectionHeaderRow}>
                 <Ionicons name="flash-outline" size={15} color={colors.accent} />
-                <Text style={styles.cardLabel}>
-                  {fitlook.isRestDay ? "RECOVERY PROTOCOL" : "TODAY'S PROTOCOL"}
-                </Text>
+                <Text style={styles.cardLabel}>{fitlook.isRestDay ? 'RECOVERY PROTOCOL' : "TODAY'S PROTOCOL"}</Text>
               </View>
               {(fitlook.protocol ?? []).map((step, i) => (
                 <View key={i} style={styles.protocolRow}>
@@ -374,19 +511,16 @@ export default function FitLookScreen() {
                   <Text style={styles.protocolActionText}>{step.action}</Text>
                 </View>
               ))}
-              {(!fitlook.protocol || fitlook.protocol.length === 0) && (
-                <Text style={styles.actionText}>Follow your usual routine</Text>
-              )}
             </View>
-
-            {/* Section 3: Your Edge */}
-            <View style={styles.forecastCard}>
-              <View style={styles.forecastStripe} />
-              <View style={styles.forecastContent}>
-                <Text style={styles.forecastHeading}>YOUR EDGE</Text>
-                <Text style={styles.forecastText}>{fitlook.edge ?? fitlook.focus ?? ''}</Text>
+            {fitlook.edge && (
+              <View style={styles.forecastCard}>
+                <View style={styles.forecastStripe} />
+                <View style={styles.forecastContent}>
+                  <Text style={styles.forecastHeading}>YOUR EDGE</Text>
+                  <Text style={styles.forecastText}>{fitlook.edge}</Text>
+                </View>
               </View>
-            </View>
+            )}
           </>
         ) : (
           <>
@@ -451,12 +585,82 @@ export default function FitLookScreen() {
           <Text style={styles.explainButtonText}>Explain Today's Plan</Text>
         </TouchableOpacity>
 
+        {/* Dev: force regenerate */}
+        <TouchableOpacity
+          style={styles.regenButton}
+          activeOpacity={0.7}
+          onPress={async () => {
+            setLoading(true);
+            setError(null);
+            try {
+              const data = await regenerateFitLook();
+              setFitlook(data);
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Failed to regenerate');
+            } finally {
+              setLoading(false);
+            }
+          }}
+        >
+          <Ionicons name="refresh-outline" size={13} color={colors.textMuted} />
+          <Text style={styles.regenButtonText}>Regenerate</Text>
+        </TouchableOpacity>
+
         {/* Cached hint */}
         {(fitlook as any).cached && (
           <Text style={styles.cachedHint}>Generated earlier today</Text>
         )}
       </Animated.View>
     </ScrollView>
+
+    {/* Pillar detail bottom sheet */}
+    <Modal visible={openPillar !== null} transparent animationType="none" onRequestClose={closeModal}>
+      <View style={styles.modalBackdrop}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={closeModal} />
+        <Animated.View style={[styles.modalSheet, { transform: [{ translateY: modalAnim }] }]}>
+          <View style={styles.modalDragArea} {...dragPan.panHandlers}>
+            <View style={styles.modalHandle} />
+          </View>
+          {openPillar && (() => {
+            const pillar = PILLARS.find(p => p.key === openPillar)!;
+            const data = fitlook!.plan![openPillar]!;
+            return (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.modalHeader}>
+                  <View style={styles.pillarIconWrap}>
+                    <Ionicons name={pillar.icon as any} size={18} color={colors.accent} />
+                  </View>
+                  <Text style={styles.modalTitle}>{pillar.label}</Text>
+                </View>
+                {data.summary ? (
+                  <Text style={styles.modalContextText}>{data.summary}</Text>
+                ) : null}
+                {(data.detail ?? []).length > 0 && (
+                  <View style={[styles.modalActionList, data.summary ? { marginTop: spacing.lg } : {}]}>
+                    <Text style={styles.modalActionLabel}>ACTIONS</Text>
+                    {(data.detail ?? []).map((action, i) => (
+                      <View key={i} style={styles.modalActionRow}>
+                        <View style={styles.modalActionDot} />
+                        <Text style={styles.modalActionText}>
+                          {renderBulletText(action, styles.modalActionEmphasis, styles.modalActionText)}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+                {openPillar === 'training' && fitlook!.edge && (
+                  <View style={styles.modalEdge}>
+                    <Text style={styles.modalEdgeLabel}>YOUR EDGE</Text>
+                    <Text style={styles.modalEdgeText}>{fitlook!.edge}</Text>
+                  </View>
+                )}
+              </ScrollView>
+            );
+          })()}
+        </Animated.View>
+      </View>
+    </Modal>
+    </View>
   );
 }
 
@@ -492,12 +696,244 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     letterSpacing: 0.3,
   },
-  reasoningText: {
+  // Legacy pillar block styles (v3 compat)
+  pillarBlock: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.surfaceMute + '50',
+    marginBottom: spacing.md,
+    paddingBottom: spacing.md,
+  },
+  pillarLabel: {
     ...typography.small,
     color: colors.textMuted,
-    fontStyle: 'italic',
+    fontWeight: '700',
+    letterSpacing: 0.8,
     marginBottom: spacing.sm,
-    lineHeight: 18,
+  },
+  pillarText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    lineHeight: 22,
+  },
+
+  // v4 pillar cards
+  glowBorder: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: radii.lg + 2,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+  },
+  pillarCard: {
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.lg,
+    padding: spacing.lg,
+    ...shadows.card,
+  },
+  pillarCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  pillarIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: colors.accent + '18',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pillarCardLabel: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    flex: 1,
+  },
+  pillarSummaryText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    lineHeight: 22,
+    fontWeight: '500',
+  },
+  pillarBulletList: {
+    gap: spacing.sm,
+  },
+  pillarBulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  pillarBulletDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.accent,
+    marginTop: 8,
+    flexShrink: 0,
+  },
+  pillarBulletText: {
+    ...typography.body,
+    fontSize: 14,
+    color: colors.textPrimary,
+    lineHeight: 20,
+    fontWeight: '500',
+    flex: 1,
+  },
+  bulletEmphasis: {
+    color: colors.accent,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  pillarCtaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    marginTop: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.surfaceMute + '60',
+  },
+  pillarCtaText: {
+    ...typography.small,
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  tapHint: {
+    ...typography.small,
+    color: colors.accent,
+    fontSize: 11,
+    marginTop: spacing.sm,
+    opacity: 0.7,
+  },
+
+  // Bottom sheet modal
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'flex-end',
+  },
+  modalSheet: {
+    backgroundColor: colors.bgSecondary,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: spacing.xl,
+    paddingBottom: Platform.OS === 'ios' ? 40 : spacing.xl,
+    maxHeight: SCREEN_HEIGHT * 0.75,
+  },
+  modalDragArea: {
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: colors.surfaceMute,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  modalTitle: {
+    ...typography.h2,
+    letterSpacing: 0.5,
+  },
+  modalDetailText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    lineHeight: 24,
+  },
+  modalContextText: {
+    ...typography.body,
+    color: colors.textMuted,
+    lineHeight: 24,
+    fontStyle: 'italic',
+  },
+  modalActionList: {
+    gap: spacing.sm,
+  },
+  modalActionLabel: {
+    ...typography.small,
+    color: colors.accent,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: spacing.xs,
+  },
+  modalActionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+  },
+  modalActionDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.accent,
+    marginTop: 9,
+    flexShrink: 0,
+  },
+  modalActionText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    lineHeight: 24,
+    flex: 1,
+  },
+  modalActionEmphasis: {
+    color: colors.accent,
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  modalEdge: {
+    marginTop: spacing.xl,
+    paddingTop: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.surfaceMute + '60',
+  },
+  modalEdgeLabel: {
+    ...typography.small,
+    color: colors.accent,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    marginBottom: spacing.xs,
+  },
+  modalEdgeText: {
+    ...typography.body,
+    color: colors.textPrimary,
+    fontStyle: 'italic',
+    lineHeight: 22,
+  },
+  yesterdayGreenCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.bgSecondary,
+    borderRadius: radii.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.accent + '30',
+  },
+  yesterdayGreenText: {
+    ...typography.small,
+    color: colors.accent,
+    flex: 1,
+    fontWeight: '500',
+  },
+  cardLabelMuted: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontWeight: '700',
+    letterSpacing: 0.8,
   },
 
   // Check-in
@@ -820,5 +1256,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
     fontSize: 11,
+  },
+  regenButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  regenButtonText: {
+    ...typography.small,
+    color: colors.textMuted,
+    fontSize: 12,
   },
 });

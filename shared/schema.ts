@@ -348,11 +348,22 @@ export interface FitLookPayload {
   avoid?: string;             // v2 Avoid bullet
   forecast_line?: string;     // v2 Forecast line
   sleepDebtMinutes?: number;  // carried through for display
-  // v3 pre-game protocol sections
-  fuel?: string[];            // 1-2 nutrition bullets for today's session
-  protocol?: FitLookProtocolStep[]; // 2-3 time-anchored protocol steps
-  edge?: string;              // 1 personalized "Your Edge" insight
-  isRestDay?: boolean;        // true if no team sessions today
+  // v3 pre-game protocol sections (legacy — kept for backward compat)
+  fuel?: string[];
+  protocol?: FitLookProtocolStep[];
+  edge?: string;
+  isRestDay?: boolean;
+  // v4 three-pillar plan
+  plan?: {
+    nutrition: { summary: string; detail: string[] };
+    recovery:  { summary: string; detail: string[] };
+    training:  { summary: string; detail: string[] };
+  };
+  // Yesterday summary — computed server-side, not AI-generated
+  yesterday_summary?: {
+    all_green: boolean;
+    weak_pillars?: Array<{ pillar: string; score: number; detail: string }>;
+  };
 }
 
 export const insertUserSchema = createInsertSchema(users).pick({

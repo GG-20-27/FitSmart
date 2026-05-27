@@ -24,7 +24,7 @@ import { requireJWTAuth, jwtAuthMiddleware } from './jwtAuth';
 import { db } from './db';
 import { users, fitScores, userGoals, fitlookDaily, dailyCheckins, fitroastWeekly, userContext, whoopData as whoopDataTable, trainingData as trainingDataTable, meals as mealsTable, planHabits as planHabitsTable, habitCheckins as habitCheckinsTable, improvementPlans, manualCheckins } from '@shared/schema';
 import type { UserGoal, FitScore } from '@shared/schema';
-import { eq, desc, sql, and, gte, lt } from 'drizzle-orm';
+import { eq, desc, sql, and, gte, lt, lte } from 'drizzle-orm';
 import { Resend } from 'resend';
 import cron from 'node-cron';
 import { uploadMealImage, resolveImageUrl } from './supabaseStorage';
@@ -6285,16 +6285,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!userId) return res.status(401).json({ error: 'Authentication required' });
 
       const todayLocal = DateTime.now().setZone('Europe/Zurich').toISODate()!;
+      const forceRegen = req.query.force === 'true';
 
-      // Check cache first
-      const existing = await storage.getFitlookByUserAndDate(userId, todayLocal);
-      if (existing) {
-        console.log(`[FITLOOK] Serving cached FitLook for ${userId} date=${todayLocal}`);
-        return res.json({
-          ...JSON.parse(existing.payloadJson),
-          cached: true,
-          created_at: existing.createdAt,
-        });
+      // Check cache first (skip if force regeneration requested)
+      if (!forceRegen) {
+        const existing = await storage.getFitlookByUserAndDate(userId, todayLocal);
+        if (existing) {
+          console.log(`[FITLOOK] Serving cached FitLook for ${userId} date=${todayLocal}`);
+          return res.json({
+            ...JSON.parse(existing.payloadJson),
+            cached: true,
+            created_at: existing.createdAt,
+          });
+        }
+      } else {
+        await storage.deleteFitlookByUserAndDate(userId, todayLocal);
+        console.log(`[FITLOOK] Force-regenerating for user=${userId} date=${todayLocal}`);
       }
 
       // Check if self-assessment exists for today
@@ -6375,13 +6381,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log('[FITLOOK] WHOOP data not available:', (e as Error).message);
       }
 
-      // Yesterday's FitScore + pillar breakdown
+      // Most recent FitScore + pillar breakdown (within last 3 days)
       const yesterday = DateTime.now().setZone('Europe/Zurich').minus({ days: 1 }).toISODate()!;
+      const threeDaysAgo = DateTime.now().setZone('Europe/Zurich').minus({ days: 3 }).toISODate()!;
       let yesterdayFitScore: number | undefined;
       let yesterdayBreakdown: { recovery?: number; training?: number; nutrition?: number } | undefined;
       try {
         const [ys] = await db.select().from(fitScores)
-          .where(and(eq(fitScores.userId, userId), eq(fitScores.date, yesterday)))
+          .where(and(
+            eq(fitScores.userId, userId),
+            gte(fitScores.date, threeDaysAgo),
+            lte(fitScores.date, yesterday),
+          ))
+          .orderBy(desc(fitScores.date))
           .limit(1);
         if (ys) {
           yesterdayFitScore = ys.score;
@@ -6441,6 +6453,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
           yesterdayMealsSummary = 'Yesterday: 0 meals logged';
         }
       } catch { /* graceful */ }
+
+      // Yesterday summary — data-driven, no AI needed
+      let yesterdaySummary: { all_green: boolean; weak_pillars?: Array<{ pillar: string; score: number; detail: string }> } | undefined;
+      if (yesterdayBreakdown) {
+        const THRESHOLD = 7;
+        const weakPillars: Array<{ pillar: string; score: number; detail: string }> = [];
+        const { nutrition, training, recovery } = yesterdayBreakdown;
+
+        if (nutrition != null && nutrition < THRESHOLD) {
+          let detail = `Nutrition score ${nutrition.toFixed(1)}/10`;
+          if (yesterdayMealsSummary) {
+            const protMatch = yesterdayMealsSummary.match(/~(\d+)g protein[^;]*target: (\d+)g[^;]*SHORT/);
+            const mealMatch = yesterdayMealsSummary.match(/Yesterday: (\d+) meal/);
+            if (protMatch) {
+              const actual = parseInt(protMatch[1]);
+              const target = parseInt(protMatch[2]);
+              detail = `Protein ${target - actual}g short of ${target}g target`;
+            } else if (mealMatch && parseInt(mealMatch[1]) === 0) {
+              detail = 'No meals logged yesterday';
+            }
+          }
+          weakPillars.push({ pillar: 'nutrition', score: nutrition, detail });
+        }
+
+        if (training != null && training < THRESHOLD) {
+          weakPillars.push({ pillar: 'training', score: training, detail: `Training score ${training.toFixed(1)}/10` });
+        }
+
+        if (recovery != null && recovery < THRESHOLD) {
+          weakPillars.push({ pillar: 'recovery', score: recovery, detail: `Recovery score ${recovery.toFixed(1)}/10` });
+        }
+
+        yesterdaySummary = weakPillars.length === 0
+          ? { all_green: true }
+          : { all_green: false, weak_pillars: weakPillars };
+      }
 
       // 7-day per-pillar FitScore pattern
       let pillarPattern7d: string | undefined;
@@ -6599,15 +6647,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         prescribedSession,
       });
 
-      // Store immutably
-      const record = await storage.createFitlook({
-        userId,
-        dateLocal: todayLocal,
-        payloadJson: JSON.stringify(payload),
-      });
+      // Attach server-computed yesterday summary
+      const payloadWithSummary = { ...payload, yesterday_summary: yesterdaySummary };
 
-      console.log(`[FITLOOK] Generated and stored for user=${userId} date=${todayLocal}`);
-      res.json({ ...payload, cached: false, created_at: record.createdAt, sleepDebtMinutes: fitlookSleepDebtMinutes ?? null });
+      // Store — if DB times out, still return the payload (just won't be cached)
+      let createdAt = new Date().toISOString();
+      try {
+        const record = await storage.createFitlook({
+          userId,
+          dateLocal: todayLocal,
+          payloadJson: JSON.stringify(payloadWithSummary),
+        });
+        createdAt = record.createdAt.toISOString?.() ?? String(record.createdAt);
+        console.log(`[FITLOOK] Generated and stored for user=${userId} date=${todayLocal}`);
+      } catch (dbErr) {
+        console.error('[FITLOOK] DB save failed (returning payload anyway):', (dbErr as Error).message);
+      }
+      res.json({ ...payloadWithSummary, cached: false, created_at: createdAt, sleepDebtMinutes: fitlookSleepDebtMinutes ?? null });
 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

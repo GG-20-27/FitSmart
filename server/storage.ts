@@ -269,7 +269,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createFitlook(data: InsertFitlookDaily): Promise<FitlookDaily> {
-    const [row] = await db.insert(fitlookDaily).values(data).returning();
+    const [row] = await db.insert(fitlookDaily).values(data)
+      .onConflictDoUpdate({
+        target: [fitlookDaily.userId, fitlookDaily.dateLocal],
+        set: { payloadJson: data.payloadJson },
+      })
+      .returning();
     return row;
   }
 
