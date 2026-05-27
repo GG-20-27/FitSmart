@@ -154,37 +154,30 @@ export default function OnboardingWelcome() {
           </Text>
         </TouchableOpacity>
 
-        {/* WHOOP login */}
+        {/* Email login — first */}
         <TouchableOpacity
-          style={[styles.connectButton, (!consentGiven || isLoading) && styles.connectButtonDisabled]}
+          style={[styles.primaryButton, !consentGiven && styles.buttonDisabled]}
+          onPress={() => consentGiven && navigation.navigate('OnboardingEmailAuth')}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="mail-outline" size={20} color={colors.bgPrimary} />
+          <Text style={styles.primaryButtonText}>Continue with Email</Text>
+        </TouchableOpacity>
+
+        {/* WHOOP login — second */}
+        <TouchableOpacity
+          style={[styles.secondaryButton, (!consentGiven || isLoading) && styles.buttonDisabled]}
           onPress={handleConnectWhoop}
           disabled={!consentGiven || isLoading}
         >
           {isLoading ? (
-            <ActivityIndicator color={colors.bgPrimary} />
+            <ActivityIndicator color={colors.accent} />
           ) : (
-            <Ionicons name="heart-outline" size={22} color={colors.bgPrimary} />
+            <Ionicons name="heart-outline" size={20} color={colors.accent} />
           )}
-          <Text style={styles.connectButtonText}>
+          <Text style={styles.secondaryButtonText}>
             {isLoading ? 'Connecting...' : 'Continue with WHOOP'}
           </Text>
-        </TouchableOpacity>
-
-        {/* Divider */}
-        <View style={styles.dividerRow}>
-          <View style={styles.dividerLine} />
-          <Text style={styles.dividerText}>or</Text>
-          <View style={styles.dividerLine} />
-        </View>
-
-        {/* Email login */}
-        <TouchableOpacity
-          style={[styles.emailButton, !consentGiven && styles.emailButtonDisabled]}
-          onPress={() => consentGiven && navigation.navigate('OnboardingEmailAuth')}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="mail-outline" size={20} color={consentGiven ? colors.accent : colors.textMuted} />
-          <Text style={[styles.emailButtonText, !consentGiven && styles.emailButtonTextDisabled]}>Sign Up with Email</Text>
         </TouchableOpacity>
 
         {/* Already have an account */}
@@ -297,62 +290,40 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontWeight: '600',
   },
-  connectButton: {
+  primaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.accent,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md + 2,
     borderRadius: radii.lg,
     gap: spacing.sm,
     marginBottom: spacing.sm,
   },
-  connectButtonDisabled: {
-    opacity: 0.4,
-  },
-  connectButtonText: {
+  primaryButtonText: {
     ...typography.title,
     color: colors.bgPrimary,
     fontSize: 17,
   },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: spacing.sm,
-    gap: spacing.sm,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.surfaceMute,
-  },
-  dividerText: {
-    ...typography.small,
-    color: colors.textMuted,
-  },
-  emailButton: {
+  secondaryButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.bgSecondary,
     borderWidth: 1.5,
     borderColor: colors.accent,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md + 2,
     borderRadius: radii.lg,
     gap: spacing.sm,
     marginBottom: spacing.md,
   },
-  emailButtonDisabled: {
-    borderColor: colors.textMuted,
-    opacity: 0.4,
-  },
-  emailButtonText: {
+  secondaryButtonText: {
     ...typography.title,
     color: colors.accent,
     fontSize: 17,
-    fontWeight: '600',
   },
-  emailButtonTextDisabled: {
-    color: colors.textMuted,
+  buttonDisabled: {
+    opacity: 0.4,
   },
   signInRow: {
     flexDirection: 'row',

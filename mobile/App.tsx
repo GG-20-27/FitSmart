@@ -297,7 +297,13 @@ export default function App() {
             console.warn('[APP] Could not fetch check-in status, proceeding to main app', e);
           }
         }
-        try { const { team } = await getMyTeam(); setHasTeam(!!team); } catch { setHasTeam(false); }
+        try {
+          const { team } = await getMyTeam();
+          setHasTeam(!!team);
+        } catch {
+          // Retry once — a transient server error shouldn't hide the Teams tab
+          try { const { team } = await getMyTeam(); setHasTeam(!!team); } catch { setHasTeam(false); }
+        }
         setOnboardingComplete(true);
         setShowCheckin(false);
         setLoading(false);
