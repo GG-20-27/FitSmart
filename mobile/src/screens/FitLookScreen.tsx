@@ -10,8 +10,10 @@ const FITLOOK_LOADING_MESSAGES = [
   "Reading last night's recovery...",
   "Scanning yesterday's nutrition...",
   "Checking your training load...",
+  "Reviewing this week's trends...",
   "Calibrating today's intensity...",
   "Building your personalized plan...",
+  "Checking in on your goals...",
   "Adding finishing touches...",
 ];
 
