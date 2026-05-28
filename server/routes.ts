@@ -8462,8 +8462,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const members = await storage.getTeamMembers(teamId);
 
-      // Determine current week start
-      const weekStart = team.weekStart ?? getWeekStart(new Date());
+      // Assessment uses the stored weekStart (when pilot began).
+      // Competing always uses the current calendar week so scores don't fall outside the window.
+      const weekStart = team.phase === 'assessment'
+        ? (team.weekStart ?? getWeekStart(new Date()))
+        : getWeekStart(new Date());
 
       // During assessment — return presence data only (how many days logged per player)
       if (team.phase === 'assessment') {

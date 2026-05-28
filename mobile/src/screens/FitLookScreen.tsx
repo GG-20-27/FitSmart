@@ -6,6 +6,124 @@ import {
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
+const FITLOOK_LOADING_MESSAGES = [
+  "Reading last night's recovery...",
+  "Scanning yesterday's nutrition...",
+  "Checking your training load...",
+  "Calibrating today's intensity...",
+  "Building your personalized plan...",
+  "Adding finishing touches...",
+];
+
+function FitLookLoader() {
+  const [msgIndex, setMsgIndex] = useState(0);
+  const msgOpacity = useRef(new Animated.Value(1)).current;
+  const pulseAnim  = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.18, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1,    duration: 900, useNativeDriver: true }),
+      ])
+    );
+    pulse.start();
+    return () => pulse.stop();
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      Animated.timing(msgOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+        setMsgIndex(i => (i + 1) % FITLOOK_LOADING_MESSAGES.length);
+        Animated.timing(msgOpacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
+      });
+    }, 2400);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <View style={fitlookLoaderStyles.container}>
+      <View style={fitlookLoaderStyles.orbWrap}>
+        <Animated.View style={[fitlookLoaderStyles.orbRing, { transform: [{ scale: pulseAnim }] }]} />
+        <View style={fitlookLoaderStyles.orbCore}>
+          <Ionicons name="flash" size={28} color={colors.bgPrimary} />
+        </View>
+      </View>
+      <Text style={fitlookLoaderStyles.title}>Generating your FitLook</Text>
+      <Animated.Text style={[fitlookLoaderStyles.message, { opacity: msgOpacity }]}>
+        {FITLOOK_LOADING_MESSAGES[msgIndex]}
+      </Animated.Text>
+      <View style={fitlookLoaderStyles.dots}>
+        {FITLOOK_LOADING_MESSAGES.map((_, i) => (
+          <View key={i} style={[fitlookLoaderStyles.dot, i === msgIndex && fitlookLoaderStyles.dotActive]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const fitlookLoaderStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.bgPrimary,
+    paddingHorizontal: spacing.xl,
+  },
+  orbWrap: {
+    width: 90,
+    height: 90,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.xl,
+  },
+  orbRing: {
+    position: 'absolute',
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: colors.accent + '22',
+    borderWidth: 1.5,
+    borderColor: colors.accent + '55',
+  },
+  orbCore: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
+    ...typography.title,
+    color: colors.textPrimary,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
+  },
+  message: {
+    ...typography.bodyMuted,
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 20,
+    minHeight: 40,
+  },
+  dots: {
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: spacing.lg,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.surfaceMute,
+  },
+  dotActive: {
+    backgroundColor: colors.accent,
+    width: 18,
+  },
+});
+
 const PILLARS = [
   { key: 'nutrition' as const, icon: 'nutrition-outline', label: 'NUTRITION' },
   { key: 'recovery'  as const, icon: 'heart-outline',     label: 'RECOVERY'  },
@@ -334,12 +452,7 @@ export default function FitLookScreen() {
   // ──── Render: Loading FitLook ────
 
   if (loading && !fitlook) {
-    return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color={colors.accent} />
-        <Text style={styles.loadingText}>Preparing your morning outlook...</Text>
-      </View>
-    );
+    return <FitLookLoader />;
   }
 
   // ──── Render: Error ────
